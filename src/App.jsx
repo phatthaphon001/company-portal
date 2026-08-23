@@ -1,43 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock, Unlock, FileText, Radar, Megaphone, Landmark, UserCog, TrendingUp,
-  LogOut, Fingerprint, AlertTriangle, KeyRound, ScrollText, ClipboardCheck,
+  LogOut, AlertTriangle, KeyRound, ScrollText, ClipboardCheck,
   Bot, ShoppingBag, PlayCircle, AtSign, Music2, Share2, ShieldAlert, Sparkles,
   CheckSquare, Square, Plus, Trash2, Loader2, RefreshCw, ChevronDown, ChevronUp,
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, Users,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 
 const C = {
-  bg: '#1E2A30', bgDeep: '#141C21', panel: '#25333A',
-  panelLine: 'rgba(231,225,211,0.14)', ink: '#1E2A30',
-  text: '#EDEAE0', muted: '#8FA0A6',
-  brass: '#B8834D', teal: '#4C7A6B', brick: '#A6432E',
-  steel: '#4C6E89', olive: '#8A7B3E', plum: '#7B5C7E', gold: '#C9A227',
+  bg: '#0A0A0F', bgDeep: '#050506', panel: '#15161D', panelAlt: '#1B1C26',
+  border: 'rgba(255,255,255,0.08)', text: '#F5F5F7', muted: '#9195A3',
+  blue: '#3B82F6', cyan: '#22D3EE', violet: '#A78BFA', pink: '#F472B6',
+  emerald: '#34D399', orange: '#FB923C', teal: '#2DD4BF', red: '#F87171',
 };
+const BRAND = `linear-gradient(135deg, ${C.blue}, ${C.violet})`;
 
 const CLEARANCE = {
-  1: { label: 'ระดับ 1 · ทั่วไป', code: 'LV-1 GENERAL', color: C.steel },
-  2: { label: 'ระดับ 2 · หัวหน้างาน', code: 'LV-2 MANAGER', color: C.brass },
-  3: { label: 'ระดับ 3 · ผู้บริหาร', code: 'LV-3 EXECUTIVE', color: C.brick },
+  1: { label: 'ระดับ 1 · ทั่วไป', code: 'LV-1 STAFF', color: C.cyan },
+  2: { label: 'ระดับ 2 · หัวหน้างาน', code: 'LV-2 MANAGER', color: C.orange },
+  3: { label: 'ระดับ 3 · ผู้บริหาร', code: 'LV-3 EXECUTIVE', color: C.red },
 };
 
 const PLATFORM_META = {
-  tiktok: { label: 'TikTok', color: C.plum },
-  facebook: { label: 'Facebook', color: C.steel },
-  youtube: { label: 'YouTube', color: C.brick },
-  instagram: { label: 'Instagram', color: C.olive },
-  shopee: { label: 'Shopee', color: C.gold },
+  tiktok: { label: 'TikTok', color: C.pink },
+  facebook: { label: 'Facebook', color: C.blue },
+  youtube: { label: 'YouTube', color: C.red },
+  instagram: { label: 'Instagram', color: C.orange },
+  shopee: { label: 'Shopee', color: C.orange },
   other: { label: 'อื่นๆ', color: C.teal },
 };
 
 const DEPARTMENTS = [
   {
     id: 'content', th: 'ฝ่ายคอนเทนต์', en: 'CONTENT OPS', clearance: 1,
-    icon: FileText, accent: C.brass, manager: 'ผู้จัดการฝ่ายคอนเทนต์',
+    icon: FileText, accent: C.blue, manager: 'ผู้จัดการฝ่ายคอนเทนต์',
     brief: 'ผลิตและดูแลคอนเทนต์ทั้งหมดขององค์กร ตั้งแต่ไอเดียจนถึงเผยแพร่',
     roles: [
       { title: 'นักเขียนบท', en: 'Scriptwriter', duty: 'พัฒนาไอเดียและบทคอนเทนต์ก่อนเข้าสู่การผลิต' },
@@ -48,7 +48,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'rnd', th: 'ฝ่ายวิจัยและวิเคราะห์ข้อมูล', en: 'R&D / ANALYTICS', clearance: 2,
-    icon: Radar, accent: C.teal, hasChart: true, manager: 'ผู้จัดการฝ่ายวิจัยและวิเคราะห์ข้อมูล',
+    icon: Radar, accent: C.cyan, hasChart: true, manager: 'ผู้จัดการฝ่ายวิจัยและวิเคราะห์ข้อมูล',
     brief: 'เก็บและวิเคราะห์ข้อมูลจากทุกแผนก สรุปผลเชิงลึกให้ผู้บริหารตัดสินใจ',
     roles: [
       { title: 'นักวิเคราะห์ข้อมูล', en: 'Data Analyst', duty: 'รวบรวมข้อมูลจากทุกแผนกมาประมวลผลเป็นรายงาน' },
@@ -58,7 +58,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'marketing', th: 'ฝ่ายการตลาด', en: 'MARKETING', clearance: 1,
-    icon: Megaphone, accent: C.brick, manager: 'ผู้จัดการฝ่ายการตลาด',
+    icon: Megaphone, accent: C.pink, manager: 'ผู้จัดการฝ่ายการตลาด',
     brief: 'วางแผนแคมเปญและสร้างการเติบโตให้แบรนด์',
     roles: [
       { title: 'นักการตลาดดิจิทัล', en: 'Digital Marketer', duty: 'บริหารแคมเปญโฆษณาบนแพลตฟอร์มออนไลน์' },
@@ -68,7 +68,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'sales', th: 'ฝ่ายขาย', en: 'SALES', clearance: 1,
-    icon: TrendingUp, accent: C.olive, manager: 'ผู้จัดการฝ่ายขาย',
+    icon: TrendingUp, accent: C.emerald, manager: 'ผู้จัดการฝ่ายขาย',
     brief: 'ปิดการขายและดูแลความสัมพันธ์กับลูกค้า',
     roles: [
       { title: 'ฝ่ายขาย', en: 'Sales Executive', duty: 'ติดต่อและปิดการขายกับลูกค้าใหม่' },
@@ -78,7 +78,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'qc', th: 'ฝ่ายตรวจสอบคุณภาพ', en: 'QC / AUDIT', clearance: 2,
-    icon: ClipboardCheck, accent: C.gold, manager: 'ผู้จัดการฝ่าย QC',
+    icon: ClipboardCheck, accent: C.violet, manager: 'ผู้จัดการฝ่าย QC',
     brief: 'ตรวจสอบความถูกต้องของงานจากทุกแผนกก่อนเผยแพร่หรือส่งมอบ',
     roles: [
       { title: 'ผู้ตรวจสอบคุณภาพ', en: 'QC Reviewer', duty: 'ตรวจสอบความถูกต้องของงานก่อนเผยแพร่หรือส่งมอบลูกค้า' },
@@ -88,7 +88,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'hr', th: 'ฝ่ายบุคคล', en: 'PERSONNEL', clearance: 2,
-    icon: UserCog, accent: C.plum, manager: 'ผู้จัดการฝ่ายบุคคล',
+    icon: UserCog, accent: C.orange, manager: 'ผู้จัดการฝ่ายบุคคล',
     brief: 'ดูแลบุคลากรตั้งแต่สรรหาจนถึงสวัสดิการ',
     roles: [
       { title: 'บุคคล', en: 'HR Generalist', duty: 'ดูแลสวัสดิการ การจ้างงาน และเรื่องทั่วไปของพนักงาน' },
@@ -98,7 +98,7 @@ const DEPARTMENTS = [
   },
   {
     id: 'finance', th: 'ฝ่ายการเงิน', en: 'FINANCE', clearance: 3,
-    icon: Landmark, accent: C.steel, manager: 'ผู้จัดการฝ่ายการเงิน',
+    icon: Landmark, accent: C.teal, manager: 'ผู้จัดการฝ่ายการเงิน',
     brief: 'ควบคุมกระแสเงินสดและความถูกต้องทางบัญชี',
     roles: [
       { title: 'บัญชี', en: 'Bookkeeper', duty: 'บันทึกรายรับ-รายจ่ายและจัดทำงบการเงิน' },
@@ -135,16 +135,41 @@ const PLATFORMS = [
   { name: 'X (Twitter)', icon: AtSign, note: 'สำหรับโพสต์และติดตามการมีส่วนร่วม' },
 ];
 
-const VIDEO_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ เตรียมข้อมูลสำหรับโพสต์คลิปวิดีโอวันนี้ ตอบเป็นภาษาไทยเท่านั้น จัดเป็นหัวข้อตามนี้เป๊ะๆ ห้ามมีข้อความอื่นนอกเหนือจากนี้ ห้ามทักทาย:\nชื่อคลิป: ...\nคำบรรยาย: ... (ใส่อิโมจิและแฮชแท็กที่เกี่ยวข้อง)\nพรอมต์วิดีโอ: ...\nพรอมต์หน้าปกคลิป: ...';
+const VIDEO_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ในองค์กรผลิตคลิปวิดีโอสั้น เตรียมข้อมูลสำหรับโพสต์คลิปวิดีโอวันนี้ ตอบเป็นภาษาไทยเท่านั้น จัดเป็นหัวข้อตามนี้เป๊ะๆ ห้ามมีข้อความอื่นนอกเหนือจากนี้ ห้ามทักทาย:\nชื่อคลิป: ...\nคำบรรยาย: ... (ใส่อิโมจิและแฮชแท็กที่เกี่ยวข้อง)\nพรอมต์วิดีโอ: ...\nพรอมต์หน้าปกคลิป: ...';
 const IMAGE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ เตรียมข้อมูลสำหรับโพสต์รูปภาพวันนี้ ตอบเป็นภาษาไทยเท่านั้น จัดเป็นหัวข้อตามนี้เป๊ะๆ ห้ามมีข้อความอื่นนอกเหนือจากนี้ ห้ามทักทาย:\nชื่อโพสต์: ...\nคำบรรยาย: ... (ใส่อิโมจิและแฮชแท็กที่เกี่ยวข้อง)\nพรอมต์รูปภาพ: ...';
-const QC_VIDEO_SYS = 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์คลิปวิดีโอ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อคลิป คำบรรยาย พรอมต์วิดีโอ และพรอมต์หน้าปก เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด';
-const QC_IMAGE_SYS = 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์รูปภาพ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อโพสต์ คำบรรยาย และพรอมต์รูปภาพ เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด';
 
 const THAI_DAYS = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 function todayLabel() {
   const d = new Date();
   return `วัน${THAI_DAYS[d.getDay()]}ที่ ${d.getDate()} ${THAI_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
+}
+
+function defaultClearanceFor(accounts) {
+  return accounts.length === 0 ? 3 : 1;
+}
+
+const ACCOUNT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function isExpired(account) {
+  if (account.isOwner) return false;
+  const last = account.lastLogin || account.createdAt || Date.now();
+  return Date.now() - last > ACCOUNT_EXPIRY_MS;
+}
+
+function daysUntilExpiry(account) {
+  if (account.isOwner) return null;
+  const last = account.lastLogin || account.createdAt || Date.now();
+  const remaining = ACCOUNT_EXPIRY_MS - (Date.now() - last);
+  return Math.max(0, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
+}
+
+function daysAgoLabel(ts) {
+  if (!ts) return 'ไม่เคยเข้าสู่ระบบ';
+  const days = Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'วันนี้';
+  if (days === 1) return 'เมื่อวาน';
+  return `${days} วันที่แล้ว`;
 }
 
 async function callClaude(system, content) {
@@ -178,21 +203,42 @@ function parseContentBlock(text, type) {
   return { title: get('ชื่อโพสต์') || get('ชื่อ'), caption: get('คำบรรยาย'), imagePrompt: get('พรอมต์รูปภาพ'), raw: text };
 }
 
-function CornerMarks({ color }) {
-  const base = { position: 'absolute', width: 12, height: 12, borderColor: color };
+function GradientBlobs() {
   return (
-    <>
-      <span style={{ ...base, top: 5, left: 5, borderTop: '2px solid', borderLeft: '2px solid' }} />
-      <span style={{ ...base, top: 5, right: 5, borderTop: '2px solid', borderRight: '2px solid' }} />
-      <span style={{ ...base, bottom: 5, left: 5, borderBottom: '2px solid', borderLeft: '2px solid' }} />
-      <span style={{ ...base, bottom: 5, right: 5, borderBottom: '2px solid', borderRight: '2px solid' }} />
-    </>
+    <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
+      <div style={{ position: 'absolute', top: -120, left: -80, width: 320, height: 320, borderRadius: '50%', background: C.blue, opacity: 0.2, filter: 'blur(90px)' }} />
+      <div style={{ position: 'absolute', bottom: -100, right: -60, width: 280, height: 280, borderRadius: '50%', background: C.violet, opacity: 0.2, filter: 'blur(90px)' }} />
+      <div style={{ position: 'absolute', top: '45%', right: '8%', width: 200, height: 200, borderRadius: '50%', background: C.pink, opacity: 0.12, filter: 'blur(90px)' }} />
+    </div>
+  );
+}
+
+function IconBadge({ Icon, accent, size = 44 }) {
+  return (
+    <div className="flex items-center justify-center rounded-2xl shrink-0" style={{ width: size, height: size, background: `linear-gradient(135deg, ${accent}, ${accent}99)` }}>
+      <Icon size={Math.round(size * 0.48)} color="#fff" />
+    </div>
+  );
+}
+
+function Logo({ size = 28, color = '#fff' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g transform="skewX(-8)">
+        <rect x="8" y="5" width="5" height="22" rx="1.5" fill={color} />
+        <rect x="8" y="5" width="18" height="6" rx="1.5" fill={color} />
+        <rect x="8" y="14.5" width="14" height="5.5" rx="1.5" fill={color} />
+      </g>
+      <circle cx="27" cy="6" r="1.6" fill={color} opacity="0.9" />
+      <circle cx="29.5" cy="10.5" r="1" fill={color} opacity="0.55" />
+      <circle cx="24" cy="3" r="0.8" fill={color} opacity="0.7" />
+    </svg>
   );
 }
 
 function NavTab({ label, active, onClick }) {
   return (
-    <button onClick={onClick} className="font-mono text-2xs tracking-widest uppercase px-2 py-1" style={{ color: active ? C.text : C.muted, borderBottom: active ? `2px solid ${C.brass}` : '2px solid transparent' }}>
+    <button onClick={onClick} className="font-mono text-2xs tracking-widest uppercase px-2 py-1" style={{ color: active ? C.text : C.muted, borderBottom: active ? `2px solid ${C.blue}` : '2px solid transparent' }}>
       {label}
     </button>
   );
@@ -201,19 +247,28 @@ function NavTab({ label, active, onClick }) {
 function Header({ user, stage, setStage, logout }) {
   const cl = CLEARANCE[user.clearance];
   return (
-    <div className="sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.bgDeep, borderBottom: `1px solid ${C.panelLine}` }}>
-      <div className="flex items-center gap-1 flex-wrap">
-        <NavTab label="งานประจำวัน" active={stage === 'daily'} onClick={() => setStage('daily')} />
-        <NavTab label="Directory" active={stage === 'directory' || stage === 'department'} onClick={() => setStage('directory')} />
-        <NavTab label="แพลตฟอร์ม" active={stage === 'platforms'} onClick={() => setStage('platforms')} />
-        <NavTab label="Protocol" active={stage === 'security'} onClick={() => setStage('security')} />
+    <div className="sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.bgDeep, borderBottom: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Logo size={18} />
+          <span className="font-display uppercase tracking-widest text-xs font-bold" style={{ color: C.text }}>FORGE</span>
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <NavTab label="งานประจำวัน" active={stage === 'daily'} onClick={() => setStage('daily')} />
+          <NavTab label="Directory" active={stage === 'directory' || stage === 'department'} onClick={() => setStage('directory')} />
+          <NavTab label="แพลตฟอร์ม" active={stage === 'platforms'} onClick={() => setStage('platforms')} />
+          {user.clearance === 3 && <NavTab label="ทีมงาน" active={stage === 'team'} onClick={() => setStage('team')} />}
+          <NavTab label="Protocol" active={stage === 'security'} onClick={() => setStage('security')} />
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <div className="text-right hidden sm:block">
           <div className="font-body text-sm" style={{ color: C.text }}>{user.name}</div>
           <div className="font-mono text-2xs tracking-wider" style={{ color: cl.color }}>{cl.code}</div>
         </div>
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: cl.color, boxShadow: `0 0 8px ${cl.color}` }} />
+        <div className="w-8 h-8 rounded-full flex items-center justify-center font-display text-xs font-bold shrink-0" style={{ background: `linear-gradient(135deg, ${cl.color}, ${cl.color}88)`, color: '#0A0A0F' }}>
+          {user.name.charAt(0).toUpperCase()}
+        </div>
         <button onClick={logout} className="p-2" style={{ color: C.muted }} aria-label="ออกจากระบบ"><LogOut size={16} /></button>
       </div>
     </div>
@@ -222,9 +277,10 @@ function Header({ user, stage, setStage, logout }) {
 
 function AuthShell({ children }) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 anim-fade" style={{ background: `radial-gradient(${C.panelLine} 1px, transparent 1px) ${C.bg}`, backgroundSize: '22px 22px' }}>
-      <div className="w-full max-w-sm relative" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-        <CornerMarks color={C.brass} />
+    <div className="min-h-screen flex items-center justify-center p-6 anim-fade relative" style={{ background: C.bg }}>
+      <GradientBlobs />
+      <div className="w-full max-w-sm relative rounded-3xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 20px 60px -20px rgba(59,130,246,0.25)`, zIndex: 1, overflow: 'hidden' }}>
+        <div style={{ height: 3, background: BRAND }} />
         {children}
       </div>
     </div>
@@ -235,7 +291,7 @@ function TextField({ label, ...props }) {
   return (
     <div>
       <label className="font-mono text-2xs tracking-widest uppercase block mb-1" style={{ color: C.muted }}>{label}</label>
-      <input {...props} className="w-full px-3 py-2 font-body text-sm outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }} />
+      <input {...props} className="w-full px-3 py-2.5 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
     </div>
   );
 }
@@ -245,31 +301,75 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [loginStep, setLoginStep] = useState('credentials');
   const [loginForm, setLoginForm] = useState({ email: '', password: '', code: '' });
   const [loginError, setLoginError] = useState('');
+  const [otpToken, setOtpToken] = useState('');
+  const [otpLoading, setOtpLoading] = useState(false);
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
+  const [signupRole, setSignupRole] = useState(3);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotDone, setForgotDone] = useState(false);
 
-  function submitCredentials(e) {
+  async function submitCredentials(e) {
     e.preventDefault();
     const acc = accounts.find((a) => a.email === loginForm.email && a.password === loginForm.password);
     if (!acc) { setLoginError('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); return; }
     setLoginError('');
-    setLoginStep('verify');
+    setOtpLoading(true);
+    try {
+      const res = await fetch('/api/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginForm.email }),
+      });
+      const data = await res.json();
+      setOtpLoading(false);
+      if (!res.ok) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
+      setOtpToken(data.token);
+      setLoginForm((f) => ({ ...f, code: '' }));
+      setLoginStep('verify');
+    } catch (err) {
+      setOtpLoading(false);
+      setLoginError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+    }
   }
-  function submitVerify(e) {
+  async function submitVerify(e) {
     e.preventDefault();
     if (loginForm.code.trim().length < 6) return;
-    const acc = accounts.find((a) => a.email === loginForm.email);
-    onLogin(acc);
+    setLoginError('');
+    setOtpLoading(true);
+    try {
+      const res = await fetch('/api/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: otpToken, code: loginForm.code.trim() }),
+      });
+      const data = await res.json();
+      setOtpLoading(false);
+      if (!res.ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
+      const acc = accounts.find((a) => a.email === loginForm.email);
+      onLogin(acc);
+    } catch (err) {
+      setOtpLoading(false);
+      setLoginError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+    }
   }
   function submitSignup(e) {
     e.preventDefault();
     if (!signupForm.name.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     if (accounts.some((a) => a.email === signupForm.email)) { setSignupError('อีเมลนี้ถูกใช้แล้ว'); return; }
-    onSignup({ name: signupForm.name.trim(), email: signupForm.email.trim(), password: signupForm.password, clearance: 3 });
+    const clearance = defaultClearanceFor(accounts);
+    setSignupRole(clearance);
+    onSignup({
+      name: signupForm.name.trim(),
+      email: signupForm.email.trim(),
+      password: signupForm.password,
+      clearance,
+      isOwner: accounts.length === 0,
+      createdAt: Date.now(),
+      lastLogin: Date.now(),
+    });
     setSignupError('');
     setSignupDone(true);
   }
@@ -278,14 +378,17 @@ function Terminal({ accounts, onSignup, onLogin }) {
     return (
       <AuthShell>
         <div className="px-6 pt-8 pb-6 text-center">
-          <UserPlus size={28} style={{ color: C.brass, margin: '0 auto' }} />
+          <IconBadge Icon={UserPlus} accent={C.blue} size={52} />
           <h1 className="font-display uppercase tracking-widest text-sm mt-3" style={{ color: C.text }}>Create Account</h1>
-          <p className="font-body text-xs mt-1" style={{ color: C.muted }}>สร้างบัญชีใหม่สำหรับเว็บไซต์ส่วนตัวของคุณ</p>
+          <p className="font-body text-xs mt-1" style={{ color: C.muted }}>สร้างบัญชีใหม่สำหรับ FORGE</p>
         </div>
         {signupDone ? (
           <div className="px-6 pb-6 text-center">
-            <p className="font-body text-sm mb-4" style={{ color: C.teal }}>สร้างบัญชีสำเร็จ (จำลอง)</p>
-            <button onClick={() => { setMode('login'); setLoginForm({ ...loginForm, email: signupForm.email }); }} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase" style={{ background: C.brass, color: C.ink }}>ไปหน้าเข้าสู่ระบบ</button>
+            <p className="font-body text-sm mb-1" style={{ color: C.emerald }}>สร้างบัญชีสำเร็จ</p>
+            <p className="font-mono text-2xs mb-4" style={{ color: C.muted }}>
+              {signupRole === 3 ? 'คุณคือผู้บริหารสูงสุดของระบบนี้' : 'บัญชีเริ่มต้นที่ระดับพนักงานทั่วไป — ผู้บริหารปรับสิทธิ์ให้ภายหลังได้ที่หน้าทีมงาน'}
+            </p>
+            <button onClick={() => { setMode('login'); setLoginForm({ ...loginForm, email: signupForm.email }); }} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>ไปหน้าเข้าสู่ระบบ</button>
           </div>
         ) : (
           <form onSubmit={submitSignup} className="px-6 pb-6 space-y-3">
@@ -293,8 +396,8 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
-            {signupError && <p className="font-mono text-2xs" style={{ color: C.brick }}>{signupError}</p>}
-            <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase" style={{ background: C.brass, color: C.ink }}>สร้างบัญชี</button>
+            {signupError && <p className="font-mono text-2xs" style={{ color: C.red }}>{signupError}</p>}
+            <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>สร้างบัญชี</button>
             <button type="button" onClick={() => setMode('login')} className="w-full font-mono text-2xs tracking-widest flex items-center justify-center gap-1" style={{ color: C.muted }}><ArrowLeft size={11} /> กลับไปเข้าสู่ระบบ</button>
           </form>
         )}
@@ -306,20 +409,20 @@ function Terminal({ accounts, onSignup, onLogin }) {
     return (
       <AuthShell>
         <div className="px-6 pt-8 pb-6 text-center">
-          <Mail size={28} style={{ color: C.brass, margin: '0 auto' }} />
+          <IconBadge Icon={Mail} accent={C.violet} size={52} />
           <h1 className="font-display uppercase tracking-widest text-sm mt-3" style={{ color: C.text }}>Reset Password</h1>
           <p className="font-body text-xs mt-1" style={{ color: C.muted }}>กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์รีเซ็ตให้</p>
         </div>
         {forgotDone ? (
           <div className="px-6 pb-6 text-center">
-            <p className="font-body text-sm mb-1" style={{ color: C.teal }}>ถ้ามีบัญชีนี้ในระบบ เราได้ส่งลิงก์รีเซ็ตไปที่อีเมลแล้ว</p>
-            <p className="font-mono text-2xs mb-4" style={{ color: C.muted }}>(จำลอง — ยังไม่มีระบบส่งอีเมลจริง)</p>
-            <button onClick={() => setMode('login')} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase" style={{ background: C.brass, color: C.ink }}>กลับไปเข้าสู่ระบบ</button>
+            <p className="font-body text-sm mb-1" style={{ color: C.emerald }}>ถ้ามีบัญชีนี้ในระบบ เราได้ส่งลิงก์รีเซ็ตไปที่อีเมลแล้ว</p>
+            <p className="font-mono text-2xs mb-4" style={{ color: C.muted }}>(จำลอง — ยังไม่มีระบบส่งลิงก์รีเซ็ตจริง)</p>
+            <button onClick={() => setMode('login')} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>กลับไปเข้าสู่ระบบ</button>
           </div>
         ) : (
           <form onSubmit={(e) => { e.preventDefault(); setForgotDone(true); }} className="px-6 pb-6 space-y-3">
             <TextField label="อีเมล" type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} placeholder="you@email.com" required />
-            <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase" style={{ background: C.brass, color: C.ink }}>ส่งลิงก์รีเซ็ตรหัสผ่าน</button>
+            <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>ส่งลิงก์รีเซ็ตรหัสผ่าน</button>
             <button type="button" onClick={() => setMode('login')} className="w-full font-mono text-2xs tracking-widest flex items-center justify-center gap-1" style={{ color: C.muted }}><ArrowLeft size={11} /> กลับไปเข้าสู่ระบบ</button>
           </form>
         )}
@@ -330,10 +433,10 @@ function Terminal({ accounts, onSignup, onLogin }) {
   return (
     <AuthShell>
       <div className="px-6 pt-8 pb-6 text-center">
-        <Fingerprint size={30} style={{ color: C.brass, margin: '0 auto' }} />
-        <h1 className="font-display uppercase tracking-widest text-sm mt-3" style={{ color: C.text }}>Access Terminal</h1>
+        <Logo size={44} />
+        <h1 className="font-display uppercase tracking-widest text-2xl mt-3 font-bold" style={{ color: C.text }}>FORGE</h1>
         <p className="font-body text-xs mt-1" style={{ color: C.muted }}>
-          {loginStep === 'credentials' ? 'เข้าสู่ระบบเว็บไซต์ส่วนตัวของคุณ' : 'กรอกรหัสยืนยันตัวตนขั้นที่สอง'}
+          {loginStep === 'credentials' ? 'เข้าสู่ระบบ FORGE' : 'กรอกรหัสยืนยันตัวตนขั้นที่สอง'}
         </p>
       </div>
 
@@ -341,8 +444,10 @@ function Terminal({ accounts, onSignup, onLogin }) {
         <form onSubmit={submitCredentials} className="px-6 pb-6 space-y-3">
           <TextField label="อีเมล" type="email" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} placeholder="you@email.com" required />
           <TextField label="รหัสผ่าน" type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="••••••••" required />
-          {loginError && <p className="font-mono text-2xs" style={{ color: C.brick }}>{loginError}</p>}
-          <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2" style={{ background: C.brass, color: C.ink }}><KeyRound size={14} /> ถัดไป</button>
+          {loginError && <p className="font-mono text-2xs" style={{ color: C.red }}>{loginError}</p>}
+          <button type="submit" disabled={otpLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff', opacity: otpLoading ? 0.6 : 1 }}>
+            {otpLoading ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />} {otpLoading ? 'กำลังส่งรหัส...' : 'ถัดไป'}
+          </button>
           <div className="flex items-center justify-between pt-1">
             <button type="button" onClick={() => setMode('forgot')} className="font-mono text-2xs" style={{ color: C.muted }}>ลืมรหัสผ่าน?</button>
             <button type="button" onClick={() => setMode('signup')} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.muted }}><UserPlus size={11} /> สร้างบัญชีใหม่</button>
@@ -355,14 +460,17 @@ function Terminal({ accounts, onSignup, onLogin }) {
         <form onSubmit={submitVerify} className="px-6 pb-6 space-y-4">
           <div>
             <label className="font-mono text-2xs tracking-widest uppercase block mb-1" style={{ color: C.muted }}>รหัสยืนยัน 6 หลัก</label>
-            <input value={loginForm.code} onChange={(e) => setLoginForm({ ...loginForm, code: e.target.value })} placeholder="000000" maxLength={6} className="w-full px-3 py-2 font-mono text-lg tracking-widest text-center outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }} required />
-            <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>* สาธิต: กรอกตัวเลขใดก็ได้ 6 หลัก ระบบจริงจะส่งรหัสผ่าน SMS/อีเมลที่ลงทะเบียนไว้</p>
+            <input value={loginForm.code} onChange={(e) => setLoginForm({ ...loginForm, code: e.target.value })} placeholder="000000" maxLength={6} className="w-full px-3 py-2 font-mono text-lg tracking-widest text-center outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} required />
+            <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>* ส่งรหัสไปที่ {loginForm.email} แล้ว (เช็คโฟลเดอร์สแปมด้วยถ้าไม่เจอ) รหัสหมดอายุใน 5 นาที</p>
+            {loginError && <p className="font-mono text-2xs mt-2" style={{ color: C.red }}>{loginError}</p>}
           </div>
-          <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2" style={{ background: C.brass, color: C.ink }}><ShieldAlert size={14} /> ยืนยันตัวตน</button>
+          <button type="submit" disabled={otpLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff', opacity: otpLoading ? 0.6 : 1 }}>
+            {otpLoading ? <Loader2 size={14} className="animate-spin" /> : <ShieldAlert size={14} />} {otpLoading ? 'กำลังตรวจสอบ...' : 'ยืนยันตัวตน'}
+          </button>
           <button type="button" onClick={() => setLoginStep('credentials')} className="w-full font-mono text-2xs tracking-widest" style={{ color: C.muted }}>← กลับ</button>
         </form>
       )}
-      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* ต้นแบบ UI จำลอง บัญชีเก็บไว้ชั่วคราวในเบราว์เซอร์ ยังไม่มีฐานข้อมูลจริง</p></div>
+      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* รหัสยืนยันส่งจริงทางอีเมลแล้ว — ส่วนบัญชีผู้ใช้ยังเก็บไว้ชั่วคราวในเบราว์เซอร์ ยังไม่มีฐานข้อมูลถาวร</p></div>
     </AuthShell>
   );
 }
@@ -372,20 +480,19 @@ function DeptCard({ dept, userClearance, denied, onOpen }) {
   const locked = userClearance < dept.clearance;
   const isDenied = denied === dept.id;
   return (
-    <button onClick={() => onOpen(dept)} className="relative text-left p-4 transition-transform" style={{ background: C.panel, border: `1px solid ${isDenied ? C.brick : C.panelLine}`, opacity: locked ? 0.55 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}>
-      <CornerMarks color={locked ? C.muted : dept.accent} />
+    <button onClick={() => onOpen(dept)} className="relative text-left p-5 rounded-2xl transition-transform" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${isDenied ? C.red : C.border}`, boxShadow: locked ? 'none' : `0 8px 24px -14px ${dept.accent}66`, opacity: locked ? 0.5 : 1, cursor: locked ? 'not-allowed' : 'pointer', filter: locked ? 'grayscale(0.6)' : 'none' }}>
       <div className="flex items-start justify-between mb-3">
-        <Icon size={22} style={{ color: locked ? C.muted : dept.accent }} />
+        <IconBadge Icon={Icon} accent={dept.accent} size={40} />
         {locked ? <Lock size={16} style={{ color: C.muted }} /> : <Unlock size={16} style={{ color: dept.accent }} />}
       </div>
       <div className="font-mono text-2xs tracking-widest" style={{ color: dept.accent }}>{dept.en}</div>
       <div className="font-body text-base mt-0.5" style={{ color: C.text }}>{dept.th}</div>
       <p className="font-body text-xs mt-2 leading-relaxed" style={{ color: C.muted }}>{dept.brief}</p>
       <div className="flex items-center gap-1 mt-3"><Bot size={12} style={{ color: C.muted }} /><span className="font-mono text-2xs" style={{ color: C.muted }}>{dept.manager} · ดำเนินการโดย AI ได้</span></div>
-      <div className="font-mono text-2xs tracking-wider mt-2" style={{ color: locked ? C.brick : C.muted }}>ต้องการสิทธิ์ {CLEARANCE[dept.clearance].label}</div>
+      <div className="font-mono text-2xs tracking-wider mt-2" style={{ color: locked ? C.red : C.muted }}>ต้องการสิทธิ์ {CLEARANCE[dept.clearance].label}</div>
       {isDenied && (
-        <div className="absolute inset-0 flex items-center justify-center flex-col gap-1 anim-fade" style={{ background: 'rgba(20,28,33,0.92)' }}>
-          <AlertTriangle size={18} style={{ color: C.brick }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.brick }}>ACCESS DENIED</span>
+        <div className="absolute inset-0 flex items-center justify-center flex-col gap-1 anim-fade rounded-2xl" style={{ background: 'rgba(5,5,6,0.92)' }}>
+          <AlertTriangle size={18} style={{ color: C.red }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.red }}>ACCESS DENIED</span>
         </div>
       )}
     </button>
@@ -395,7 +502,7 @@ function DeptCard({ dept, userClearance, denied, onOpen }) {
 function Directory({ user, denied, onOpen }) {
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="mb-6"><div className="font-mono text-2xs tracking-widest" style={{ color: C.muted }}>DEPARTMENT DIRECTORY</div><h2 className="font-body text-xl mt-1" style={{ color: C.text }}>เลือกแผนกที่ต้องการเข้าถึง</h2></div>
+      <div className="mb-6"><div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>DEPARTMENT DIRECTORY</div><h2 className="font-body text-xl mt-1" style={{ color: C.text }}>เลือกแผนกที่ต้องการเข้าถึง</h2></div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{DEPARTMENTS.map((d) => <DeptCard key={d.id} dept={d} userClearance={user.clearance} denied={denied} onOpen={onOpen} />)}</div>
     </div>
   );
@@ -403,7 +510,7 @@ function Directory({ user, denied, onOpen }) {
 
 function RoleFile({ role, index, accent }) {
   return (
-    <div className="flex gap-4 p-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+    <div className="flex gap-4 p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
       <div className="font-mono text-2xs shrink-0" style={{ color: accent }}>แฟ้ม {String(index + 1).padStart(2, '0')}</div>
       <div><div className="font-body text-sm" style={{ color: C.text }}>{role.title} <span className="font-mono text-2xs" style={{ color: C.muted }}>· {role.en}</span></div><p className="font-body text-xs mt-1 leading-relaxed" style={{ color: C.muted }}>{role.duty}</p></div>
     </div>
@@ -415,23 +522,22 @@ function DepartmentView({ dept, onBack }) {
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-stamp">
       <button onClick={onBack} className="font-mono text-2xs tracking-widest mb-4" style={{ color: C.muted }}>← กลับไปไดเรกทอรี</button>
-      <div className="relative p-5 mb-6" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-        <CornerMarks color={dept.accent} />
-        <div className="flex items-center gap-3"><Icon size={26} style={{ color: dept.accent }} /><div><div className="font-mono text-2xs tracking-widest" style={{ color: dept.accent }}>{dept.en}</div><div className="font-body text-lg" style={{ color: C.text }}>{dept.th}</div></div></div>
+      <div className="relative p-5 mb-6 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-3"><IconBadge Icon={Icon} accent={dept.accent} size={46} /><div><div className="font-mono text-2xs tracking-widest" style={{ color: dept.accent }}>{dept.en}</div><div className="font-body text-lg" style={{ color: C.text }}>{dept.th}</div></div></div>
         <p className="font-body text-sm mt-3" style={{ color: C.muted }}>{dept.brief}</p>
-        <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${C.panelLine}` }}><Bot size={14} style={{ color: dept.accent }} /><span className="font-body text-xs" style={{ color: C.text }}>{dept.manager}</span><span className="font-mono text-2xs" style={{ color: C.muted }}>· ดำเนินการโดย AI ภายใต้การกำกับของคุณ</span></div>
+        <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}><Bot size={14} style={{ color: dept.accent }} /><span className="font-body text-xs" style={{ color: C.text }}>{dept.manager}</span><span className="font-mono text-2xs" style={{ color: C.muted }}>· ดำเนินการโดย AI ภายใต้การกำกับของคุณ</span></div>
       </div>
       <div className="space-y-3 mb-6">{dept.roles.map((r, i) => <RoleFile key={r.en} role={r} index={i} accent={dept.accent} />)}</div>
       {dept.hasChart && (
-        <div className="p-5" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
+        <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
           <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: dept.accent }}>สรุปผลรายเดือน (ข้อมูลตัวอย่าง)</div>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={CHART_DATA}>
-              <CartesianGrid stroke={C.panelLine} vertical={false} />
-              <XAxis dataKey="month" tick={{ fill: C.muted, fontSize: 11 }} axisLine={{ stroke: C.panelLine }} tickLine={false} />
-              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={{ stroke: C.panelLine }} tickLine={false} />
-              <Tooltip contentStyle={{ background: C.bgDeep, border: `1px solid ${C.panelLine}`, fontSize: 12 }} labelStyle={{ color: C.text }} />
-              <Bar dataKey="output" fill={dept.accent} radius={[2, 2, 0, 0]} />
+              <CartesianGrid stroke={C.border} vertical={false} />
+              <XAxis dataKey="month" tick={{ fill: C.muted, fontSize: 11 }} axisLine={{ stroke: C.border }} tickLine={false} />
+              <YAxis tick={{ fill: C.muted, fontSize: 11 }} axisLine={{ stroke: C.border }} tickLine={false} />
+              <Tooltip contentStyle={{ background: C.bgDeep, border: `1px solid ${C.border}`, fontSize: 12, borderRadius: 8 }} labelStyle={{ color: C.text }} />
+              <Bar dataKey="output" fill={dept.accent} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -443,15 +549,15 @@ function DepartmentView({ dept, onBack }) {
 function PlatformsPanel() {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><Share2 size={18} style={{ color: C.brass }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.brass }}>PLATFORM LINKS</span></div>
+      <div className="flex items-center gap-2 mb-1"><Share2 size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>PLATFORM LINKS</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การเชื่อมต่อแพลตฟอร์ม</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>การเชื่อมต่อจริงต้องลงทะเบียน API/OAuth ของแต่ละแพลตฟอร์มเอง หน้านี้แสดงสถานะตัวอย่างเท่านั้น</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {PLATFORMS.map((p) => { const Icon = p.icon; return (
-          <div key={p.name} className="p-4 flex items-center gap-3" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-            <Icon size={20} style={{ color: C.muted }} />
+        {PLATFORMS.map((p) => { const meta = PLATFORM_META[Object.keys(PLATFORM_META).find(k => PLATFORM_META[k].label === p.name.split(' ')[0])] || PLATFORM_META.other; return (
+          <div key={p.name} className="p-4 flex items-center gap-3 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <IconBadge Icon={p.icon} accent={meta.color} size={36} />
             <div className="flex-1"><div className="font-body text-sm" style={{ color: C.text }}>{p.name}</div><div className="font-mono text-2xs" style={{ color: C.muted }}>{p.note}</div></div>
-            <span className="font-mono text-2xs px-2 py-1" style={{ color: C.muted, border: `1px solid ${C.panelLine}` }}>ยังไม่เชื่อมต่อ</span>
+            <span className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ยังไม่เชื่อมต่อ</span>
           </div>
         );})}
       </div>
@@ -462,13 +568,15 @@ function PlatformsPanel() {
 function SecurityProtocol() {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><ScrollText size={18} style={{ color: C.brass }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.brass }}>SECURITY PROTOCOL</span></div>
+      <div className="flex items-center gap-2 mb-1"><ScrollText size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SECURITY PROTOCOL</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>มาตรการความปลอดภัยสำหรับระบบจริง</h2>
-      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>หน้านี้เป็นข้อมูลอ้างอิง — ต้นแบบที่คุณกำลังดูอยู่ยังไม่มีระบบยืนยันตัวตนหรือฐานข้อมูลจริง</p>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>หน้านี้เป็นข้อมูลอ้างอิง — ระบบล็อกอินหลักเชื่อมจริงแล้ว แต่บางส่วนยังเป็นต้นแบบ</p>
       <div className="space-y-3">
         {SECURITY_PROTOCOL.map((item, i) => (
-          <div key={item.title} className="relative p-4 pl-14" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-            <span className="absolute left-4 top-4 font-mono text-xs w-7 h-7 flex items-center justify-center" style={{ color: C.brass, border: `1px solid ${C.brass}` }}>{String(i + 1).padStart(2, '0')}</span>
+          <div key={item.title} className="relative p-4 pl-16 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <span className="absolute left-4 top-4 font-mono text-xs w-8 h-8 rounded-full flex items-center justify-center" style={{ color: '#fff', background: BRAND }}>
+              {String(i + 1).padStart(2, '0')}
+            </span>
             <div className="font-body text-sm" style={{ color: C.text }}>{item.title}</div>
             <p className="font-body text-xs mt-1 leading-relaxed" style={{ color: C.muted }}>{item.body}</p>
           </div>
@@ -478,11 +586,55 @@ function SecurityProtocol() {
   );
 }
 
+function TeamPanel({ accounts, onUpdateClearance }) {
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><Users size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>TEAM MANAGEMENT</span></div>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>จัดการทีมงาน</h2>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>คนที่สมัครใหม่จะเริ่มที่ระดับพนักงานทั่วไปเสมอ ปรับสิทธิ์ให้แต่ละคนได้ที่นี่ — บัญชีที่ไม่เข้าสู่ระบบเกิน 30 วันจะถูกลบอัตโนมัติ (ยกเว้นบัญชีเจ้าของระบบ)</p>
+      {accounts.length === 0 ? (
+        <p className="font-body text-sm" style={{ color: C.muted }}>ยังไม่มีสมาชิกในระบบ</p>
+      ) : (
+        <div className="space-y-2">
+          {accounts.map((a) => {
+            const cl = CLEARANCE[a.clearance];
+            const remaining = daysUntilExpiry(a);
+            return (
+              <div key={a.email} className="p-4 flex items-center justify-between gap-3 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center font-display text-xs font-bold shrink-0" style={{ background: `linear-gradient(135deg, ${cl.color}, ${cl.color}88)`, color: '#0A0A0F' }}>
+                    {a.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-body text-sm truncate" style={{ color: C.text }}>{a.name}</span>
+                      {a.isOwner && <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: C.emerald, border: `1px solid ${C.emerald}` }}>เจ้าของ</span>}
+                    </div>
+                    <div className="font-mono text-2xs truncate" style={{ color: C.muted }}>{a.email}</div>
+                    <div className="font-mono text-2xs truncate mt-0.5" style={{ color: a.isOwner ? C.emerald : (remaining !== null && remaining <= 7 ? C.red : C.muted) }}>
+                      {a.isOwner ? 'ไม่มีวันหมดอายุ' : `ใช้ล่าสุด ${daysAgoLabel(a.lastLogin)} · เหลือ ${remaining} วันก่อนถูกลบ`}
+                    </div>
+                  </div>
+                </div>
+                <select value={a.clearance} onChange={(e) => onUpdateClearance(a.email, Number(e.target.value))} className="font-mono text-2xs px-2 py-2 rounded-xl outline-none shrink-0" style={{ background: C.panelAlt, color: cl.color, border: `1px solid ${C.border}` }}>
+                  <option value={1}>LV-1 STAFF</option>
+                  <option value={2}>LV-2 MANAGER</option>
+                  <option value={3}>LV-3 EXECUTIVE</option>
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProgressBar({ done, total, color }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   return (
     <div>
-      <div style={{ width: '100%', height: 6, background: C.bgDeep, border: `1px solid ${C.panelLine}` }}><div style={{ width: `${pct}%`, height: '100%', background: color, transition: 'width 0.3s ease' }} /></div>
+      <div style={{ width: '100%', height: 6, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}><div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${color}, ${C.violet})`, transition: 'width 0.3s ease' }} /></div>
       <div className="font-mono text-2xs mt-1" style={{ color: C.muted }}>{done}/{total} เสร็จวันนี้</div>
     </div>
   );
@@ -491,10 +643,10 @@ function ProgressBar({ done, total, color }) {
 function VerdictBox({ verdict }) {
   if (!verdict) return null;
   return (
-    <div className="p-2 mt-1.5" style={{ border: `1px solid ${verdict.passed ? C.teal : C.brick}` }}>
+    <div className="p-2 mt-1.5 rounded-xl" style={{ border: `1px solid ${verdict.passed ? C.emerald : C.red}`, background: verdict.passed ? `${C.emerald}11` : `${C.red}11` }}>
       <div className="flex items-center gap-2 mb-1">
-        {verdict.passed ? <CheckCircle2 size={13} style={{ color: C.teal }} /> : <XCircle size={13} style={{ color: C.brick }} />}
-        <span className="font-mono text-2xs" style={{ color: verdict.passed ? C.teal : C.brick }}>{verdict.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข'}</span>
+        {verdict.passed ? <CheckCircle2 size={13} style={{ color: C.emerald }} /> : <XCircle size={13} style={{ color: C.red }} />}
+        <span className="font-mono text-2xs" style={{ color: verdict.passed ? C.emerald : C.red }}>{verdict.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข'}</span>
       </div>
       <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.muted }}>{verdict.text}</p>
     </div>
@@ -506,24 +658,24 @@ function DailyTaskCard({ task, onToggle, onGenerate, onQC, loading, qcLoading })
   const c = task.content;
   const hasFields = c && (c.title || c.caption || c.videoPrompt || c.coverPrompt || c.imagePrompt);
   return (
-    <div className="p-3" style={{ borderTop: `1px solid ${C.panelLine}` }}>
+    <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
       <div className="flex items-start gap-3">
-        <button onClick={() => onToggle(task.id)} style={{ color: task.done ? C.teal : C.muted }} className="mt-0.5 shrink-0">{task.done ? <CheckSquare size={18} /> : <Square size={18} />}</button>
+        <button onClick={() => onToggle(task.id)} style={{ color: task.done ? C.emerald : C.muted }} className="mt-0.5 shrink-0">{task.done ? <CheckSquare size={18} /> : <Square size={18} />}</button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2"><Icon size={13} style={{ color: C.muted }} /><span className="font-body text-sm" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span></div>
           {!c ? (
-            <button onClick={() => onGenerate(task)} disabled={loading} className="mt-2 font-mono text-2xs px-3 py-1.5 flex items-center gap-1" style={{ background: C.brass, color: C.ink, opacity: loading ? 0.6 : 1 }}>
+            <button onClick={() => onGenerate(task)} disabled={loading} className="mt-2 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: loading ? 0.6 : 1 }}>
               {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI เตรียมเนื้อหา
             </button>
           ) : (
             <div className="mt-2 space-y-1.5">
               {hasFields ? (
                 <>
-                  {c.title && <div><span className="font-mono text-2xs" style={{ color: C.brass }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.title}</span></div>}
-                  {c.caption && <div><span className="font-mono text-2xs" style={{ color: C.brass }}>คำบรรยาย: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.caption}</span></div>}
-                  {c.videoPrompt && <div><span className="font-mono text-2xs" style={{ color: C.teal }}>พรอมต์วิดีโอ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.videoPrompt}</span></div>}
-                  {c.coverPrompt && <div><span className="font-mono text-2xs" style={{ color: C.gold }}>พรอมต์หน้าปก: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.coverPrompt}</span></div>}
-                  {c.imagePrompt && <div><span className="font-mono text-2xs" style={{ color: C.gold }}>พรอมต์รูปภาพ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.imagePrompt}</span></div>}
+                  {c.title && <div><span className="font-mono text-2xs" style={{ color: C.blue }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.title}</span></div>}
+                  {c.caption && <div><span className="font-mono text-2xs" style={{ color: C.blue }}>คำบรรยาย: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.caption}</span></div>}
+                  {c.videoPrompt && <div><span className="font-mono text-2xs" style={{ color: C.cyan }}>พรอมต์วิดีโอ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.videoPrompt}</span></div>}
+                  {c.coverPrompt && <div><span className="font-mono text-2xs" style={{ color: C.violet }}>พรอมต์หน้าปก: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.coverPrompt}</span></div>}
+                  {c.imagePrompt && <div><span className="font-mono text-2xs" style={{ color: C.violet }}>พรอมต์รูปภาพ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.imagePrompt}</span></div>}
                 </>
               ) : (
                 <pre className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text, fontFamily: 'inherit' }}>{c.raw}</pre>
@@ -533,7 +685,7 @@ function DailyTaskCard({ task, onToggle, onGenerate, onQC, loading, qcLoading })
                   {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} สร้างใหม่
                 </button>
                 {!task.qc && (
-                  <button onClick={() => onQC(task)} disabled={qcLoading} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.gold }}>
+                  <button onClick={() => onQC(task)} disabled={qcLoading} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.violet }}>
                     {qcLoading ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
                   </button>
                 )}
@@ -553,20 +705,19 @@ function AddChannelForm({ onAdd, onClose }) {
   const [videos, setVideos] = useState(1);
   const [images, setImages] = useState(0);
   return (
-    <div className="relative p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-      <CornerMarks color={C.brass} />
-      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.brass }}>เพิ่มช่อง/เพจใหม่</div>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อช่อง เช่น ช่องวาฬ" className="w-full px-3 py-2 font-body text-sm mb-2 outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }} />
-      <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full px-3 py-2 font-body text-sm mb-2 outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }}>
+    <div className="relative p-4 mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เพิ่มช่อง/เพจใหม่</div>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อช่อง เช่น ช่องวาฬ" className="w-full px-3 py-2 font-body text-sm mb-2 outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+      <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full px-3 py-2 font-body text-sm mb-2 outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
         {Object.entries(PLATFORM_META).map(([key, v]) => <option key={key} value={key}>{v.label}</option>)}
       </select>
       <div className="flex gap-2 mb-3">
-        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วิดีโอ/วัน</label><input type="number" min="0" value={videos} onChange={(e) => setVideos(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }} /></div>
-        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>รูปภาพ/วัน</label><input type="number" min="0" value={images} onChange={(e) => setImages(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.panelLine}` }} /></div>
+        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วิดีโอ/วัน</label><input type="number" min="0" value={videos} onChange={(e) => setVideos(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} /></div>
+        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>รูปภาพ/วัน</label><input type="number" min="0" value={images} onChange={(e) => setImages(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} /></div>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => { if (name.trim() && (videos > 0 || images > 0)) { onAdd(name.trim(), platform, videos, images); onClose(); } }} className="font-mono text-2xs px-3 py-2 flex items-center gap-1" style={{ background: C.brass, color: C.ink }}><Plus size={13} /> เพิ่มช่อง</button>
-        <button onClick={onClose} className="font-mono text-2xs px-3 py-2" style={{ color: C.muted, border: `1px solid ${C.panelLine}` }}>ยกเลิก</button>
+        <button onClick={() => { if (name.trim() && (videos > 0 || images > 0)) { onAdd(name.trim(), platform, videos, images); onClose(); } }} className="font-mono text-2xs px-3 py-2 flex items-center gap-1 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={13} /> เพิ่มช่อง</button>
+        <button onClick={onClose} className="font-mono text-2xs px-3 py-2 rounded-xl" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ยกเลิก</button>
       </div>
     </div>
   );
@@ -578,11 +729,11 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
   const done = tasks.filter((t) => t.done).length;
   const qcable = tasks.some((t) => t.content && !t.qc);
   return (
-    <div className="relative mb-4" style={{ background: C.panel, border: `1px solid ${C.panelLine}` }}>
-      <CornerMarks color={meta.color} />
+    <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${meta.color}66`, overflow: 'hidden' }}>
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${meta.color}, transparent)` }} />
       <div className="p-4 flex items-center justify-between gap-3">
         <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2"><span className="font-mono text-2xs px-2 py-0.5 shrink-0" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>{meta.label}</span><span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span></div>
+          <div className="flex items-center gap-2"><span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>{meta.label}</span><span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span></div>
           <div className="mt-2 max-w-xs"><ProgressBar done={done} total={tasks.length} color={meta.color} /></div>
         </button>
         <div className="flex items-center gap-2 shrink-0">
@@ -593,11 +744,11 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
       {open && (
         <div className="anim-fade">
           <div className="px-3 pb-2 flex flex-wrap gap-2">
-            <button onClick={() => onGenerateAll(channel)} disabled={generatingAll} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1" style={{ background: meta.color, color: C.ink, opacity: generatingAll ? 0.6 : 1 }}>
+            <button onClick={() => onGenerateAll(channel)} disabled={generatingAll} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: meta.color, color: '#fff', opacity: generatingAll ? 0.6 : 1 }}>
               {generatingAll ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} เตรียมเนื้อหาให้ครบทุกงานวันนี้
             </button>
             {qcable && (
-              <button onClick={() => onQCAll(channel)} disabled={qcAllRunning} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1" style={{ background: C.gold, color: C.ink, opacity: qcAllRunning ? 0.6 : 1 }}>
+              <button onClick={() => onQCAll(channel)} disabled={qcAllRunning} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: C.violet, color: '#fff', opacity: qcAllRunning ? 0.6 : 1 }}>
                 {qcAllRunning ? <Loader2 size={12} className="animate-spin" /> : <ClipboardCheck size={12} />} ตรวจ QC ทั้งหมด
               </button>
             )}
@@ -654,7 +805,9 @@ function DailyWork() {
     if (!task.content) return;
     setQcLoadingId(task.id);
     try {
-      const sys = task.type === 'video' ? QC_VIDEO_SYS : QC_IMAGE_SYS;
+      const sys = task.type === 'video'
+        ? 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์คลิปวิดีโอ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อคลิป คำบรรยาย พรอมต์วิดีโอ และพรอมต์หน้าปก เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด'
+        : 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์รูปภาพ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อโพสต์ คำบรรยาย และพรอมต์รูปภาพ เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด';
       const c = task.content;
       const summary = task.type === 'video'
         ? `ชื่อคลิป: ${c.title || '-'}\nคำบรรยาย: ${c.caption || '-'}\nพรอมต์วิดีโอ: ${c.videoPrompt || '-'}\nพรอมต์หน้าปก: ${c.coverPrompt || '-'}`
@@ -682,17 +835,17 @@ function DailyWork() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.brass }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.brass }}>{todayLabel()}</span></div>
+      <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{todayLabel()}</span></div>
       <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
       <div className="flex items-center justify-between gap-3 mt-3 mb-6">
-        <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.brass} /></div>
-        <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0" style={{ color: C.muted, border: `1px solid ${C.panelLine}` }}>เริ่มวันใหม่</button>
+        <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
+        <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
       </div>
 
       {showAdd ? (
         <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
       ) : (
-        <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2" style={{ background: C.brass, color: C.ink }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
+        <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
       )}
 
       {channels.length === 0 ? (
@@ -715,7 +868,19 @@ export default function CompanyPortal() {
   const [denied, setDenied] = useState(null);
 
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
-  function handleLogin(account) { setUser({ name: account.name, clearance: account.clearance }); setStage('daily'); }
+  function handleLogin(account) {
+    setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: Date.now() } : a)));
+    setUser({ name: account.name, clearance: account.clearance });
+    setStage('daily');
+  }
+  function updateAccountClearance(email, clearance) {
+    setAccounts((prev) => prev.map((a) => (a.email === email ? { ...a, clearance } : a)));
+  }
+
+  // ลบบัญชีที่ไม่ได้เข้าสู่ระบบเกิน 30 วันอัตโนมัติ (ยกเว้นเจ้าของระบบ)
+  useEffect(() => {
+    setAccounts((prev) => prev.filter((a) => !isExpired(a)));
+  }, []);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -747,6 +912,7 @@ export default function CompanyPortal() {
           {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
           {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
           {stage === 'platforms' && <PlatformsPanel />}
+          {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
           {stage === 'security' && <SecurityProtocol />}
         </>
       )}
