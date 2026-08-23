@@ -221,18 +221,25 @@ function IconBadge({ Icon, accent, size = 44 }) {
   );
 }
 
-function Logo({ size = 28, color = '#fff' }) {
+function CameraLensO({ size }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <g transform="skewX(-8)">
-        <rect x="8" y="5" width="5" height="22" rx="1.5" fill={color} />
-        <rect x="8" y="5" width="18" height="6" rx="1.5" fill={color} />
-        <rect x="8" y="14.5" width="14" height="5.5" rx="1.5" fill={color} />
-      </g>
-      <circle cx="27" cy="6" r="1.6" fill={color} opacity="0.9" />
-      <circle cx="29.5" cy="10.5" r="1" fill={color} opacity="0.55" />
-      <circle cx="24" cy="3" r="0.8" fill={color} opacity="0.7" />
+    <svg width={size} height={size} viewBox="0 0 32 32" style={{ display: 'block' }}>
+      <circle cx="16" cy="16" r="14" fill="none" stroke="#fff" strokeWidth="3" />
+      <circle cx="16" cy="16" r="9.5" fill="none" stroke="#fff" strokeWidth="1.6" opacity="0.6" />
+      <circle cx="16" cy="16" r="4.5" fill="#fff" opacity="0.95" />
     </svg>
+  );
+}
+
+function Wordmark({ fontSize = 28 }) {
+  const iconSize = Math.round(fontSize * 0.72);
+  const textStyle = { fontSize, color: '#fff', letterSpacing: '0.03em', lineHeight: 1 };
+  return (
+    <div className="inline-flex items-center font-display font-bold" style={{ gap: fontSize * 0.06 }}>
+      <span style={textStyle}>F</span>
+      <CameraLensO size={iconSize} />
+      <span style={textStyle}>RGE</span>
+    </div>
   );
 }
 
@@ -250,8 +257,7 @@ function Header({ user, stage, setStage, logout }) {
     <div className="sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.bgDeep, borderBottom: `1px solid ${C.border}` }}>
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-1.5 shrink-0">
-          <Logo size={18} />
-          <span className="font-display uppercase tracking-widest text-xs font-bold" style={{ color: C.text }}>FORGE</span>
+          <Wordmark fontSize={15} />
         </div>
         <div className="flex items-center gap-1 flex-wrap">
           <NavTab label="งานประจำวัน" active={stage === 'daily'} onClick={() => setStage('daily')} />
@@ -299,11 +305,12 @@ function TextField({ label, ...props }) {
 function Terminal({ accounts, onSignup, onLogin }) {
   const [mode, setMode] = useState('login');
   const [loginStep, setLoginStep] = useState('credentials');
-  const [loginForm, setLoginForm] = useState({ email: '', password: '', code: '' });
+  const [loginForm, setLoginForm] = useState({ identifier: '', password: '', code: '' });
   const [loginError, setLoginError] = useState('');
   const [otpToken, setOtpToken] = useState('');
+  const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', confirm: '' });
+  const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
   const [signupRole, setSignupRole] = useState(3);
@@ -312,20 +319,22 @@ function Terminal({ accounts, onSignup, onLogin }) {
 
   async function submitCredentials(e) {
     e.preventDefault();
-    const acc = accounts.find((a) => a.email === loginForm.email && a.password === loginForm.password);
-    if (!acc) { setLoginError('อีเมลหรือรหัสผ่านไม่ถูกต้อง'); return; }
+    const input = loginForm.identifier.trim();
+    const acc = accounts.find((a) => (a.email === input || a.username === input) && a.password === loginForm.password);
+    if (!acc) { setLoginError('อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง'); return; }
     setLoginError('');
     setOtpLoading(true);
     try {
       const res = await fetch('/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginForm.email }),
+        body: JSON.stringify({ email: acc.email }),
       });
       const data = await res.json();
       setOtpLoading(false);
       if (!res.ok) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
       setOtpToken(data.token);
+      setOtpEmail(acc.email);
       setLoginForm((f) => ({ ...f, code: '' }));
       setLoginStep('verify');
     } catch (err) {
@@ -347,7 +356,8 @@ function Terminal({ accounts, onSignup, onLogin }) {
       const data = await res.json();
       setOtpLoading(false);
       if (!res.ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
-      const acc = accounts.find((a) => a.email === loginForm.email);
+      const input = loginForm.identifier.trim();
+      const acc = accounts.find((a) => a.email === input || a.username === input);
       onLogin(acc);
     } catch (err) {
       setOtpLoading(false);
@@ -356,13 +366,15 @@ function Terminal({ accounts, onSignup, onLogin }) {
   }
   function submitSignup(e) {
     e.preventDefault();
-    if (!signupForm.name.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
+    if (!signupForm.name.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     if (accounts.some((a) => a.email === signupForm.email)) { setSignupError('อีเมลนี้ถูกใช้แล้ว'); return; }
+    if (accounts.some((a) => a.username === signupForm.username)) { setSignupError('ชื่อผู้ใช้นี้ถูกใช้แล้ว'); return; }
     const clearance = defaultClearanceFor(accounts);
     setSignupRole(clearance);
     onSignup({
       name: signupForm.name.trim(),
+      username: signupForm.username.trim(),
       email: signupForm.email.trim(),
       password: signupForm.password,
       clearance,
@@ -388,11 +400,12 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <p className="font-mono text-2xs mb-4" style={{ color: C.muted }}>
               {signupRole === 3 ? 'คุณคือผู้บริหารสูงสุดของระบบนี้' : 'บัญชีเริ่มต้นที่ระดับพนักงานทั่วไป — ผู้บริหารปรับสิทธิ์ให้ภายหลังได้ที่หน้าทีมงาน'}
             </p>
-            <button onClick={() => { setMode('login'); setLoginForm({ ...loginForm, email: signupForm.email }); }} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>ไปหน้าเข้าสู่ระบบ</button>
+            <button onClick={() => { setMode('login'); setLoginForm({ ...loginForm, identifier: signupForm.username }); }} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>ไปหน้าเข้าสู่ระบบ</button>
           </div>
         ) : (
           <form onSubmit={submitSignup} className="px-6 pb-6 space-y-3">
             <TextField label="ชื่อ" value={signupForm.name} onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })} placeholder="ชื่อของคุณ" required />
+            <TextField label="ชื่อผู้ใช้ (สำหรับล็อกอิน)" value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value.replace(/\s/g, '') })} placeholder="เช่น forge_admin" required />
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
@@ -433,16 +446,15 @@ function Terminal({ accounts, onSignup, onLogin }) {
   return (
     <AuthShell>
       <div className="px-6 pt-8 pb-6 text-center">
-        <Logo size={44} />
-        <h1 className="font-display uppercase tracking-widest text-2xl mt-3 font-bold" style={{ color: C.text }}>FORGE</h1>
-        <p className="font-body text-xs mt-1" style={{ color: C.muted }}>
+        <div className="flex justify-center"><Wordmark fontSize={34} /></div>
+        <p className="font-body text-xs mt-3" style={{ color: C.muted }}>
           {loginStep === 'credentials' ? 'เข้าสู่ระบบ FORGE' : 'กรอกรหัสยืนยันตัวตนขั้นที่สอง'}
         </p>
       </div>
 
       {loginStep === 'credentials' && (
         <form onSubmit={submitCredentials} className="px-6 pb-6 space-y-3">
-          <TextField label="อีเมล" type="email" value={loginForm.email} onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })} placeholder="you@email.com" required />
+          <TextField label="อีเมล หรือ ชื่อผู้ใช้" value={loginForm.identifier} onChange={(e) => setLoginForm({ ...loginForm, identifier: e.target.value })} placeholder="you@email.com หรือ ชื่อผู้ใช้" required />
           <TextField label="รหัสผ่าน" type="password" value={loginForm.password} onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })} placeholder="••••••••" required />
           {loginError && <p className="font-mono text-2xs" style={{ color: C.red }}>{loginError}</p>}
           <button type="submit" disabled={otpLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff', opacity: otpLoading ? 0.6 : 1 }}>
@@ -461,7 +473,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
           <div>
             <label className="font-mono text-2xs tracking-widest uppercase block mb-1" style={{ color: C.muted }}>รหัสยืนยัน 6 หลัก</label>
             <input value={loginForm.code} onChange={(e) => setLoginForm({ ...loginForm, code: e.target.value })} placeholder="000000" maxLength={6} className="w-full px-3 py-2 font-mono text-lg tracking-widest text-center outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} required />
-            <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>* ส่งรหัสไปที่ {loginForm.email} แล้ว (เช็คโฟลเดอร์สแปมด้วยถ้าไม่เจอ) รหัสหมดอายุใน 5 นาที</p>
+            <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>* ส่งรหัสไปที่ {otpEmail} แล้ว (เช็คโฟลเดอร์สแปมด้วยถ้าไม่เจอ) รหัสหมดอายุใน 5 นาที</p>
             {loginError && <p className="font-mono text-2xs mt-2" style={{ color: C.red }}>{loginError}</p>}
           </div>
           <button type="submit" disabled={otpLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff', opacity: otpLoading ? 0.6 : 1 }}>
@@ -610,7 +622,7 @@ function TeamPanel({ accounts, onUpdateClearance }) {
                       <span className="font-body text-sm truncate" style={{ color: C.text }}>{a.name}</span>
                       {a.isOwner && <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: C.emerald, border: `1px solid ${C.emerald}` }}>เจ้าของ</span>}
                     </div>
-                    <div className="font-mono text-2xs truncate" style={{ color: C.muted }}>{a.email}</div>
+                    <div className="font-mono text-2xs truncate" style={{ color: C.muted }}>@{a.username} · {a.email}</div>
                     <div className="font-mono text-2xs truncate mt-0.5" style={{ color: a.isOwner ? C.emerald : (remaining !== null && remaining <= 7 ? C.red : C.muted) }}>
                       {a.isOwner ? 'ไม่มีวันหมดอายุ' : `ใช้ล่าสุด ${daysAgoLabel(a.lastLogin)} · เหลือ ${remaining} วันก่อนถูกลบ`}
                     </div>
