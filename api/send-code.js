@@ -1,16 +1,16 @@
 import { Resend } from 'resend';
 import crypto from 'crypto';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const SECRET = process.env.OTP_SECRET;
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  if (!process.env.RESEND_API_KEY || !SECRET) {
-    return res.status(500).json({ error: 'เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า RESEND_API_KEY หรือ OTP_SECRET' });
+  if (!process.env.RESEND_API_KEY || !process.env.OTP_SECRET) {
+    return res.status(500).json({ error: 'เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า RESEND_API_KEY หรือ OTP_SECRET ใน Vercel' });
   }
+
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const SECRET = process.env.OTP_SECRET;
 
   const { email } = req.body || {};
   if (!email || typeof email !== 'string') {
@@ -36,6 +36,6 @@ export default async function handler(req, res) {
     });
     return res.status(200).json({ token });
   } catch (err) {
-    return res.status(500).json({ error: 'ส่งอีเมลไม่สำเร็จ ลองใหม่อีกครั้ง' });
+    return res.status(500).json({ error: 'ส่งอีเมลไม่สำเร็จ ลองใหม่อีกครั้ง: ' + (err?.message || '') });
   }
 }
