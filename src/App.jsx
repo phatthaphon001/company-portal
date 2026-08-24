@@ -207,11 +207,17 @@ function emptyTask(id, channelId, platform, type, label) {
   };
 }
 
-function buildTasksForPlatform(channelId, platformEntry) {
+function buildTasksForPlatform(channelId, platformEntry, videoOffset, imageOffset) {
   const tasks = [];
   const p = platformEntry.platform;
-  for (let i = 1; i <= platformEntry.dailyVideos; i++) tasks.push(emptyTask(`${channelId}-${p}-video-${i}`, channelId, p, 'video', `วิดีโอ ${i}`));
-  for (let i = 1; i <= platformEntry.dailyImages; i++) tasks.push(emptyTask(`${channelId}-${p}-image-${i}`, channelId, p, 'image', 'โพสต์'));
+  for (let i = 1; i <= platformEntry.dailyVideos; i++) {
+    const n = videoOffset + i;
+    tasks.push(emptyTask(`${channelId}-${p}-video-${n}`, channelId, p, 'video', `วิดีโอ ${n}`));
+  }
+  for (let i = 1; i <= platformEntry.dailyImages; i++) {
+    const n = imageOffset + i;
+    tasks.push(emptyTask(`${channelId}-${p}-image-${n}`, channelId, p, 'image', `โพสต์ ${n}`));
+  }
   return tasks;
 }
 
@@ -1411,11 +1417,14 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
   function addChannel(name, platform, dailyVideos, dailyImages) {
     const channel = { id: Date.now().toString(), name, platforms: [{ platform, dailyVideos, dailyImages }] };
     setChannels((prev) => [...prev, channel]);
-    setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0])]);
+    setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0], 0, 0)]);
   }
   function addPlatform(channelId, platform, dailyVideos, dailyImages) {
+    const chTasks = tasksRef.current.filter((t) => t.channelId === channelId);
+    const videoOffset = chTasks.filter((t) => t.type === 'video').length;
+    const imageOffset = chTasks.filter((t) => t.type === 'image').length;
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: [...c.platforms, { platform, dailyVideos, dailyImages }] } : c)));
-    setTasks((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages })]);
+    setTasks((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages }, videoOffset, imageOffset)]);
   }
   function removePlatform(channelId, platform) {
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.filter((p) => p.platform !== platform) } : c)));
