@@ -1,6 +1,6 @@
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate'];
+const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks'];
 
 export default async function handler(req, res) {
   if (!REDIS_URL || !REDIS_TOKEN) {
