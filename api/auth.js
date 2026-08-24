@@ -18,6 +18,18 @@ function sanitize(a) {
   const { password, ...rest } = a;
   return rest;
 }
+async function getSecurity() {
+  const r = await fetch(`${REDIS_URL}/get/security`, { headers: { Authorization: `Bearer ${REDIS_TOKEN}` } });
+  const d = await r.json();
+  return d.result ? JSON.parse(d.result) : { forceOtpAlways: false };
+}
+async function saveSecurity(security) {
+  await fetch(`${REDIS_URL}/set/security`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+    body: JSON.stringify(security),
+  });
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -53,9 +65,31 @@ export default async function handler(req, res) {
       const accounts = await getAccounts();
       const idx = accounts.findIndex((a) => (a.email === identifier || a.username === identifier) && a.password === password);
       if (idx === -1) return res.status(400).json({ error: 'อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง' });
+      const loginCount = (accounts[idx].loginCount || 0) + 1;
+      accounts[idx].loginCount = loginCount;
       accounts[idx].lastLogin = Date.now();
       await saveAccounts(accounts);
-      return res.status(200).json({ account: sanitize(accounts[idx]) });
+      const security = await getSecurity();
+      const requireOtp = security.forceOtpAlways || loginCount > 6;
+      return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp });
+    }
+
+    if (action === 'getSecurity') {
+      return res.status(200).json({ security: await getSecurity() });
+    }
+
+    if (action === 'updateSecurity') {
+      const { forceOtpAlways } = req.body;
+      const security = { forceOtpAlways: !!forceOtpAlways };
+      await saveSecurity(security);
+      return res.status(200).json({ security });
+    }
+
+    if (action === 'resetLoginCounts') {
+      const accounts = await getAccounts();
+      const reset = accounts.map((a) => ({ ...a, loginCount: 0 }));
+      await saveAccounts(reset);
+      return res.status(200).json({ ok: true });
     }
 
     if (action === 'updateProfile') {
