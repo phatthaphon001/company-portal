@@ -196,9 +196,9 @@ async function callClaude(system, content) {
   return data.text || '(ไม่มีคำตอบ)';
 }
 
-function emptyTask(id, channelId, platform, type, label) {
+function emptyTask(id, channelId, platform, type, label, date) {
   return {
-    id, channelId, platform, type, label, done: false,
+    id, channelId, platform, type, label, date, done: false,
     outline: '', durationSec: 15, styleTemplate: '',
     imagePrompt: '', imagePromptCopied: false, imagePromptMade: false,
     videoPrompt: '', videoPromptCopied: false, videoPromptMade: false,
@@ -210,18 +210,52 @@ function emptyTask(id, channelId, platform, type, label) {
   };
 }
 
-function buildTasksForPlatform(channelId, platformEntry, videoOffset, imageOffset) {
+function buildTasksForPlatform(channelId, platformEntry, videoOffset, imageOffset, date) {
   const tasks = [];
   const p = platformEntry.platform;
   for (let i = 1; i <= platformEntry.dailyVideos; i++) {
     const n = videoOffset + i;
-    tasks.push(emptyTask(`${channelId}-${p}-video-${n}`, channelId, p, 'video', `วิดีโอ ${n}`));
+    tasks.push(emptyTask(`${channelId}-${p}-video-${n}-${date}`, channelId, p, 'video', `วิดีโอ ${n}`, date));
   }
   for (let i = 1; i <= platformEntry.dailyImages; i++) {
     const n = imageOffset + i;
-    tasks.push(emptyTask(`${channelId}-${p}-image-${n}`, channelId, p, 'image', `โพสต์ ${n}`));
+    tasks.push(emptyTask(`${channelId}-${p}-image-${n}-${date}`, channelId, p, 'image', `โพสต์ ${n}`, date));
   }
   return tasks;
+}
+
+function buildDefaultTasksForChannels(channelsList, date) {
+  let allTasks = [];
+  channelsList.forEach((c) => {
+    let videoOffset = 0, imageOffset = 0;
+    c.platforms.forEach((p) => {
+      allTasks = [...allTasks, ...buildTasksForPlatform(c.id, p, videoOffset, imageOffset, date)];
+      videoOffset += p.dailyVideos;
+      imageOffset += p.dailyImages;
+    });
+  });
+  return allTasks;
+}
+
+function shiftDateStr(dateStr, days) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dedupeTasks(list) {
+  const seen = new Map();
+  for (const t of list) {
+    const key = `${t.channelId}|${t.platform}|${t.type}|${t.label}`;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, t);
+      continue;
+    }
+    const score = (x) => (x.outline ? 1 : 0) + (x.videoPrompt || x.imagePrompt ? 1 : 0) + (x.title ? 1 : 0) + (x.link ? 1 : 0) + (x.done ? 1 : 0);
+    if (score(t) > score(existing)) seen.set(key, t);
+  }
+  return Array.from(seen.values());
 }
 
 function GradientBlobs() {
@@ -1664,30 +1698,72 @@ function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
   );
 }
 
-function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, onDismissReminder, onOpenCalendar }) {
+function DayNavigator({ viewDate, setViewDate }) {
+  const today = todayDateStr();
+  const active = viewDate || today;
+  function shift(days) {
+    const next = shiftDateStr(active, days);
+    setViewDate(next === today ? null : next);
+  }
+  function labelFor(dateStr) {
+    const diffDays = Math.round((new Date(dateStr) - new Date(today)) / 86400000);
+    if (diffDays === 1) return 'พรุ่งนี้';
+    if (diffDays === 2) return 'มะรืนนี้';
+    const d = new Date(dateStr);
+    return `${THAI_DAYS[d.getDay()]} ${d.getDate()} ${THAI_MONTHS[d.getMonth()]}`;
+  }
+  return (
+    <div className="flex items-center gap-2 mb-4 p-2.5 rounded-xl" style={{ background: viewDate ? `${C.orange}18` : C.panel, border: `1px solid ${viewDate ? C.orange : C.border}` }}>
+      <button onClick={() => shift(-1)} disabled={active === today} className="font-mono text-xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: active === today ? C.border : C.muted, border: `1px solid ${C.border}` }}>← ก่อนหน้า</button>
+      <div className="flex-1 text-center min-w-0">
+        <span className="font-mono text-xs truncate" style={{ color: viewDate ? C.orange : C.blue }}>{viewDate ? `กำลังเตรียมล่วงหน้า: ${labelFor(active)}` : 'วันนี้'}</span>
+      </div>
+      <button onClick={() => shift(1)} className="font-mono text-xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ถัดไป →</button>
+    </div>
+  );
+}
+
+function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, reminder, onDismissReminder, onOpenCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
   const [qcAllId, setQcAllId] = useState(null);
-  const tasksRef = useRef(tasks);
-  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  const [viewDate, setViewDate] = useState(null); // null = วันนี้, else = วันที่กำลังเตรียมล่วงหน้า
+  const todayStr = todayDateStr();
+  const isFutureView = !!viewDate;
+  const activeDate = viewDate || todayStr;
+  const activeTasks = isFutureView ? (futureTasks[viewDate] || buildDefaultTasksForChannels(channels, viewDate)) : tasks;
+  const activeTasksRef = useRef(activeTasks);
+  useEffect(() => { activeTasksRef.current = activeTasks; }, [activeTasks]);
+
+  function setActiveTasksUpdater(updater) {
+    if (!isFutureView) {
+      setTasks((prev) => (typeof updater === 'function' ? updater(prev) : updater));
+    } else {
+      setFutureTasks((prev) => {
+        const current = prev[viewDate] || buildDefaultTasksForChannels(channels, viewDate);
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        return { ...prev, [viewDate]: next };
+      });
+    }
+  }
 
   function setLoading(id, action) { setLoadingMap((prev) => ({ ...prev, [id]: action })); }
   function clearLoading(id) { setLoadingMap((prev) => { const n = { ...prev }; delete n[id]; return n; }); }
-  function updateTaskField(id, patch) { setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))); }
+  function updateTaskField(id, patch) { setActiveTasksUpdater((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))); }
 
   function addChannel(name, platform, dailyVideos, dailyImages) {
     const color = CHANNEL_COLORS[channels.length % CHANNEL_COLORS.length];
     const channel = { id: Date.now().toString(), name, color, platforms: [{ platform, dailyVideos, dailyImages, checkLink: '' }] };
     setChannels((prev) => [...prev, channel]);
-    setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0], 0, 0)]);
+    setActiveTasksUpdater((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0], 0, 0, activeDate)]);
   }
   function addPlatform(channelId, platform, dailyVideos, dailyImages) {
-    const chTasks = tasksRef.current.filter((t) => t.channelId === channelId);
+    const chTasks = activeTasksRef.current.filter((t) => t.channelId === channelId);
     const videoOffset = chTasks.filter((t) => t.type === 'video').length;
     const imageOffset = chTasks.filter((t) => t.type === 'image').length;
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: [...c.platforms, { platform, dailyVideos, dailyImages, checkLink: '' }] } : c)));
-    setTasks((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages }, videoOffset, imageOffset)]);
+    setActiveTasksUpdater((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages }, videoOffset, imageOffset, activeDate)]);
   }
   function updateCheckLink(channelId, platform, checkLink) {
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.map((p) => (p.platform === platform ? { ...p, checkLink } : p)) } : c)));
@@ -1695,23 +1771,33 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
   function removePlatform(channelId, platform) {
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.filter((p) => p.platform !== platform) } : c)));
     setTasks((prev) => prev.filter((t) => !(t.channelId === channelId && t.platform === platform)));
+    setFutureTasks((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((d) => { next[d] = prev[d].filter((t) => !(t.channelId === channelId && t.platform === platform)); });
+      return next;
+    });
   }
   function removeChannel(id) {
     setChannels((prev) => prev.filter((c) => c.id !== id));
     setTasks((prev) => prev.filter((t) => t.channelId !== id));
+    setFutureTasks((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((d) => { next[d] = prev[d].filter((t) => t.channelId !== id); });
+      return next;
+    });
   }
   function toggleTask(id) {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    setActiveTasksUpdater((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
   }
   function resetTask(task) {
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? emptyTask(t.id, t.channelId, t.platform, t.type, t.label) : t)));
+    setActiveTasksUpdater((prev) => prev.map((t) => (t.id === task.id ? emptyTask(t.id, t.channelId, t.platform, t.type, t.label, t.date) : t)));
   }
 
   async function genOutline(task) {
     setLoading(task.id, 'outline');
     const channel = channels.find((c) => c.id === task.channelId);
-    const avoidList = tasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
-    const avoidText = avoidList.length ? `\nเคยทำไปแล้ววันนี้ (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
+    const avoidList = activeTasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
+    const avoidText = avoidList.length ? `\nเคยทำไปแล้ว (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
     const styleLine = task.styleTemplate.trim() ? `\nสไตล์/แนวที่ต้องการ: ${task.styleTemplate.trim()}` : '';
     try {
       const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${avoidText}`);
@@ -1792,12 +1878,12 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
   }
   async function generateAll(channel) {
     setGeneratingAllId(channel.id);
-    const chTasks = tasksRef.current.filter((t) => t.channelId === channel.id);
+    const chTasks = activeTasksRef.current.filter((t) => t.channelId === channel.id);
     for (const t of chTasks) {
-      const latest = tasksRef.current.find((x) => x.id === t.id) || t;
+      const latest = activeTasksRef.current.find((x) => x.id === t.id) || t;
       const outline = await genOutline(latest);
       if (outline) {
-        const afterOutline = tasksRef.current.find((x) => x.id === t.id) || latest;
+        const afterOutline = activeTasksRef.current.find((x) => x.id === t.id) || latest;
         await genPrompts(afterOutline, outline);
         await genMeta(afterOutline, outline);
       }
@@ -1806,15 +1892,19 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
   }
   async function qcAll(channel) {
     setQcAllId(channel.id);
-    const chTasks = tasksRef.current.filter((t) => t.channelId === channel.id && t.link && t.link.trim() && !t.qc);
+    const chTasks = activeTasksRef.current.filter((t) => t.channelId === channel.id && t.link && t.link.trim() && !t.qc);
     for (const t of chTasks) { await runQC(t); }
     setQcAllId(null);
   }
-  function resetToday() {
-    setTasks((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label)));
+  function resetActiveDay() {
+    if (isFutureView) {
+      setFutureTasks((prev) => ({ ...prev, [viewDate]: buildDefaultTasksForChannels(channels, viewDate) }));
+    } else {
+      setTasks((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label, todayStr)));
+    }
   }
 
-  const totalDone = tasks.filter((t) => t.done).length;
+  const totalDone = activeTasks.filter((t) => t.done).length;
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8 anim-fade grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
@@ -1823,9 +1913,11 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
         <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
         <div className="mt-3"><ReminderBanner reminder={reminder} onDismiss={onDismissReminder} /></div>
 
-        <div className="flex items-center justify-between gap-3 mt-4 mb-6">
-          <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
-          <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
+        <div className="mt-4"><DayNavigator viewDate={viewDate} setViewDate={setViewDate} /></div>
+
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={activeTasks.length} color={C.blue} /></div>
+          <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
         </div>
 
         {showAdd ? (
@@ -1838,10 +1930,10 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
           <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น</p>
         ) : (
           channels.map((c) => (
-            <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
+            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
           ))
         )}
-        <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่</p>
+        <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่ · งานที่เตรียมล่วงหน้าจะขึ้นเป็นงานจริงอัตโนมัติเมื่อถึงวันนั้น</p>
       </div>
 
       <div className="space-y-4 lg:sticky lg:top-6">
@@ -1864,6 +1956,7 @@ export default function CompanyPortal() {
   const [tasks, setTasks] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [history, setHistory] = useState([]);
+  const [futureTasks, setFutureTasks] = useState({});
   const [lastActiveDate, setLastActiveDate] = useState(null);
   const [reminder, setReminder] = useState(null);
 
@@ -1891,21 +1984,25 @@ export default function CompanyPortal() {
   useEffect(() => {
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes] = await Promise.all([
           fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pruneExpired' }) }),
           fetch('/api/store?key=channels'),
           fetch('/api/store?key=tasks'),
           fetch('/api/store?key=history'),
           fetch('/api/store?key=lastActiveDate'),
+          fetch('/api/store?key=futureTasks'),
         ]);
         const accData = await accRes.json();
         const chData = await chRes.json();
         const taskData = await taskRes.json();
         const histData = await histRes.json();
         const dateData = await dateRes.json();
+        const futureData = await futureRes.json();
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
+        const today = todayDateStr();
+        let loadedFutureTasks = (futureData.value && typeof futureData.value === 'object') ? futureData.value : {};
         // ปรับข้อมูลเก่า (ถ้ามีช่อง/งานที่สร้างไว้ก่อนอัปเดตระบบหลายแพลตฟอร์มต่อช่อง / สีประจำช่อง) ให้เข้ารูปแบบใหม่
         const oldPlatformByChannelId = {};
         const loadedChannels = rawChannels.map((c, idx) => {
@@ -1916,13 +2013,13 @@ export default function CompanyPortal() {
           return { id: c.id, name: c.name, color, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0, checkLink: '' }] };
         });
         let loadedTasks = rawTasks.map((t) => {
-          if (t.platform) return t;
+          if (t.platform) return t.date ? t : { ...t, date: today };
           const plat = oldPlatformByChannelId[t.channelId] || 'other';
-          return { ...emptyTask(t.id, t.channelId, plat, t.type, t.label), done: !!t.done };
+          return { ...emptyTask(t.id, t.channelId, plat, t.type, t.label, today), done: !!t.done };
         });
+        loadedTasks = dedupeTasks(loadedTasks);
         let loadedHistory = Array.isArray(histData.value) ? histData.value : [];
         const loadedLastDate = dateData.value || null;
-        const today = todayDateStr();
 
         if (loadedLastDate && loadedLastDate !== today && loadedTasks.length > 0) {
           const missed = loadedTasks.filter((t) => !t.done).map((t) => {
@@ -1934,13 +2031,20 @@ export default function CompanyPortal() {
             loadedHistory = [...loadedHistory, entry];
           }
           if (missed.length > 0) setReminder(entry);
-          loadedTasks = loadedTasks.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label));
+          if (loadedFutureTasks[today]) {
+            loadedTasks = loadedFutureTasks[today];
+            const { [today]: _omit, ...restFuture } = loadedFutureTasks;
+            loadedFutureTasks = restFuture;
+          } else {
+            loadedTasks = loadedTasks.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label, today));
+          }
         }
 
         setAccounts(Array.isArray(accData.accounts) ? accData.accounts : []);
         setChannels(loadedChannels);
         setTasks(loadedTasks);
         setHistory(loadedHistory);
+        setFutureTasks(loadedFutureTasks);
         setLastActiveDate(today);
       } catch (err) {
         setLastActiveDate(todayDateStr());
@@ -1964,6 +2068,10 @@ export default function CompanyPortal() {
     if (!dataLoaded) return;
     fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'history', value: history }) }).catch(() => {});
   }, [history, dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded) return;
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'futureTasks', value: futureTasks }) }).catch(() => {});
+  }, [futureTasks, dataLoaded]);
   useEffect(() => {
     if (!dataLoaded || !lastActiveDate) return;
     fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'lastActiveDate', value: lastActiveDate }) }).catch(() => {});
@@ -2017,7 +2125,7 @@ export default function CompanyPortal() {
         <div className="flex">
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} />
           <div className="flex-1 min-w-0">
-            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} history={history} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} />}
+            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
