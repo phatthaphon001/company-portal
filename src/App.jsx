@@ -34,6 +34,8 @@ const PLATFORM_META = {
   other: { label: 'อื่นๆ', color: C.teal, icon: AtSign },
 };
 
+const CHANNEL_COLORS = [C.blue, C.violet, C.emerald, C.orange, C.pink, C.cyan, C.teal, C.red];
+
 const DEPARTMENTS = [
   {
     id: 'content', th: 'ฝ่ายคอนเทนต์', en: 'CONTENT OPS', clearance: 1,
@@ -203,7 +205,7 @@ function emptyTask(id, channelId, platform, type, label) {
     coverPrompt: '', coverPromptCopied: false, coverPromptMade: false,
     title: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
-    link: '', qc: null, lastError: '',
+    link: '', qc: null, lastError: '', referenceLink: '',
   };
 }
 
@@ -1229,16 +1231,20 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
           {expanded && (
             <div className="anim-fade">
               <div className="mt-2.5">
-                <label className="font-mono text-2xs block mb-1" style={{ color: C.blue }}>โครงเรื่อง / แนวคิดคอนเทนต์</label>
-                <textarea value={task.outline} onChange={(e) => onUpdate(task.id, { outline: e.target.value })} rows={2} placeholder="เช่น พาชมฟาร์มปลาหมึกยามเช้า..." className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-                <button onClick={() => onGenOutline(task)} disabled={busy} className="mt-1.5 font-mono text-2xs px-2.5 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue, opacity: busy ? 0.6 : 1 }}>
-                  {loadingAction === 'outline' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} ให้ AI คิดโครงเรื่องให้
-                </button>
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง</label>
+                <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={3} placeholder="วางสไตล์/สคริปต์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                <div className="mt-1.5">
+                  <input value={task.referenceLink} onChange={(e) => onUpdate(task.id, { referenceLink: e.target.value })} placeholder="+ แนบลิงก์คลิปตัวอย่าง (ถ้ามี ให้ AI ดูองค์ประกอบ)" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px dashed ${C.border}` }} />
+                  <p className="font-mono text-2xs mt-1 leading-relaxed" style={{ color: C.muted }}>* วางเป็นลิงก์เท่านั้น (อัปโหลดไฟล์วิดีโอโดยตรงยังทำไม่ได้)</p>
+                </div>
               </div>
 
               <div className="mt-2.5">
-                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง (ถ้ามี)</label>
-                <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={2} placeholder="วางสไตล์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.blue }}>โครงเรื่อง / แนวคิดคอนเทนต์</label>
+                <textarea value={task.outline} onChange={(e) => onUpdate(task.id, { outline: e.target.value })} rows={3} placeholder="เช่น พาชมฟาร์มปลาหมึกยามเช้า..." className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                <button onClick={() => onGenOutline(task)} disabled={busy} className="mt-1.5 font-mono text-2xs px-2.5 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue, opacity: busy ? 0.6 : 1 }}>
+                  {loadingAction === 'outline' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} ให้ AI คิดโครงเรื่องให้
+                </button>
               </div>
 
               {task.type === 'video' && (
@@ -1285,6 +1291,8 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
                 <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
               </div>
 
+              {task.link.trim() && <VideoPreviewBox link={task.link.trim()} />}
+
               {!task.qc && (
                 <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-2 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
                   {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
@@ -1295,6 +1303,22 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function VideoPreviewBox({ link }) {
+  const isDirectVideo = /\.(mp4|webm|mov|m3u8)(\?|$)/i.test(link);
+  return (
+    <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+      <div className="font-mono text-2xs mb-1.5" style={{ color: C.muted }}>ดูงานที่ส่ง</div>
+      {isDirectVideo ? (
+        <video src={link} controls className="w-full rounded-lg" style={{ maxHeight: 240, background: '#000' }} />
+      ) : (
+        <a href={link} target="_blank" rel="noopener noreferrer" className="font-mono text-2xs px-3 py-1.5 inline-flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff' }}>
+          <PlayCircle size={12} /> เปิดดูงานที่ลิงก์นี้
+        </a>
+      )}
     </div>
   );
 }
@@ -1362,7 +1386,7 @@ function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, o
   const done = tasks.filter((t) => t.done).length;
   const status = channelStatusLabel(done, tasks.length);
   const qcable = tasks.some((t) => t.link && t.link.trim() && !t.qc);
-  const accentColor = PLATFORM_META[(channel.platforms || [])[0]?.platform]?.color || C.blue;
+  const accentColor = channel.color || C.blue;
   return (
     <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${accentColor}66`, overflow: 'hidden' }}>
       <div style={{ height: 3, background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
@@ -1418,7 +1442,81 @@ function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, o
   );
 }
 
-function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismissReminder }) {
+function TodayStatusCard({ tasks, history }) {
+  const todayStr = todayDateStr();
+  const doneToday = tasks.filter((t) => t.done).length;
+  const totalToday = tasks.length;
+  const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
+  const todayEntry = { date: todayStr, totalTasks: totalToday, doneTasks: doneToday };
+  const trend = [...history, todayEntry].slice(-7).map((h) => ({ date: h.date.slice(5), pct: h.totalTasks ? Math.round((h.doneTasks / h.totalTasks) * 100) : 0 }));
+  return (
+    <div className="p-4 rounded-2xl flex items-center gap-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+      <div className="shrink-0 text-center">
+        <div className="font-display text-2xl font-bold" style={{ color: C.emerald }}>{pct}%</div>
+        <div className="font-mono text-2xs" style={{ color: C.muted }}>สถานะวันนี้</div>
+      </div>
+      <div className="flex-1 min-w-0" style={{ height: 50 }}>
+        {trend.length > 1 ? (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={trend}>
+              <Bar dataKey="pct" fill={C.emerald} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลย้อนหลัง</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
+  const todayStr = todayDateStr();
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const historyByDate = {};
+  history.forEach((h) => { historyByDate[h.date] = h; });
+  const todayEntry = { totalTasks: tasks.length, doneTasks: tasks.filter((t) => t.done).length };
+
+  function entryColor(entry) {
+    if (!entry || entry.totalTasks === 0) return C.border;
+    const pct = entry.doneTasks / entry.totalTasks;
+    if (pct >= 1) return C.emerald;
+    if (pct > 0) return C.orange;
+    return C.red;
+  }
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  return (
+    <button onClick={onOpenCalendar} className="p-4 rounded-2xl text-left" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{THAI_MONTHS[month]} {year + 543}</span>
+        <span className="font-mono text-2xs" style={{ color: C.muted }}>ดูปฏิทินเต็ม →</span>
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d, i) => {
+          if (!d) return <div key={i} />;
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const isToday = dateStr === todayStr;
+          const entry = isToday ? todayEntry : historyByDate[dateStr];
+          const hasData = isToday || !!historyByDate[dateStr];
+          const color = isToday ? C.blue : entryColor(entry);
+          return (
+            <div key={i} className="aspect-square rounded flex items-center justify-center font-mono text-2xs" style={{ border: `1px solid ${hasData ? color : C.border}`, color: hasData ? C.text : C.muted }}>{d}</div>
+          );
+        })}
+      </div>
+    </button>
+  );
+}
+
+function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, onDismissReminder, onOpenCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
@@ -1431,7 +1529,8 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
   function updateTaskField(id, patch) { setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))); }
 
   function addChannel(name, platform, dailyVideos, dailyImages) {
-    const channel = { id: Date.now().toString(), name, platforms: [{ platform, dailyVideos, dailyImages }] };
+    const color = CHANNEL_COLORS[channels.length % CHANNEL_COLORS.length];
+    const channel = { id: Date.now().toString(), name, color, platforms: [{ platform, dailyVideos, dailyImages }] };
     setChannels((prev) => [...prev, channel]);
     setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0], 0, 0)]);
   }
@@ -1564,11 +1663,17 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
   const totalDone = tasks.filter((t) => t.done).length;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{todayLabel()}</span></div>
       <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
       <div className="mt-3"><ReminderBanner reminder={reminder} onDismiss={onDismissReminder} /></div>
-      <div className="flex items-center justify-between gap-3 mt-3 mb-6">
+
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <TodayStatusCard tasks={tasks} history={history} />
+        <MiniCalendarCard history={history} tasks={tasks} onOpenCalendar={onOpenCalendar} />
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mt-4 mb-6">
         <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
         <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
       </div>
@@ -1643,13 +1748,14 @@ export default function CompanyPortal() {
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
-        // ปรับข้อมูลเก่า (ถ้ามีช่อง/งานที่สร้างไว้ก่อนอัปเดตระบบหลายแพลตฟอร์มต่อช่อง) ให้เข้ารูปแบบใหม่
+        // ปรับข้อมูลเก่า (ถ้ามีช่อง/งานที่สร้างไว้ก่อนอัปเดตระบบหลายแพลตฟอร์มต่อช่อง / สีประจำช่อง) ให้เข้ารูปแบบใหม่
         const oldPlatformByChannelId = {};
-        const loadedChannels = rawChannels.map((c) => {
-          if (Array.isArray(c.platforms)) return c;
+        const loadedChannels = rawChannels.map((c, idx) => {
+          const color = c.color || CHANNEL_COLORS[idx % CHANNEL_COLORS.length];
+          if (Array.isArray(c.platforms)) return { ...c, color };
           const plat = c.platform || 'other';
           oldPlatformByChannelId[c.id] = plat;
-          return { id: c.id, name: c.name, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0 }] };
+          return { id: c.id, name: c.name, color, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0 }] };
         });
         let loadedTasks = rawTasks.map((t) => {
           if (t.platform) return t;
@@ -1753,7 +1859,7 @@ export default function CompanyPortal() {
         <div className="flex">
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} />
           <div className="flex-1 min-w-0">
-            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} reminder={reminder} onDismissReminder={() => setReminder(null)} />}
+            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} history={history} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
