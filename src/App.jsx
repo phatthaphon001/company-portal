@@ -135,7 +135,7 @@ const PLATFORMS = [
   { name: 'X (Twitter)', icon: AtSign, note: 'สำหรับโพสต์และติดตามการมีส่วนร่วม' },
 ];
 
-const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
+const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ถ้าผู้ใช้ระบุสไตล์หรือแนวที่ต้องการมา ต้องยึดตามนั้นเป็นหลักเสมอ (เช่น ถ้าขอการ์ตูนเด็ก โครงเรื่องต้องเป็นการ์ตูนเด็ก ไม่ใช่แค่พูดถึงหัวข้อช่องเฉยๆ) ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
 const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างวิดีโอ และ prompt สำหรับ AI สร้างภาพหน้าปก เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุความยาว สไตล์ และรายละเอียดฉากให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "..."}';
 const PROMPTS_SYS_IMAGE = 'คุณคือฝ่ายคิดคอนเทนต์โพสต์รูปภาพ จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างภาพโพสต์ เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพเข้าใจง่าย ระบุสไตล์และรายละเอียดให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"imagePrompt": "..."}';
 const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ (ภาษาไทย) คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"title":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
@@ -1462,8 +1462,9 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
     const channel = channels.find((c) => c.id === task.channelId);
     const avoidList = tasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
     const avoidText = avoidList.length ? `\nเคยทำไปแล้ววันนี้ (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
+    const styleLine = task.styleTemplate.trim() ? `\nสไตล์/แนวที่ต้องการ: ${task.styleTemplate.trim()}` : '';
     try {
-      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${avoidText}`);
+      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${avoidText}`);
       const outline = text.trim();
       updateTaskField(task.id, { outline });
       return outline;
