@@ -203,7 +203,7 @@ function emptyTask(id, channelId, platform, type, label) {
     coverPrompt: '', coverPromptCopied: false, coverPromptMade: false,
     title: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
-    link: '', qc: null,
+    link: '', qc: null, lastError: '',
   };
 }
 
@@ -1255,6 +1255,7 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
               <button onClick={() => onGenPrompts(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
                 {loadingAction === 'prompts' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้าง Prompt {task.type === 'video' ? 'วิดีโอ + หน้าปก' : 'รูปภาพ'}
               </button>
+              {task.lastError && <p className="font-mono text-2xs mt-1.5" style={{ color: C.red }}>{task.lastError}</p>}
 
               <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
               <PromptBox label="Prompt หน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
@@ -1467,7 +1468,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
       updateTaskField(task.id, { outline });
       return outline;
     } catch (e) {
-      updateTaskField(task.id, { outline: 'เรียก AI ไม่สำเร็จ ลองใหม่อีกครั้ง' });
+      updateTaskField(task.id, { outline: `เรียก AI ไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}` });
       return null;
     } finally {
       clearLoading(task.id);
@@ -1477,6 +1478,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
     const outline = outlineOverride || task.outline;
     if (!outline || !outline.trim()) return;
     setLoading(task.id, 'prompts');
+    updateTaskField(task.id, { lastError: '' });
     const channel = channels.find((c) => c.id === task.channelId);
     const sys = task.type === 'video' ? PROMPTS_SYS_VIDEO : PROMPTS_SYS_IMAGE;
     const durationLine = task.type === 'video' ? `\nความยาว: ${task.durationSec} วินาที` : '';
@@ -1493,7 +1495,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
         imagePromptCopied: false, imagePromptMade: false,
       });
     } catch (e) {
-      // ปล่อยผ่าน ให้ผู้ใช้กดลองใหม่เองได้
+      updateTaskField(task.id, { lastError: `สร้าง Prompt ไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}` });
     } finally {
       clearLoading(task.id);
     }
@@ -1502,6 +1504,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
     const outline = outlineOverride || task.outline;
     if (!outline || !outline.trim()) return;
     setLoading(task.id, 'meta');
+    updateTaskField(task.id, { lastError: '' });
     const channel = channels.find((c) => c.id === task.channelId);
     try {
       const text = await callClaude(META_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}`);
@@ -1511,6 +1514,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
         hashtagsTh: json.hashtagsTh || '', hashtagsEn: json.hashtagsEn || '', hashtagsZh: json.hashtagsZh || '',
       });
     } catch (e) {
+      updateTaskField(task.id, { lastError: `สร้างชื่อ/คำบรรยายไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}` });
     } finally {
       clearLoading(task.id);
     }
@@ -1527,7 +1531,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
       const passed = text.trim().startsWith('ผ่าน');
       updateTaskField(task.id, { qc: { passed, text } });
     } catch (e) {
-      updateTaskField(task.id, { qc: { passed: false, text: 'เรียก AI ตรวจสอบไม่สำเร็จ ลองใหม่อีกครั้ง' } });
+      updateTaskField(task.id, { qc: { passed: false, text: `เรียก AI ตรวจสอบไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}` } });
     } finally {
       clearLoading(task.id);
     }
