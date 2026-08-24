@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Lock, Unlock, FileText, Radar, Megaphone, Landmark, UserCog, TrendingUp,
   LogOut, AlertTriangle, KeyRound, ScrollText, ClipboardCheck,
   Bot, ShoppingBag, PlayCircle, AtSign, Music2, Share2, ShieldAlert, Sparkles,
   CheckSquare, Square, Plus, Trash2, Loader2, RefreshCw, ChevronDown, ChevronUp,
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
-  CheckCircle2, XCircle, Users, Camera,
+  CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -135,8 +135,24 @@ const PLATFORMS = [
   { name: 'X (Twitter)', icon: AtSign, note: 'สำหรับโพสต์และติดตามการมีส่วนร่วม' },
 ];
 
-const VIDEO_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ในองค์กรผลิตคลิปวิดีโอสั้น เตรียมข้อมูลสำหรับโพสต์คลิปวิดีโอวันนี้ ตอบเป็นภาษาไทยเท่านั้น จัดเป็นหัวข้อตามนี้เป๊ะๆ ห้ามมีข้อความอื่นนอกเหนือจากนี้ ห้ามทักทาย:\nชื่อคลิป: ...\nคำบรรยาย: ... (ใส่อิโมจิและแฮชแท็กที่เกี่ยวข้อง)\nพรอมต์วิดีโอ: ...\nพรอมต์หน้าปกคลิป: ...';
-const IMAGE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ เตรียมข้อมูลสำหรับโพสต์รูปภาพวันนี้ ตอบเป็นภาษาไทยเท่านั้น จัดเป็นหัวข้อตามนี้เป๊ะๆ ห้ามมีข้อความอื่นนอกเหนือจากนี้ ห้ามทักทาย:\nชื่อโพสต์: ...\nคำบรรยาย: ... (ใส่อิโมจิและแฮชแท็กที่เกี่ยวข้อง)\nพรอมต์รูปภาพ: ...';
+const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
+const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างวิดีโอ และ prompt สำหรับ AI สร้างภาพหน้าปก เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุความยาว สไตล์ และรายละเอียดฉากให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "..."}';
+const PROMPTS_SYS_IMAGE = 'คุณคือฝ่ายคิดคอนเทนต์โพสต์รูปภาพ จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างภาพโพสต์ เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพเข้าใจง่าย ระบุสไตล์และรายละเอียดให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"imagePrompt": "..."}';
+const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ (ภาษาไทย) คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"title":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
+const QC_NOTE = 'หมายเหตุ: ระบบไม่สามารถเปิดดูวิดีโอ/รูปภาพจริงจากลิงก์ได้ ตรวจได้แค่จากข้อมูลที่กรอกในระบบเท่านั้น';
+const QC_SYS_VIDEO = `คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์คลิปวิดีโอ จากโครงเรื่อง พรอมต์วิดีโอ พรอมต์หน้าปก ชื่อคลิป และคำบรรยายที่ให้มา ตรวจว่าเหมาะสม ชัดเจน สอดคล้องกัน ไม่เข้าข่ายผิดกฎทั่วไปของแพลตฟอร์มโซเชียล (เนื้อหารุนแรง ล่อแหลม ผิดกฎหมาย ฯลฯ) ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด ${QC_NOTE}`;
+const QC_SYS_IMAGE = `คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์รูปภาพ จากโครงเรื่อง พรอมต์รูปภาพ ชื่อโพสต์ และคำบรรยายที่ให้มา ตรวจว่าเหมาะสม ชัดเจน สอดคล้องกัน ไม่เข้าข่ายผิดกฎทั่วไปของแพลตฟอร์มโซเชียล (เนื้อหารุนแรง ล่อแหลม ผิดกฎหมาย ฯลฯ) ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด ${QC_NOTE}`;
+const DURATION_OPTIONS = [8, 10, 15, 20, 30, 40, 50, 60, 90, 120];
+
+function parseJsonLoose(text) {
+  try {
+    let t = (text || '').trim();
+    t = t.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '');
+    return JSON.parse(t);
+  } catch (e) {
+    return null;
+  }
+}
 
 const THAI_DAYS = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -178,23 +194,25 @@ async function callClaude(system, content) {
   return data.text || '(ไม่มีคำตอบ)';
 }
 
-function buildTasksForChannel(channel) {
-  const tasks = [];
-  for (let i = 1; i <= channel.dailyVideos; i++) tasks.push({ id: `${channel.id}-video-${i}`, channelId: channel.id, type: 'video', label: `วิดีโอ ${i}`, done: false, content: null, qc: null });
-  for (let i = 1; i <= channel.dailyImages; i++) tasks.push({ id: `${channel.id}-image-${i}`, channelId: channel.id, type: 'image', label: `รูปภาพ ${i}`, done: false, content: null, qc: null });
-  return tasks;
+function emptyTask(id, channelId, platform, type, label) {
+  return {
+    id, channelId, platform, type, label, done: false,
+    outline: '', durationSec: 15, styleTemplate: '',
+    imagePrompt: '', imagePromptCopied: false, imagePromptMade: false,
+    videoPrompt: '', videoPromptCopied: false, videoPromptMade: false,
+    coverPrompt: '', coverPromptCopied: false, coverPromptMade: false,
+    title: '', captionTh: '', captionEn: '', captionZh: '',
+    hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
+    link: '', qc: null,
+  };
 }
 
-function parseContentBlock(text, type) {
-  const get = (label) => {
-    const re = new RegExp(label + '\\s*[:：]\\s*([\\s\\S]*?)(?=\\n[ก-๙A-Za-z]+\\s*[:：]|$)');
-    const m = text.match(re);
-    return m ? m[1].trim() : '';
-  };
-  if (type === 'video') {
-    return { title: get('ชื่อคลิป') || get('ชื่อ'), caption: get('คำบรรยาย'), videoPrompt: get('พรอมต์วิดีโอ'), coverPrompt: get('พรอมต์หน้าปกคลิป') || get('พรอมต์หน้าปก'), raw: text };
-  }
-  return { title: get('ชื่อโพสต์') || get('ชื่อ'), caption: get('คำบรรยาย'), imagePrompt: get('พรอมต์รูปภาพ'), raw: text };
+function buildTasksForPlatform(channelId, platformEntry) {
+  const tasks = [];
+  const p = platformEntry.platform;
+  for (let i = 1; i <= platformEntry.dailyVideos; i++) tasks.push(emptyTask(`${channelId}-${p}-video-${i}`, channelId, p, 'video', `วิดีโอ ${i}`));
+  for (let i = 1; i <= platformEntry.dailyImages; i++) tasks.push(emptyTask(`${channelId}-${p}-image-${i}`, channelId, p, 'image', 'โพสต์'));
+  return tasks;
 }
 
 function GradientBlobs() {
@@ -237,47 +255,76 @@ function Wordmark({ fontSize = 28 }) {
   );
 }
 
-function NavTab({ label, active, onClick }) {
+function CircularProgress({ pct, size = 40, strokeWidth = 3, color }) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (Math.min(100, Math.max(0, pct)) / 100) * circumference;
   return (
-    <button onClick={onClick} className="font-mono text-2xs tracking-widest uppercase px-2 py-1" style={{ color: active ? C.text : C.muted, borderBottom: active ? `2px solid ${C.blue}` : '2px solid transparent' }}>
-      {label}
+    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+      <circle cx={size / 2} cy={size / 2} r={radius} stroke={C.border} strokeWidth={strokeWidth} fill="none" />
+      <circle cx={size / 2} cy={size / 2} r={radius} stroke={color} strokeWidth={strokeWidth} fill="none" strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
+    </svg>
+  );
+}
+
+function SidebarNavItem({ Icon, label, active, onClick }) {
+  return (
+    <button onClick={onClick} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-body text-sm justify-center sm:justify-start" style={{ background: active ? `${C.blue}18` : 'transparent', color: active ? C.blue : C.muted }}>
+      <Icon size={17} className="shrink-0" />
+      <span className="hidden sm:inline truncate">{label}</span>
     </button>
   );
 }
 
-function Header({ user, stage, setStage, logout, accounts }) {
-  const cl = CLEARANCE[user.clearance];
+function Sidebar({ user, stage, setStage, logout, accounts, tasks }) {
   const account = (accounts || []).find((a) => a.email === user.email);
+  const totalToday = tasks.length;
+  const doneToday = tasks.filter((t) => t.done).length;
+  const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
+
+  const navItems = [
+    { key: 'daily', label: 'งานประจำวัน', Icon: ClipboardCheck },
+    { key: 'calendar', label: 'ปฏิทิน', Icon: Calendar },
+    { key: 'directory', label: 'Directory', Icon: FileText },
+    { key: 'platforms', label: 'แพลตฟอร์ม', Icon: Share2 },
+    ...(user.clearance === 3 ? [{ key: 'team', label: 'ทีมงาน', Icon: Users }] : []),
+    { key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp },
+    { key: 'security', label: 'Protocol', Icon: ScrollText },
+    { key: 'settings', label: 'Setting', Icon: SettingsIcon },
+  ];
+
   return (
-    <div className="sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.bgDeep, borderBottom: `1px solid ${C.border}` }}>
-      <div className="flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Wordmark fontSize={15} />
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          <NavTab label="งานประจำวัน" active={stage === 'daily'} onClick={() => setStage('daily')} />
-          <NavTab label="Directory" active={stage === 'directory' || stage === 'department'} onClick={() => setStage('directory')} />
-          <NavTab label="ปฏิทิน" active={stage === 'calendar'} onClick={() => setStage('calendar')} />
-          <NavTab label="แพลตฟอร์ม" active={stage === 'platforms'} onClick={() => setStage('platforms')} />
-          {user.clearance === 3 && <NavTab label="ทีมงาน" active={stage === 'team'} onClick={() => setStage('team')} />}
-          <NavTab label="Protocol" active={stage === 'security'} onClick={() => setStage('security')} />
-        </div>
+    <div className="w-16 sm:w-56 shrink-0 flex flex-col sticky top-0" style={{ height: '100vh', background: C.bgDeep, borderRight: `1px solid ${C.border}` }}>
+      <div className="p-4 flex items-center justify-center sm:justify-start">
+        <Wordmark fontSize={15} />
       </div>
-      <div className="flex items-center gap-3">
-        <div className="text-right hidden sm:block">
-          <div className="font-body text-sm" style={{ color: C.text }}>{user.name}</div>
-          <div className="font-mono text-2xs tracking-wider" style={{ color: cl.color }}>{cl.code}</div>
-        </div>
-        <button onClick={() => setStage('profile')} aria-label="โปรไฟล์" className="shrink-0">
-          {account?.avatar ? (
-            <img src={account.avatar} alt="avatar" className="w-8 h-8 rounded-full object-cover" style={{ border: stage === 'profile' ? `2px solid ${C.blue}` : '2px solid transparent' }} />
-          ) : (
-            <div className="w-8 h-8 rounded-full flex items-center justify-center font-display text-xs font-bold" style={{ background: `linear-gradient(135deg, ${account?.avatarColor || cl.color}, ${account?.avatarColor || cl.color}88)`, color: '#0A0A0F', border: stage === 'profile' ? `2px solid ${C.blue}` : '2px solid transparent' }}>
-              {user.name.charAt(0).toUpperCase()}
+      <div className="flex-1 overflow-y-auto px-2 space-y-1">
+        {navItems.map((n) => (
+          <SidebarNavItem key={n.key} Icon={n.Icon} label={n.label} active={stage === n.key || (n.key === 'directory' && stage === 'department')} onClick={() => setStage(n.key)} />
+        ))}
+      </div>
+      <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <button onClick={() => setStage('profile')} className="w-full flex items-center gap-2.5 mb-1.5 justify-center sm:justify-start">
+          <div className="relative shrink-0" style={{ width: 40, height: 40 }}>
+            <CircularProgress pct={pct} color={C.emerald} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              {account?.avatar ? (
+                <img src={account.avatar} alt="avatar" className="w-7 h-7 rounded-full object-cover" />
+              ) : (
+                <div className="w-7 h-7 rounded-full flex items-center justify-center font-display text-2xs font-bold" style={{ background: `linear-gradient(135deg, ${account?.avatarColor || C.blue}, ${account?.avatarColor || C.blue}88)`, color: '#0A0A0F' }}>
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+              )}
             </div>
-          )}
+          </div>
+          <div className="hidden sm:block text-left min-w-0">
+            <div className="font-body text-xs truncate" style={{ color: C.text }}>{user.name}</div>
+            <div className="font-mono text-2xs" style={{ color: C.emerald }}>{pct}% วันนี้</div>
+          </div>
         </button>
-        <button onClick={logout} className="p-2" style={{ color: C.muted }} aria-label="ออกจากระบบ"><LogOut size={16} /></button>
+        <button onClick={logout} className="w-full flex items-center gap-2.5 px-1 py-1.5 justify-center sm:justify-start" style={{ color: C.muted }}>
+          <LogOut size={15} className="shrink-0" /> <span className="hidden sm:inline font-mono text-2xs">ออกจากระบบ</span>
+        </button>
       </div>
     </div>
   );
@@ -334,6 +381,12 @@ function Terminal({ accounts, onSignup, onLogin }) {
       const loginData = await loginRes.json();
       if (!loginRes.ok) { setOtpLoading(false); setLoginError(loginData.error || 'เข้าสู่ระบบไม่สำเร็จ'); return; }
       const acc = loginData.account;
+
+      if (!loginData.requireOtp) {
+        setOtpLoading(false);
+        onLogin(acc);
+        return;
+      }
 
       const res = await fetch('/api/send-code', {
         method: 'POST',
@@ -495,7 +548,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
           <button type="button" onClick={() => setLoginStep('credentials')} className="w-full font-mono text-2xs tracking-widest" style={{ color: C.muted }}>← กลับ</button>
         </form>
       )}
-      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* รหัสยืนยันส่งจริงทางอีเมลแล้ว — ส่วนบัญชีผู้ใช้ยังเก็บไว้ชั่วคราวในเบราว์เซอร์ ยังไม่มีฐานข้อมูลถาวร</p></div>
+      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* เข้าสู่ระบบ 6 ครั้งแรกไม่ต้องยืนยันอีเมล ตั้งแต่ครั้งที่ 7 เป็นต้นไปต้องยืนยันรหัสทางอีเมลทุกครั้ง</p></div>
     </AuthShell>
   );
 }
@@ -590,12 +643,69 @@ function PlatformsPanel() {
   );
 }
 
-function SecurityProtocol() {
+function SecurityProtocol({ user }) {
+  const [security, setSecurity] = useState({ forceOtpAlways: false });
+  const [loaded, setLoaded] = useState(false);
+  const [savingToggle, setSavingToggle] = useState(false);
+  const [resetMsg, setResetMsg] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => {
+    if (user.clearance !== 3) return;
+    fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getSecurity' }) })
+      .then((r) => r.json())
+      .then((d) => { if (d.security) setSecurity(d.security); })
+      .catch(() => {})
+      .finally(() => setLoaded(true));
+  }, [user.clearance]);
+
+  async function toggleForceOtp() {
+    setSavingToggle(true);
+    const next = { forceOtpAlways: !security.forceOtpAlways };
+    try {
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateSecurity', ...next }) });
+      const data = await res.json();
+      if (res.ok) setSecurity(data.security);
+    } catch (e) {}
+    setSavingToggle(false);
+  }
+
+  async function resetSessions() {
+    setResetting(true);
+    setResetMsg('');
+    try {
+      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resetLoginCounts' }) });
+      if (res.ok) setResetMsg('ตั้งค่าแล้ว — ทุกบัญชีต้องยืนยันอีเมลใหม่ตั้งแต่การล็อกอินครั้งถัดไป');
+    } catch (e) {}
+    setResetting(false);
+    setTimeout(() => setResetMsg(''), 4000);
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><ScrollText size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SECURITY PROTOCOL</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>มาตรการความปลอดภัยสำหรับระบบจริง</h2>
-      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>หน้านี้เป็นข้อมูลอ้างอิง — ระบบล็อกอินหลักเชื่อมจริงแล้ว แต่บางส่วนยังเป็นต้นแบบ</p>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ระบบล็อกอิน ฐานข้อมูล และรหัสผ่าน เชื่อมต่อทำงานจริงแล้วทั้งหมด</p>
+
+      {user.clearance === 3 && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ควบคุมโดยเจ้าของระบบ</div>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <div className="font-body text-sm" style={{ color: C.text }}>บังคับยืนยันอีเมลทุกครั้ง</div>
+              <p className="font-body text-xs" style={{ color: C.muted }}>ปกติ 6 ครั้งแรกไม่ต้องยืนยัน เปิดตัวนี้เพื่อบังคับยืนยันทุกครั้งแทน</p>
+            </div>
+            <button onClick={toggleForceOtp} disabled={savingToggle || !loaded} className="shrink-0 w-11 h-6 rounded-full relative" style={{ background: security.forceOtpAlways ? C.emerald : C.border }}>
+              <span className="absolute top-0.5 w-5 h-5 rounded-full" style={{ left: security.forceOtpAlways ? 22 : 2, background: '#fff', transition: 'left 0.2s ease' }} />
+            </button>
+          </div>
+          <button onClick={resetSessions} disabled={resetting} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.red}`, color: C.red, opacity: resetting ? 0.6 : 1 }}>
+            {resetting ? <Loader2 size={11} className="animate-spin" /> : <ShieldAlert size={11} />} บังคับยืนยันอีเมลรอบถัดไปทุกบัญชี
+          </button>
+          {resetMsg && <p className="font-mono text-2xs mt-2" style={{ color: C.emerald }}>{resetMsg}</p>}
+        </div>
+      )}
+
       <div className="space-y-3">
         {SECURITY_PROTOCOL.map((item, i) => (
           <div key={item.title} className="relative p-4 pl-16 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -890,6 +1000,139 @@ function CalendarPage({ history, tasks, channels }) {
   );
 }
 
+const ANALYSIS_SYS = 'คุณคือฝ่ายวิเคราะห์ข้อมูลในองค์กรผลิตคอนเทนต์ จากข้อมูลสถิติการทำงานที่ให้มา (อัตราการทำงานเสร็จรายวัน แยกตามช่อง จำนวนงานที่ผ่าน/ไม่ผ่าน QC) ให้วิเคราะห์แนวโน้มสั้นๆ และให้คำแนะนำแนวทางการทำงานที่เป็นประโยชน์ 3-5 ข้อ ตอบเป็นภาษาไทย กระชับ ไม่เกิน 10 บรรทัด หมายเหตุ: ข้อมูลที่มีคือสถิติภายในระบบเท่านั้น ไม่มีข้อมูลยอดวิว/ยอดไลก์จริงจากแพลตฟอร์ม ห้ามอ้างว่ามีข้อมูลนั้น';
+
+function AnalyticsPage({ history, tasks, channels }) {
+  const [analysis, setAnalysis] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const todayStr = todayDateStr();
+  const todayEntry = { date: todayStr, totalTasks: tasks.length, doneTasks: tasks.filter((t) => t.done).length };
+  const trend = [...history, todayEntry].slice(-14).map((h) => ({ date: h.date.slice(5), pct: h.totalTasks ? Math.round((h.doneTasks / h.totalTasks) * 100) : 0 }));
+  const byChannel = channels.map((c) => {
+    const chTasks = tasks.filter((t) => t.channelId === c.id);
+    return { name: c.name, platform: c.platforms.map((p) => PLATFORM_META[p.platform].label).join(', '), done: chTasks.filter((t) => t.done).length, total: chTasks.length };
+  });
+  const qcPassed = tasks.filter((t) => t.qc && t.qc.passed).length;
+  const qcFailed = tasks.filter((t) => t.qc && !t.qc.passed).length;
+
+  async function runAnalysis() {
+    setLoading(true);
+    try {
+      const trendText = trend.map((t) => `${t.date}: ${t.pct}%`).join(', ');
+      const channelText = byChannel.map((c) => `${c.name} (${c.platform}): ${c.done}/${c.total}`).join(', ');
+      const text = await callClaude(ANALYSIS_SYS, `แนวโน้มอัตราทำงานเสร็จรายวัน: ${trendText || 'ยังไม่มีข้อมูล'}\nวันนี้แยกตามช่อง: ${channelText || 'ยังไม่มีช่อง'}\nQC วันนี้: ผ่าน ${qcPassed} ไม่ผ่าน ${qcFailed}`);
+      setAnalysis(text);
+    } catch (e) {
+      setAnalysis('เรียก AI วิเคราะห์ไม่สำเร็จ ลองใหม่อีกครั้ง');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><TrendingUp size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ANALYTICS</span></div>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การวิเคราะห์</h2>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>วิเคราะห์จากสถิติการทำงานภายในระบบ (ยังไม่เชื่อมข้อมูลยอดวิว/ยอดไลก์จริงจากแพลตฟอร์ม)</p>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มอัตราทำงานเสร็จ (14 วันล่าสุด)</div>
+        {trend.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={trend}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 10 }} domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}` }} />
+              <Bar dataKey="pct" fill={C.blue} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>วันนี้แยกตามช่อง</div>
+        {byChannel.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีช่อง</p> : (
+          <div className="space-y-2">
+            {byChannel.map((c) => (
+              <div key={c.name} className="flex items-center justify-between">
+                <span className="font-body text-xs" style={{ color: C.text }}>{c.name} <span style={{ color: C.muted }}>({c.platform})</span></span>
+                <span className="font-mono text-2xs" style={{ color: C.muted }}>{c.done}/{c.total}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 pt-3 flex items-center gap-4" style={{ borderTop: `1px solid ${C.border}` }}>
+          <span className="font-mono text-2xs" style={{ color: C.emerald }}>QC ผ่าน: {qcPassed}</span>
+          <span className="font-mono text-2xs" style={{ color: C.red }}>QC ไม่ผ่าน: {qcFailed}</span>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>สรุปแนวทางการทำงานจาก AI</div>
+          <button onClick={runAnalysis} disabled={loading} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg shrink-0" style={{ background: BRAND, color: '#fff', opacity: loading ? 0.6 : 1 }}>
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์
+          </button>
+        </div>
+        {analysis ? <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{analysis}</p> : <p className="font-body text-xs" style={{ color: C.muted }}>กด "วิเคราะห์" เพื่อให้ AI สรุปแนวโน้มและคำแนะนำ</p>}
+      </div>
+    </div>
+  );
+}
+
+const SHORTCUTS = [
+  { keys: '1', action: 'ไปหน้างานประจำวัน' },
+  { keys: '2', action: 'ไปหน้าปฏิทิน' },
+  { keys: '3', action: 'ไปหน้า Directory' },
+  { keys: '4', action: 'ไปหน้าแพลตฟอร์ม' },
+  { keys: '5', action: 'ไปหน้าการวิเคราะห์' },
+  { keys: '6', action: 'ไปหน้า Protocol' },
+  { keys: '?', action: 'ไปหน้า Setting' },
+];
+
+function SettingsPage({ user, accounts }) {
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><SettingsIcon size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SETTINGS</span></div>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าที่ใช้งานได้จริงตอนนี้ — ส่วนธีมสี/ฟอนต์/ย้ายตำแหน่งปุ่มเองยังอยู่ระหว่างพัฒนา เพราะต้องปรับโครงสร้างสีทั้งระบบก่อนถึงจะปลอดภัยและไม่พังส่วนอื่น</p>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-3"><KeyRound size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>คีย์ลัด</span></div>
+        <div className="space-y-1.5">
+          {SHORTCUTS.map((s) => (
+            <div key={s.keys} className="flex items-center gap-3">
+              <span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0" style={{ border: `1px solid ${C.border}`, color: C.text }}>{s.keys}</span>
+              <span className="font-body text-xs" style={{ color: C.muted }}>{s.action}</span>
+            </div>
+          ))}
+        </div>
+        <p className="font-mono text-2xs mt-3" style={{ color: C.muted }}>* กดได้เมื่อไม่ได้พิมพ์อยู่ในช่องกรอกข้อความ</p>
+      </div>
+
+      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-3"><Users size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ประวัติการเข้าสู่ระบบ</span></div>
+        {accounts.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
+          <div className="space-y-2">
+            {[...accounts].sort((a, b) => (b.lastLogin || 0) - (a.lastLogin || 0)).map((a) => (
+              <div key={a.email} className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="font-body text-xs truncate block" style={{ color: C.text }}>{a.name} {user.email === a.email && <span style={{ color: C.blue }}>(คุณ)</span>}</span>
+                  <span className="font-mono text-2xs truncate block" style={{ color: C.muted }}>@{a.username}</span>
+                </div>
+                <span className="font-mono text-2xs shrink-0" style={{ color: C.muted }}>{daysAgoLabel(a.lastLogin)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="font-mono text-2xs mt-3 leading-relaxed" style={{ color: C.muted }}>* แสดงเวลาล็อกอินล่าสุดต่อบัญชี ระบบยังไม่ได้เก็บแยกเป็นรายอุปกรณ์/รายครั้ง</p>
+      </div>
+    </div>
+  );
+}
+
 function ProgressBar({ done, total, color }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   return (
@@ -903,7 +1146,7 @@ function ProgressBar({ done, total, color }) {
 function VerdictBox({ verdict }) {
   if (!verdict) return null;
   return (
-    <div className="p-2 mt-1.5 rounded-xl" style={{ border: `1px solid ${verdict.passed ? C.emerald : C.red}`, background: verdict.passed ? `${C.emerald}11` : `${C.red}11` }}>
+    <div className="p-2 mt-2 rounded-xl" style={{ border: `1px solid ${verdict.passed ? C.emerald : C.red}`, background: verdict.passed ? `${C.emerald}11` : `${C.red}11` }}>
       <div className="flex items-center gap-2 mb-1">
         {verdict.passed ? <CheckCircle2 size={13} style={{ color: C.emerald }} /> : <XCircle size={13} style={{ color: C.red }} />}
         <span className="font-mono text-2xs" style={{ color: verdict.passed ? C.emerald : C.red }}>{verdict.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข'}</span>
@@ -913,46 +1156,121 @@ function VerdictBox({ verdict }) {
   );
 }
 
-function DailyTaskCard({ task, onToggle, onGenerate, onQC, loading, qcLoading }) {
+function PromptBox({ label, color, value, copied, made, onCopiedChange, onMadeChange }) {
+  const [copyMsg, setCopyMsg] = useState('');
+  if (!value) return null;
+  function copyText() {
+    navigator.clipboard.writeText(value).then(() => {
+      onCopiedChange(true);
+      setCopyMsg('คัดลอกแล้ว ✓');
+      setTimeout(() => setCopyMsg(''), 1500);
+    }).catch(() => {});
+  }
+  return (
+    <div className="p-2.5 rounded-xl mt-2" style={{ background: C.bgDeep, border: `1px solid ${color}` }}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="font-mono text-2xs" style={{ color }}>{label}</span>
+        <button onClick={copyText} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ border: `1px solid ${color}`, color }}>{copyMsg || 'คัดลอก'}</button>
+      </div>
+      <p className="font-body text-xs whitespace-pre-wrap mb-2" style={{ color: C.text }}>{value}</p>
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-1.5 font-mono text-2xs cursor-pointer" style={{ color: copied ? C.emerald : C.muted }}>
+          <input type="checkbox" checked={copied} onChange={(e) => onCopiedChange(e.target.checked)} /> คัดลอกแล้ว
+        </label>
+        <label className="flex items-center gap-1.5 font-mono text-2xs cursor-pointer" style={{ color: made ? C.emerald : C.muted }}>
+          <input type="checkbox" checked={made} onChange={(e) => onMadeChange(e.target.checked)} /> สร้างแล้ว
+        </label>
+      </div>
+    </div>
+  );
+}
+
+const CAPTION_LANGS = [
+  { key: 'Th', label: 'ไทย' },
+  { key: 'En', label: 'English' },
+  { key: 'Zh', label: '中文' },
+];
+
+function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingAction }) {
   const Icon = task.type === 'video' ? VideoIcon : ImageIcon;
-  const c = task.content;
-  const hasFields = c && (c.title || c.caption || c.videoPrompt || c.coverPrompt || c.imagePrompt);
+  const platMeta = PLATFORM_META[task.platform];
+  const hasMeta = task.title || task.captionTh;
+  const busy = !!loadingAction;
   return (
     <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
       <div className="flex items-start gap-3">
         <button onClick={() => onToggle(task.id)} style={{ color: task.done ? C.emerald : C.muted }} className="mt-0.5 shrink-0">{task.done ? <CheckSquare size={18} /> : <Square size={18} />}</button>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2"><Icon size={13} style={{ color: C.muted }} /><span className="font-body text-sm" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span></div>
-          {!c ? (
-            <button onClick={() => onGenerate(task)} disabled={loading} className="mt-2 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: loading ? 0.6 : 1 }}>
-              {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI เตรียมเนื้อหา
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Icon size={13} style={{ color: C.muted }} /><span className="font-body text-sm" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span>
+              {platMeta && <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: platMeta.color, border: `1px solid ${platMeta.color}` }}>{platMeta.label}</span>}
+            </div>
+            <button onClick={() => onReset(task)} className="font-mono text-2xs flex items-center gap-1 shrink-0" style={{ color: C.muted }}><RefreshCw size={11} /> รีเซ็ต</button>
+          </div>
+
+          <div className="mt-2.5">
+            <label className="font-mono text-2xs block mb-1" style={{ color: C.blue }}>โครงเรื่อง / แนวคิดคอนเทนต์</label>
+            <textarea value={task.outline} onChange={(e) => onUpdate(task.id, { outline: e.target.value })} rows={2} placeholder="เช่น พาชมฟาร์มปลาหมึกยามเช้า..." className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <button onClick={() => onGenOutline(task)} disabled={busy} className="mt-1.5 font-mono text-2xs px-2.5 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue, opacity: busy ? 0.6 : 1 }}>
+              {loadingAction === 'outline' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} ให้ AI คิดโครงเรื่องให้
             </button>
-          ) : (
-            <div className="mt-2 space-y-1.5">
-              {hasFields ? (
-                <>
-                  {c.title && <div><span className="font-mono text-2xs" style={{ color: C.blue }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.title}</span></div>}
-                  {c.caption && <div><span className="font-mono text-2xs" style={{ color: C.blue }}>คำบรรยาย: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.caption}</span></div>}
-                  {c.videoPrompt && <div><span className="font-mono text-2xs" style={{ color: C.cyan }}>พรอมต์วิดีโอ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.videoPrompt}</span></div>}
-                  {c.coverPrompt && <div><span className="font-mono text-2xs" style={{ color: C.violet }}>พรอมต์หน้าปก: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.coverPrompt}</span></div>}
-                  {c.imagePrompt && <div><span className="font-mono text-2xs" style={{ color: C.violet }}>พรอมต์รูปภาพ: </span><span className="font-body text-xs" style={{ color: C.text }}>{c.imagePrompt}</span></div>}
-                </>
-              ) : (
-                <pre className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text, fontFamily: 'inherit' }}>{c.raw}</pre>
-              )}
-              <div className="flex items-center gap-3 mt-1">
-                <button onClick={() => onGenerate(task)} disabled={loading} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.muted }}>
-                  {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} สร้างใหม่
-                </button>
-                {!task.qc && (
-                  <button onClick={() => onQC(task)} disabled={qcLoading} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.violet }}>
-                    {qcLoading ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
-                  </button>
-                )}
+          </div>
+
+          <div className="mt-2.5">
+            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง (ถ้ามี)</label>
+            <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={2} placeholder="วางสไตล์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          </div>
+
+          {task.type === 'video' && (
+            <div className="mt-2.5">
+              <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ความยาววิดีโอ</label>
+              <div className="flex flex-wrap gap-1.5">
+                {DURATION_OPTIONS.map((s) => (
+                  <button key={s} onClick={() => onUpdate(task.id, { durationSec: s })} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ background: task.durationSec === s ? BRAND : 'transparent', color: task.durationSec === s ? '#fff' : C.muted, border: `1px solid ${task.durationSec === s ? 'transparent' : C.border}` }}>{s} วิ</button>
+                ))}
               </div>
-              <VerdictBox verdict={task.qc} />
             </div>
           )}
+
+          <button onClick={() => onGenPrompts(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
+            {loadingAction === 'prompts' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้าง Prompt {task.type === 'video' ? 'วิดีโอ + หน้าปก' : 'รูปภาพ'}
+          </button>
+
+          <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
+          <PromptBox label="Prompt หน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
+          <PromptBox label="Prompt รูปภาพ" color={C.violet} value={task.imagePrompt} copied={task.imagePromptCopied} made={task.imagePromptMade} onCopiedChange={(v) => onUpdate(task.id, { imagePromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { imagePromptMade: v })} />
+
+          <button onClick={() => onGenMeta(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald, opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
+            {loadingAction === 'meta' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้างชื่อ + คำบรรยาย + แฮชแท็ก
+          </button>
+
+          {hasMeta && (
+            <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task.title}</span></div>
+              {CAPTION_LANGS.map((l) => (
+                task[`caption${l.key}`] ? (
+                  <div key={l.key}>
+                    <div className="font-mono text-2xs" style={{ color: C.emerald }}>คำบรรยาย ({l.label}):</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${l.key}`]}</p>
+                    {task[`hashtags${l.key}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${l.key}`]}</p>}
+                  </div>
+                ) : null
+              ))}
+            </div>
+          )}
+
+          <div className="mt-3">
+            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ลิงก์ยืนยันการส่งงาน</label>
+            <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          </div>
+
+          {!task.qc && (
+            <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-2 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
+              {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
+            </button>
+          )}
+          <VerdictBox verdict={task.qc} />
         </div>
       </div>
     </div>
@@ -966,8 +1284,8 @@ function AddChannelForm({ onAdd, onClose }) {
   const [images, setImages] = useState(0);
   return (
     <div className="relative p-4 mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
-      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เพิ่มช่อง/เพจใหม่</div>
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อช่อง เช่น ช่องวาฬ" className="w-full px-3 py-2 font-body text-sm mb-2 outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เพิ่มช่องใหม่ (หัวข้อ/แบรนด์ใหม่)</div>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อช่อง เช่น Whalandia" className="w-full px-3 py-2 font-body text-sm mb-2 outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
       <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full px-3 py-2 font-body text-sm mb-2 outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
         {Object.entries(PLATFORM_META).map(([key, v]) => <option key={key} value={key}>{v.label}</option>)}
       </select>
@@ -975,6 +1293,7 @@ function AddChannelForm({ onAdd, onClose }) {
         <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วิดีโอ/วัน</label><input type="number" min="0" value={videos} onChange={(e) => setVideos(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} /></div>
         <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>รูปภาพ/วัน</label><input type="number" min="0" value={images} onChange={(e) => setImages(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-3 py-2 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} /></div>
       </div>
+      <p className="font-mono text-2xs mb-3 leading-relaxed" style={{ color: C.muted }}>* ปุ่มนี้สร้างช่องใหม่เท่านั้น ถ้าช่องนี้มีอยู่แล้วและแค่อยากเพิ่มแพลตฟอร์มอื่น ให้กด "+ แพลตฟอร์ม" ในการ์ดของช่องนั้นแทน</p>
       <div className="flex gap-2">
         <button onClick={() => { if (name.trim() && (videos > 0 || images > 0)) { onAdd(name.trim(), platform, videos, images); onClose(); } }} className="font-mono text-2xs px-3 py-2 flex items-center gap-1 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={13} /> เพิ่มช่อง</button>
         <button onClick={onClose} className="font-mono text-2xs px-3 py-2 rounded-xl" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ยกเลิก</button>
@@ -983,29 +1302,83 @@ function AddChannelForm({ onAdd, onClose }) {
   );
 }
 
-function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loadingTaskId, qcLoadingId, onRemove, onGenerateAll, generatingAll, onQCAll, qcAllRunning }) {
-  const [open, setOpen] = useState(true);
-  const meta = PLATFORM_META[channel.platform];
-  const PlatformIcon = meta.icon;
-  const done = tasks.filter((t) => t.done).length;
-  const qcable = tasks.some((t) => t.content && !t.qc);
+function AddPlatformForm({ existingPlatforms, onAdd, onClose }) {
+  const available = Object.keys(PLATFORM_META).filter((p) => !existingPlatforms.includes(p));
+  const [platform, setPlatform] = useState(available[0] || Object.keys(PLATFORM_META)[0]);
+  const [videos, setVideos] = useState(1);
+  const [images, setImages] = useState(0);
+  if (available.length === 0) {
+    return <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>ช่องนี้มีครบทุกแพลตฟอร์มแล้ว</p>;
+  }
   return (
-    <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${meta.color}66`, overflow: 'hidden' }}>
-      <div style={{ height: 3, background: `linear-gradient(90deg, ${meta.color}, transparent)` }} />
-      <div className="p-4 flex items-center justify-between gap-3">
-        <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2"><span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={11} />{meta.label}</span><span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span></div>
-          <div className="mt-2 max-w-xs"><ProgressBar done={done} total={tasks.length} color={meta.color} /></div>
-        </button>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => onRemove(channel.id)} style={{ color: C.muted }} aria-label="ลบช่อง"><Trash2 size={15} /></button>
-          <button onClick={() => setOpen((o) => !o)} style={{ color: C.muted }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+    <div className="p-3 rounded-xl mt-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+      <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full px-2.5 py-2 font-body text-xs mb-2 outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }}>
+        {available.map((key) => <option key={key} value={key}>{PLATFORM_META[key].label}</option>)}
+      </select>
+      <div className="flex gap-2 mb-2">
+        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วิดีโอ/วัน</label><input type="number" min="0" value={videos} onChange={(e) => setVideos(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} /></div>
+        <div className="flex-1"><label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>รูปภาพ/วัน</label><input type="number" min="0" value={images} onChange={(e) => setImages(Math.max(0, parseInt(e.target.value) || 0))} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} /></div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => { if (videos > 0 || images > 0) { onAdd(platform, videos, images); onClose(); } }} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ background: BRAND, color: '#fff' }}>เพิ่มแพลตฟอร์ม</button>
+        <button onClick={onClose} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ยกเลิก</button>
+      </div>
+    </div>
+  );
+}
+
+function channelStatusLabel(done, total) {
+  if (total === 0) return { text: 'ไม่มีงาน', color: C.muted };
+  if (done === 0) return { text: 'ยังไม่เริ่ม', color: C.muted };
+  if (done === total) return { text: 'เสร็จแล้ว', color: C.emerald };
+  return { text: `ทำอยู่ ${done}/${total}`, color: C.orange };
+}
+
+function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning }) {
+  const [open, setOpen] = useState(true);
+  const [showAddPlatform, setShowAddPlatform] = useState(false);
+  const done = tasks.filter((t) => t.done).length;
+  const status = channelStatusLabel(done, tasks.length);
+  const qcable = tasks.some((t) => t.link && t.link.trim() && !t.qc);
+  const accentColor = PLATFORM_META[channel.platforms[0]?.platform]?.color || C.blue;
+  return (
+    <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${accentColor}66`, overflow: 'hidden' }}>
+      <div style={{ height: 3, background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
+      <div className="p-4">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left min-w-0 flex items-center gap-2 flex-wrap">
+            <span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span>
+            <span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0" style={{ color: status.color, border: `1px solid ${status.color}` }}>{status.text}</span>
+          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => onRemove(channel.id)} style={{ color: C.muted }} aria-label="ลบช่อง"><Trash2 size={15} /></button>
+            <button onClick={() => setOpen((o) => !o)} style={{ color: C.muted }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+          </div>
         </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {channel.platforms.map((p) => {
+            const meta = PLATFORM_META[p.platform];
+            const PlatformIcon = meta.icon;
+            return (
+              <span key={p.platform} className="font-mono text-2xs pl-2 pr-1.5 py-1 rounded-md flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>
+                <PlatformIcon size={11} />{meta.label}
+                {channel.platforms.length > 1 && (
+                  <button onClick={() => onRemovePlatform(channel.id, p.platform)} aria-label="ลบแพลตฟอร์มนี้ออกจากช่อง" style={{ color: meta.color, opacity: 0.7 }}><XCircle size={11} /></button>
+                )}
+              </span>
+            );
+          })}
+          <button onClick={() => setShowAddPlatform((s) => !s)} className="font-mono text-2xs px-2 py-1 rounded-md flex items-center gap-1" style={{ color: C.muted, border: `1px dashed ${C.border}` }}>
+            <Plus size={11} /> แพลตฟอร์ม
+          </button>
+        </div>
+        {showAddPlatform && <AddPlatformForm existingPlatforms={channel.platforms.map((p) => p.platform)} onAdd={(platform, v, im) => { onAddPlatform(channel.id, platform, v, im); setShowAddPlatform(false); }} onClose={() => setShowAddPlatform(false)} />}
+        <div className="mt-3 max-w-xs"><ProgressBar done={done} total={tasks.length} color={accentColor} /></div>
       </div>
       {open && (
         <div className="anim-fade">
           <div className="px-3 pb-2 flex flex-wrap gap-2">
-            <button onClick={() => onGenerateAll(channel)} disabled={generatingAll} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: meta.color, color: '#fff', opacity: generatingAll ? 0.6 : 1 }}>
+            <button onClick={() => onGenerateAll(channel)} disabled={generatingAll} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: accentColor, color: '#fff', opacity: generatingAll ? 0.6 : 1 }}>
               {generatingAll ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} เตรียมเนื้อหาให้ครบทุกงานวันนี้
             </button>
             {qcable && (
@@ -1014,7 +1387,9 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
               </button>
             )}
           </div>
-          {tasks.map((t) => <DailyTaskCard key={t.id} task={t} onToggle={onToggle} onGenerate={onGenerate} onQC={onQC} loading={loadingTaskId === t.id} qcLoading={qcLoadingId === t.id} />)}
+          {tasks.map((t) => (
+            <DailyTaskCard key={t.id} task={t} onToggle={onToggle} onUpdate={onUpdate} onGenOutline={onGenOutline} onGenPrompts={onGenPrompts} onGenMeta={onGenMeta} onQC={onQC} onReset={onReset} loadingAction={loadingMap[t.id]} />
+          ))}
         </div>
       )}
     </div>
@@ -1023,15 +1398,28 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
 
 function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismissReminder }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [loadingTaskId, setLoadingTaskId] = useState(null);
+  const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
-  const [qcLoadingId, setQcLoadingId] = useState(null);
   const [qcAllId, setQcAllId] = useState(null);
+  const tasksRef = useRef(tasks);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+
+  function setLoading(id, action) { setLoadingMap((prev) => ({ ...prev, [id]: action })); }
+  function clearLoading(id) { setLoadingMap((prev) => { const n = { ...prev }; delete n[id]; return n; }); }
+  function updateTaskField(id, patch) { setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t))); }
 
   function addChannel(name, platform, dailyVideos, dailyImages) {
-    const channel = { id: Date.now().toString(), name, platform, dailyVideos, dailyImages };
+    const channel = { id: Date.now().toString(), name, platforms: [{ platform, dailyVideos, dailyImages }] };
     setChannels((prev) => [...prev, channel]);
-    setTasks((prev) => [...prev, ...buildTasksForChannel(channel)]);
+    setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0])]);
+  }
+  function addPlatform(channelId, platform, dailyVideos, dailyImages) {
+    setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: [...c.platforms, { platform, dailyVideos, dailyImages }] } : c)));
+    setTasks((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages })]);
+  }
+  function removePlatform(channelId, platform) {
+    setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.filter((p) => p.platform !== platform) } : c)));
+    setTasks((prev) => prev.filter((t) => !(t.channelId === channelId && t.platform === platform)));
   }
   function removeChannel(id) {
     setChannels((prev) => prev.filter((c) => c.id !== id));
@@ -1040,54 +1428,108 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
   function toggleTask(id) {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
   }
-  async function generateTask(task) {
-    setLoadingTaskId(task.id);
+  function resetTask(task) {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? emptyTask(t.id, t.channelId, t.platform, t.type, t.label) : t)));
+  }
+
+  async function genOutline(task) {
+    setLoading(task.id, 'outline');
+    const channel = channels.find((c) => c.id === task.channelId);
+    const avoidList = tasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
+    const avoidText = avoidList.length ? `\nเคยทำไปแล้ววันนี้ (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
+    try {
+      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${avoidText}`);
+      const outline = text.trim();
+      updateTaskField(task.id, { outline });
+      return outline;
+    } catch (e) {
+      updateTaskField(task.id, { outline: 'เรียก AI ไม่สำเร็จ ลองใหม่อีกครั้ง' });
+      return null;
+    } finally {
+      clearLoading(task.id);
+    }
+  }
+  async function genPrompts(task, outlineOverride) {
+    const outline = outlineOverride || task.outline;
+    if (!outline || !outline.trim()) return;
+    setLoading(task.id, 'prompts');
+    const channel = channels.find((c) => c.id === task.channelId);
+    const sys = task.type === 'video' ? PROMPTS_SYS_VIDEO : PROMPTS_SYS_IMAGE;
+    const durationLine = task.type === 'video' ? `\nความยาว: ${task.durationSec} วินาที` : '';
+    const styleLine = task.styleTemplate.trim() ? `\nเทมเพลต/สไตล์อ้างอิง: ${task.styleTemplate.trim()}` : '';
+    try {
+      const text = await callClaude(sys, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}${durationLine}${styleLine}`);
+      const json = parseJsonLoose(text) || {};
+      updateTaskField(task.id, {
+        videoPrompt: json.videoPrompt || task.videoPrompt,
+        coverPrompt: json.coverPrompt || task.coverPrompt,
+        imagePrompt: json.imagePrompt || task.imagePrompt,
+        videoPromptCopied: false, videoPromptMade: false,
+        coverPromptCopied: false, coverPromptMade: false,
+        imagePromptCopied: false, imagePromptMade: false,
+      });
+    } catch (e) {
+      // ปล่อยผ่าน ให้ผู้ใช้กดลองใหม่เองได้
+    } finally {
+      clearLoading(task.id);
+    }
+  }
+  async function genMeta(task, outlineOverride) {
+    const outline = outlineOverride || task.outline;
+    if (!outline || !outline.trim()) return;
+    setLoading(task.id, 'meta');
     const channel = channels.find((c) => c.id === task.channelId);
     try {
-      const sys = task.type === 'video' ? VIDEO_SYS : IMAGE_SYS;
-      const text = await callClaude(sys, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[channel.platform].label})\nงาน: ${task.label}`);
-      const content = parseContentBlock(text, task.type);
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, content, qc: null } : t)));
+      const text = await callClaude(META_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}`);
+      const json = parseJsonLoose(text) || {};
+      updateTaskField(task.id, {
+        title: json.title || '', captionTh: json.captionTh || '', captionEn: json.captionEn || '', captionZh: json.captionZh || '',
+        hashtagsTh: json.hashtagsTh || '', hashtagsEn: json.hashtagsEn || '', hashtagsZh: json.hashtagsZh || '',
+      });
     } catch (e) {
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, content: { raw: 'เรียก AI ไม่สำเร็จ ลองใหม่อีกครั้ง' }, qc: null } : t)));
     } finally {
-      setLoadingTaskId(null);
+      clearLoading(task.id);
+    }
+  }
+  async function runQC(task) {
+    if (!task.link || !task.link.trim()) return;
+    setLoading(task.id, 'qc');
+    const sys = task.type === 'video' ? QC_SYS_VIDEO : QC_SYS_IMAGE;
+    const summary = task.type === 'video'
+      ? `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์วิดีโอ: ${task.videoPrompt || '-'}\nพรอมต์หน้าปก: ${task.coverPrompt || '-'}\nชื่อคลิป: ${task.title || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`
+      : `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์รูปภาพ: ${task.imagePrompt || '-'}\nชื่อโพสต์: ${task.title || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`;
+    try {
+      const text = await callClaude(sys, summary);
+      const passed = text.trim().startsWith('ผ่าน');
+      updateTaskField(task.id, { qc: { passed, text } });
+    } catch (e) {
+      updateTaskField(task.id, { qc: { passed: false, text: 'เรียก AI ตรวจสอบไม่สำเร็จ ลองใหม่อีกครั้ง' } });
+    } finally {
+      clearLoading(task.id);
     }
   }
   async function generateAll(channel) {
     setGeneratingAllId(channel.id);
-    const chTasks = tasks.filter((t) => t.channelId === channel.id);
-    for (const t of chTasks) { await generateTask(t); }
-    setGeneratingAllId(null);
-  }
-  async function runQC(task) {
-    if (!task.content) return;
-    setQcLoadingId(task.id);
-    try {
-      const sys = task.type === 'video'
-        ? 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์คลิปวิดีโอ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อคลิป คำบรรยาย พรอมต์วิดีโอ และพรอมต์หน้าปก เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด'
-        : 'คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์รูปภาพ ก่อนที่ทีมจะเอาไปเจนจริง ตรวจว่าชื่อโพสต์ คำบรรยาย และพรอมต์รูปภาพ เหมาะสม ชัดเจน ไม่ผิดพลาด สอดคล้องกัน และคำบรรยายมีแฮชแท็ก/อิโมจิหรือยัง ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด';
-      const c = task.content;
-      const summary = task.type === 'video'
-        ? `ชื่อคลิป: ${c.title || '-'}\nคำบรรยาย: ${c.caption || '-'}\nพรอมต์วิดีโอ: ${c.videoPrompt || '-'}\nพรอมต์หน้าปก: ${c.coverPrompt || '-'}`
-        : `ชื่อโพสต์: ${c.title || '-'}\nคำบรรยาย: ${c.caption || '-'}\nพรอมต์รูปภาพ: ${c.imagePrompt || '-'}`;
-      const text = await callClaude(sys, c.raw && !c.title ? c.raw : summary);
-      const passed = text.trim().startsWith('ผ่าน');
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, qc: { passed, text } } : t)));
-    } catch (e) {
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, qc: { passed: false, text: 'เรียก AI ตรวจสอบไม่สำเร็จ ลองใหม่อีกครั้ง' } } : t)));
-    } finally {
-      setQcLoadingId(null);
+    const chTasks = tasksRef.current.filter((t) => t.channelId === channel.id);
+    for (const t of chTasks) {
+      const latest = tasksRef.current.find((x) => x.id === t.id) || t;
+      const outline = await genOutline(latest);
+      if (outline) {
+        const afterOutline = tasksRef.current.find((x) => x.id === t.id) || latest;
+        await genPrompts(afterOutline, outline);
+        await genMeta(afterOutline, outline);
+      }
     }
+    setGeneratingAllId(null);
   }
   async function qcAll(channel) {
     setQcAllId(channel.id);
-    const chTasks = tasks.filter((t) => t.channelId === channel.id && t.content && !t.qc);
+    const chTasks = tasksRef.current.filter((t) => t.channelId === channel.id && t.link && t.link.trim() && !t.qc);
     for (const t of chTasks) { await runQC(t); }
     setQcAllId(null);
   }
   function resetToday() {
-    setTasks((prev) => prev.map((t) => ({ ...t, done: false, content: null, qc: null })));
+    setTasks((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label)));
   }
 
   const totalDone = tasks.filter((t) => t.done).length;
@@ -1112,7 +1554,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismiss
         <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น</p>
       ) : (
         channels.map((c) => (
-          <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onGenerate={generateTask} onQC={runQC} loadingTaskId={loadingTaskId} qcLoadingId={qcLoadingId} onRemove={removeChannel} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
+          <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
         ))
       )}
       <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่</p>
@@ -1186,7 +1628,7 @@ export default function CompanyPortal() {
             loadedHistory = [...loadedHistory, entry];
           }
           if (missed.length > 0) setReminder(entry);
-          loadedTasks = loadedTasks.map((t) => ({ ...t, done: false, content: null, qc: null }));
+          loadedTasks = loadedTasks.map((t) => emptyTask(t.id, t.channelId, t.type, t.label));
         }
 
         setAccounts(Array.isArray(accData.accounts) ? accData.accounts : []);
@@ -1227,6 +1669,19 @@ export default function CompanyPortal() {
   }
   function logout() { setUser(null); setStage('terminal'); setActiveDept(null); }
 
+  // คีย์ลัดเปลี่ยนหน้า (ใช้ได้เมื่อไม่ได้พิมพ์อยู่ในช่องกรอกข้อความ)
+  useEffect(() => {
+    function handleKey(e) {
+      if (!user || stage === 'terminal') return;
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const map = { '1': 'daily', '2': 'calendar', '3': 'directory', '4': 'platforms', '5': 'analytics', '6': 'security', '?': 'settings' };
+      if (map[e.key]) setStage(map[e.key]);
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [user, stage]);
+
   if (!dataLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: C.bg }}>
@@ -1253,17 +1708,21 @@ export default function CompanyPortal() {
       {stage === 'terminal' && <Terminal accounts={accounts} onSignup={handleSignup} onLogin={handleLogin} />}
 
       {stage !== 'terminal' && user && (
-        <>
-          <Header user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} />
-          {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} reminder={reminder} onDismissReminder={() => setReminder(null)} />}
-          {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
-          {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
-          {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
-          {stage === 'platforms' && <PlatformsPanel />}
-          {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
-          {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
-          {stage === 'security' && <SecurityProtocol />}
-        </>
+        <div className="flex">
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} />
+          <div className="flex-1 min-w-0">
+            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} reminder={reminder} onDismissReminder={() => setReminder(null)} />}
+            {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
+            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
+            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'platforms' && <PlatformsPanel />}
+            {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
+            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} />}
+            {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
+            {stage === 'security' && <SecurityProtocol user={user} />}
+          </div>
+        </div>
       )}
     </div>
   );
