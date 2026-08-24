@@ -1340,7 +1340,7 @@ function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, o
   const done = tasks.filter((t) => t.done).length;
   const status = channelStatusLabel(done, tasks.length);
   const qcable = tasks.some((t) => t.link && t.link.trim() && !t.qc);
-  const accentColor = PLATFORM_META[channel.platforms[0]?.platform]?.color || C.blue;
+  const accentColor = PLATFORM_META[(channel.platforms || [])[0]?.platform]?.color || C.blue;
   return (
     <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${accentColor}66`, overflow: 'hidden' }}>
       <div style={{ height: 3, background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
@@ -1612,8 +1612,21 @@ export default function CompanyPortal() {
         const histData = await histRes.json();
         const dateData = await dateRes.json();
 
-        const loadedChannels = Array.isArray(chData.value) ? chData.value : [];
-        let loadedTasks = Array.isArray(taskData.value) ? taskData.value : [];
+        const rawChannels = Array.isArray(chData.value) ? chData.value : [];
+        const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
+        // ปรับข้อมูลเก่า (ถ้ามีช่อง/งานที่สร้างไว้ก่อนอัปเดตระบบหลายแพลตฟอร์มต่อช่อง) ให้เข้ารูปแบบใหม่
+        const oldPlatformByChannelId = {};
+        const loadedChannels = rawChannels.map((c) => {
+          if (Array.isArray(c.platforms)) return c;
+          const plat = c.platform || 'other';
+          oldPlatformByChannelId[c.id] = plat;
+          return { id: c.id, name: c.name, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0 }] };
+        });
+        let loadedTasks = rawTasks.map((t) => {
+          if (t.platform) return t;
+          const plat = oldPlatformByChannelId[t.channelId] || 'other';
+          return { ...emptyTask(t.id, t.channelId, plat, t.type, t.label), done: !!t.done };
+        });
         let loadedHistory = Array.isArray(histData.value) ? histData.value : [];
         const loadedLastDate = dateData.value || null;
         const today = todayDateStr();
@@ -1628,7 +1641,7 @@ export default function CompanyPortal() {
             loadedHistory = [...loadedHistory, entry];
           }
           if (missed.length > 0) setReminder(entry);
-          loadedTasks = loadedTasks.map((t) => emptyTask(t.id, t.channelId, t.type, t.label));
+          loadedTasks = loadedTasks.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label));
         }
 
         setAccounts(Array.isArray(accData.accounts) ? accData.accounts : []);
