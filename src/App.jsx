@@ -5,7 +5,7 @@ import {
   Bot, ShoppingBag, PlayCircle, AtSign, Music2, Share2, ShieldAlert, Sparkles,
   CheckSquare, Square, Plus, Trash2, Loader2, RefreshCw, ChevronDown, ChevronUp,
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
-  CheckCircle2, XCircle, Users,
+  CheckCircle2, XCircle, Users, Camera,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -26,12 +26,12 @@ const CLEARANCE = {
 };
 
 const PLATFORM_META = {
-  tiktok: { label: 'TikTok', color: C.pink },
-  facebook: { label: 'Facebook', color: C.blue },
-  youtube: { label: 'YouTube', color: C.red },
-  instagram: { label: 'Instagram', color: C.orange },
-  shopee: { label: 'Shopee', color: C.orange },
-  other: { label: 'อื่นๆ', color: C.teal },
+  tiktok: { label: 'TikTok', color: C.pink, icon: Music2 },
+  facebook: { label: 'Facebook', color: C.blue, icon: Share2 },
+  youtube: { label: 'YouTube', color: C.red, icon: PlayCircle },
+  instagram: { label: 'Instagram', color: C.orange, icon: Camera },
+  shopee: { label: 'Shopee', color: C.orange, icon: ShoppingBag },
+  other: { label: 'อื่นๆ', color: C.teal, icon: AtSign },
 };
 
 const DEPARTMENTS = [
@@ -145,17 +145,12 @@ function todayLabel() {
   return `วัน${THAI_DAYS[d.getDay()]}ที่ ${d.getDate()} ${THAI_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
 }
 
-function defaultClearanceFor(accounts) {
-  return accounts.length === 0 ? 3 : 1;
+function todayDateStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 const ACCOUNT_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-function isExpired(account) {
-  if (account.isOwner) return false;
-  const last = account.lastLogin || account.createdAt || Date.now();
-  return Date.now() - last > ACCOUNT_EXPIRY_MS;
-}
 
 function daysUntilExpiry(account) {
   if (account.isOwner) return null;
@@ -173,15 +168,14 @@ function daysAgoLabel(ts) {
 }
 
 async function callClaude(system, content) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 500, system, messages: [{ role: 'user', content }] }),
+    body: JSON.stringify({ system, content }),
   });
   const data = await response.json();
-  if (data?.error) throw new Error(data.error?.message || 'เกิดข้อผิดพลาด');
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-  return text || '(ไม่มีคำตอบ)';
+  if (!response.ok || data?.error) throw new Error(data.error || 'เกิดข้อผิดพลาด');
+  return data.text || '(ไม่มีคำตอบ)';
 }
 
 function buildTasksForChannel(channel) {
@@ -251,8 +245,9 @@ function NavTab({ label, active, onClick }) {
   );
 }
 
-function Header({ user, stage, setStage, logout }) {
+function Header({ user, stage, setStage, logout, accounts }) {
   const cl = CLEARANCE[user.clearance];
+  const account = (accounts || []).find((a) => a.email === user.email);
   return (
     <div className="sticky top-0 z-20 px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between" style={{ background: C.bgDeep, borderBottom: `1px solid ${C.border}` }}>
       <div className="flex items-center gap-4 flex-wrap">
@@ -262,6 +257,7 @@ function Header({ user, stage, setStage, logout }) {
         <div className="flex items-center gap-1 flex-wrap">
           <NavTab label="งานประจำวัน" active={stage === 'daily'} onClick={() => setStage('daily')} />
           <NavTab label="Directory" active={stage === 'directory' || stage === 'department'} onClick={() => setStage('directory')} />
+          <NavTab label="ปฏิทิน" active={stage === 'calendar'} onClick={() => setStage('calendar')} />
           <NavTab label="แพลตฟอร์ม" active={stage === 'platforms'} onClick={() => setStage('platforms')} />
           {user.clearance === 3 && <NavTab label="ทีมงาน" active={stage === 'team'} onClick={() => setStage('team')} />}
           <NavTab label="Protocol" active={stage === 'security'} onClick={() => setStage('security')} />
@@ -272,9 +268,15 @@ function Header({ user, stage, setStage, logout }) {
           <div className="font-body text-sm" style={{ color: C.text }}>{user.name}</div>
           <div className="font-mono text-2xs tracking-wider" style={{ color: cl.color }}>{cl.code}</div>
         </div>
-        <div className="w-8 h-8 rounded-full flex items-center justify-center font-display text-xs font-bold shrink-0" style={{ background: `linear-gradient(135deg, ${cl.color}, ${cl.color}88)`, color: '#0A0A0F' }}>
-          {user.name.charAt(0).toUpperCase()}
-        </div>
+        <button onClick={() => setStage('profile')} aria-label="โปรไฟล์" className="shrink-0">
+          {account?.avatar ? (
+            <img src={account.avatar} alt="avatar" className="w-8 h-8 rounded-full object-cover" style={{ border: stage === 'profile' ? `2px solid ${C.blue}` : '2px solid transparent' }} />
+          ) : (
+            <div className="w-8 h-8 rounded-full flex items-center justify-center font-display text-xs font-bold" style={{ background: `linear-gradient(135deg, ${account?.avatarColor || cl.color}, ${account?.avatarColor || cl.color}88)`, color: '#0A0A0F', border: stage === 'profile' ? `2px solid ${C.blue}` : '2px solid transparent' }}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+          )}
+        </button>
         <button onClick={logout} className="p-2" style={{ color: C.muted }} aria-label="ออกจากระบบ"><LogOut size={16} /></button>
       </div>
     </div>
@@ -310,21 +312,29 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [otpToken, setOtpToken] = useState('');
   const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
+  const [pendingAccount, setPendingAccount] = useState(null);
   const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
   const [signupRole, setSignupRole] = useState(3);
+  const [signupLoading, setSignupLoading] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotDone, setForgotDone] = useState(false);
 
   async function submitCredentials(e) {
     e.preventDefault();
-    const input = loginForm.identifier.trim();
-    const acc = accounts.find((a) => (a.email === input || a.username === input) && a.password === loginForm.password);
-    if (!acc) { setLoginError('อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง'); return; }
     setLoginError('');
     setOtpLoading(true);
     try {
+      const loginRes = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', identifier: loginForm.identifier.trim(), password: loginForm.password }),
+      });
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) { setOtpLoading(false); setLoginError(loginData.error || 'เข้าสู่ระบบไม่สำเร็จ'); return; }
+      const acc = loginData.account;
+
       const res = await fetch('/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,6 +345,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
       if (!res.ok) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
       setOtpToken(data.token);
       setOtpEmail(acc.email);
+      setPendingAccount(acc);
       setLoginForm((f) => ({ ...f, code: '' }));
       setLoginStep('verify');
     } catch (err) {
@@ -356,34 +367,34 @@ function Terminal({ accounts, onSignup, onLogin }) {
       const data = await res.json();
       setOtpLoading(false);
       if (!res.ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
-      const input = loginForm.identifier.trim();
-      const acc = accounts.find((a) => a.email === input || a.username === input);
-      onLogin(acc);
+      onLogin(pendingAccount);
     } catch (err) {
       setOtpLoading(false);
       setLoginError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง');
     }
   }
-  function submitSignup(e) {
+  async function submitSignup(e) {
     e.preventDefault();
+    setSignupError('');
     if (!signupForm.name.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
-    if (accounts.some((a) => a.email === signupForm.email)) { setSignupError('อีเมลนี้ถูกใช้แล้ว'); return; }
-    if (accounts.some((a) => a.username === signupForm.username)) { setSignupError('ชื่อผู้ใช้นี้ถูกใช้แล้ว'); return; }
-    const clearance = defaultClearanceFor(accounts);
-    setSignupRole(clearance);
-    onSignup({
-      name: signupForm.name.trim(),
-      username: signupForm.username.trim(),
-      email: signupForm.email.trim(),
-      password: signupForm.password,
-      clearance,
-      isOwner: accounts.length === 0,
-      createdAt: Date.now(),
-      lastLogin: Date.now(),
-    });
-    setSignupError('');
-    setSignupDone(true);
+    setSignupLoading(true);
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password }),
+      });
+      const data = await res.json();
+      setSignupLoading(false);
+      if (!res.ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
+      setSignupRole(data.account.clearance);
+      onSignup(data.account);
+      setSignupDone(true);
+    } catch (err) {
+      setSignupLoading(false);
+      setSignupError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    }
   }
 
   if (mode === 'signup') {
@@ -410,7 +421,9 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
             {signupError && <p className="font-mono text-2xs" style={{ color: C.red }}>{signupError}</p>}
-            <button type="submit" className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl" style={{ background: BRAND, color: '#fff' }}>สร้างบัญชี</button>
+            <button type="submit" disabled={signupLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl flex items-center justify-center gap-2" style={{ background: BRAND, color: '#fff', opacity: signupLoading ? 0.6 : 1 }}>
+              {signupLoading ? <Loader2 size={14} className="animate-spin" /> : null} {signupLoading ? 'กำลังสร้างบัญชี...' : 'สร้างบัญชี'}
+            </button>
             <button type="button" onClick={() => setMode('login')} className="w-full font-mono text-2xs tracking-widest flex items-center justify-center gap-1" style={{ color: C.muted }}><ArrowLeft size={11} /> กลับไปเข้าสู่ระบบ</button>
           </form>
         )}
@@ -642,6 +655,241 @@ function TeamPanel({ accounts, onUpdateClearance }) {
   );
 }
 
+const AVATAR_COLORS = [C.blue, C.violet, C.teal, C.pink, C.emerald, C.cyan];
+
+function ProfilePage({ user, accounts, tasks, history, onUpdateProfile }) {
+  const account = accounts.find((a) => a.email === user.email);
+  const [name, setName] = useState(user.name);
+  const [avatar, setAvatar] = useState(account?.avatar || null);
+  const [avatarColor, setAvatarColor] = useState(account?.avatarColor || C.blue);
+  const [saveMsg, setSaveMsg] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwError, setPwError] = useState('');
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwLoading, setPwLoading] = useState(false);
+
+  const totalToday = tasks.length;
+  const doneToday = tasks.filter((t) => t.done).length;
+  const histTotal = history.reduce((sum, h) => sum + h.totalTasks, 0) + totalToday;
+  const histDone = history.reduce((sum, h) => sum + h.doneTasks, 0) + doneToday;
+  const consistencyPct = histTotal === 0 ? 0 : Math.round((histDone / histTotal) * 100);
+
+  function handleAvatarUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAvatar(reader.result);
+    reader.readAsDataURL(file);
+  }
+
+  function saveProfile() {
+    onUpdateProfile({ name: name.trim() || account.name, avatar, avatarColor });
+    setSaveMsg('บันทึกโปรไฟล์แล้ว');
+    setTimeout(() => setSaveMsg(''), 2000);
+  }
+
+  async function changePassword(e) {
+    e.preventDefault();
+    setPwError('');
+    setPwMsg('');
+    if (newPassword.length < 4) { setPwError('รหัสผ่านใหม่สั้นเกินไป'); return; }
+    if (newPassword !== confirmPassword) { setPwError('รหัสผ่านใหม่ไม่ตรงกัน'); return; }
+    setPwLoading(true);
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'changePassword', email: user.email, currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      setPwLoading(false);
+      if (!res.ok) { setPwError(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ'); return; }
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+      setPwMsg('เปลี่ยนรหัสผ่านแล้ว');
+      setTimeout(() => setPwMsg(''), 2000);
+    } catch (err) {
+      setPwLoading(false);
+      setPwError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    }
+  }
+
+  return (
+    <div className="max-w-xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <h2 className="font-body text-xl mb-6" style={{ color: C.text }}>โปรไฟล์ของฉัน</h2>
+
+      <div className="p-5 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-4 mb-4">
+          {avatar ? (
+            <img src={avatar} alt="avatar" className="w-20 h-20 rounded-full object-cover shrink-0" style={{ border: `2px solid ${C.border}` }} />
+          ) : (
+            <div className="w-20 h-20 rounded-full flex items-center justify-center font-display text-2xl font-bold shrink-0" style={{ background: `linear-gradient(135deg, ${avatarColor}, ${avatarColor}88)`, color: '#0A0A0F' }}>
+              {(name || 'U').charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div className="flex-1">
+            <label className="font-mono text-2xs px-3 py-2 rounded-xl inline-block cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+              อัปโหลดรูป
+              <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+            </label>
+            {avatar && <button onClick={() => setAvatar(null)} className="font-mono text-2xs ml-2" style={{ color: C.muted }}>ลบรูป ใช้อวาตาร์แทน</button>}
+          </div>
+        </div>
+        {!avatar && (
+          <div className="flex items-center gap-2 mb-4">
+            <span className="font-mono text-2xs" style={{ color: C.muted }}>สีอวาตาร์:</span>
+            {AVATAR_COLORS.map((c) => (
+              <button key={c} onClick={() => setAvatarColor(c)} className="w-6 h-6 rounded-full" style={{ background: c, border: avatarColor === c ? `2px solid ${C.text}` : '2px solid transparent' }} aria-label="เลือกสีอวาตาร์" />
+            ))}
+          </div>
+        )}
+        <TextField label="ชื่อที่แสดง" value={name} onChange={(e) => setName(e.target.value)} />
+        <button onClick={saveProfile} className="mt-3 font-mono text-2xs px-4 py-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}>บันทึกโปรไฟล์</button>
+        {saveMsg && <p className="font-mono text-2xs mt-2" style={{ color: C.emerald }}>{saveMsg}</p>}
+      </div>
+
+      <div className="p-5 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ความสม่ำเสมอสะสม</div>
+        <div style={{ width: '100%', height: 10, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+          <div style={{ width: `${consistencyPct}%`, height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})`, transition: 'width 0.4s ease' }} />
+        </div>
+        <div className="font-mono text-2xs mt-2" style={{ color: C.muted }}>{consistencyPct}% ({histDone}/{histTotal} งานเสร็จ นับตั้งแต่เริ่มใช้งาน)</div>
+        <p className="font-mono text-2xs mt-3 leading-relaxed" style={{ color: C.muted }}>* คำนวณจากงานทั้งหมดที่บันทึกไว้ในฐานข้อมูล รวมวันนี้ด้วย ดูรายละเอียดรายวันได้ที่หน้าปฏิทิน</p>
+      </div>
+
+      <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เปลี่ยนรหัสผ่าน</div>
+        <form onSubmit={changePassword} className="space-y-3">
+          <TextField label="รหัสผ่านปัจจุบัน" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          <TextField label="รหัสผ่านใหม่" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          <TextField label="ยืนยันรหัสผ่านใหม่" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+          {pwError && <p className="font-mono text-2xs" style={{ color: C.red }}>{pwError}</p>}
+          {pwMsg && <p className="font-mono text-2xs" style={{ color: C.emerald }}>{pwMsg}</p>}
+          <button type="submit" disabled={pwLoading} className="font-mono text-2xs px-4 py-2 rounded-xl flex items-center gap-2" style={{ background: BRAND, color: '#fff', opacity: pwLoading ? 0.6 : 1 }}>
+            {pwLoading ? <Loader2 size={12} className="animate-spin" /> : null} {pwLoading ? 'กำลังบันทึก...' : 'เปลี่ยนรหัสผ่าน'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+const WEEKDAY_LABELS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+function ReminderBanner({ reminder, onDismiss }) {
+  if (!reminder) return null;
+  return (
+    <div className="p-4 rounded-2xl mb-4 relative" style={{ background: `${C.orange}18`, border: `1px solid ${C.orange}` }}>
+      <button onClick={onDismiss} className="absolute top-3 right-3 font-mono text-2xs" style={{ color: C.muted }}>ปิด</button>
+      <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.orange }}>⚠ แจ้งเตือน — เมื่อวาน ({reminder.date})</div>
+      <p className="font-body text-sm mb-2" style={{ color: C.text }}>มีงานที่ยังไม่เสร็จ {reminder.missed.length} งาน:</p>
+      <div className="space-y-1">
+        {reminder.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.muted }}>• {m.channelName} — {m.label}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function CalendarPage({ history, tasks, channels }) {
+  const todayStr = todayDateStr();
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const historyByDate = {};
+  history.forEach((h) => { historyByDate[h.date] = h; });
+
+  const todayDone = tasks.filter((t) => t.done).length;
+  const todayEntry = {
+    date: todayStr,
+    totalTasks: tasks.length,
+    doneTasks: todayDone,
+    missed: tasks.filter((t) => !t.done).map((t) => {
+      const ch = channels.find((c) => c.id === t.channelId);
+      return { channelName: ch ? ch.name : '-', label: t.label };
+    }),
+  };
+
+  function entryColor(entry) {
+    if (!entry || entry.totalTasks === 0) return C.border;
+    const pct = entry.doneTasks / entry.totalTasks;
+    if (pct >= 1) return C.emerald;
+    if (pct > 0) return C.orange;
+    return C.red;
+  }
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const selectedEntry = selectedDate === todayStr ? todayEntry : historyByDate[selectedDate];
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><Calendar size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>CALENDAR</span></div>
+      <h2 className="font-body text-xl mb-6" style={{ color: C.text }}>ปฏิทิน / ประวัติย้อนหลัง</h2>
+
+      <div className="p-5 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-body text-sm mb-3" style={{ color: C.text }}>{THAI_MONTHS[month]} {year + 543}</div>
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {WEEKDAY_LABELS.map((d) => <div key={d} className="font-mono text-2xs text-center" style={{ color: C.muted }}>{d}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} />;
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const isToday = dateStr === todayStr;
+            const entry = isToday ? todayEntry : historyByDate[dateStr];
+            const hasData = isToday || !!historyByDate[dateStr];
+            const color = isToday ? C.blue : entryColor(entry);
+            return (
+              <button
+                key={i}
+                onClick={() => hasData && setSelectedDate(dateStr)}
+                className="aspect-square rounded-lg flex items-center justify-center font-mono text-2xs"
+                style={{
+                  background: dateStr === selectedDate && hasData ? `${color}33` : 'transparent',
+                  border: `1px solid ${hasData ? color : C.border}`,
+                  color: hasData ? C.text : C.muted,
+                  cursor: hasData ? 'pointer' : 'default',
+                }}
+              >
+                {d}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {selectedEntry ? (
+        <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</div>
+          <div style={{ width: '100%', height: 8, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+            <div style={{ width: selectedEntry.totalTasks ? `${Math.round((selectedEntry.doneTasks / selectedEntry.totalTasks) * 100)}%` : '0%', height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
+          </div>
+          <div className="font-mono text-2xs mt-2 mb-3" style={{ color: C.muted }}>{selectedEntry.doneTasks}/{selectedEntry.totalTasks} งานเสร็จ</div>
+          {selectedEntry.missed.length > 0 ? (
+            <div>
+              <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>งานที่ยังไม่เสร็จ:</div>
+              <div className="space-y-1">
+                {selectedEntry.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.text }}>• {m.channelName} — {m.label}</div>)}
+              </div>
+            </div>
+          ) : (
+            <p className="font-body text-xs" style={{ color: C.emerald }}>{selectedEntry.totalTasks > 0 ? 'ทำครบทุกงาน 🎉' : 'ไม่มีงานในวันนี้'}</p>
+          )}
+        </div>
+      ) : (
+        <p className="font-body text-sm text-center py-6" style={{ color: C.muted }}>เลือกวันที่มีข้อมูล (มีกรอบสี) เพื่อดูรายละเอียด</p>
+      )}
+    </div>
+  );
+}
+
 function ProgressBar({ done, total, color }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   return (
@@ -738,6 +986,7 @@ function AddChannelForm({ onAdd, onClose }) {
 function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loadingTaskId, qcLoadingId, onRemove, onGenerateAll, generatingAll, onQCAll, qcAllRunning }) {
   const [open, setOpen] = useState(true);
   const meta = PLATFORM_META[channel.platform];
+  const PlatformIcon = meta.icon;
   const done = tasks.filter((t) => t.done).length;
   const qcable = tasks.some((t) => t.content && !t.qc);
   return (
@@ -745,7 +994,7 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
       <div style={{ height: 3, background: `linear-gradient(90deg, ${meta.color}, transparent)` }} />
       <div className="p-4 flex items-center justify-between gap-3">
         <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2"><span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>{meta.label}</span><span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span></div>
+          <div className="flex items-center gap-2"><span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={11} />{meta.label}</span><span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span></div>
           <div className="mt-2 max-w-xs"><ProgressBar done={done} total={tasks.length} color={meta.color} /></div>
         </button>
         <div className="flex items-center gap-2 shrink-0">
@@ -772,9 +1021,7 @@ function DailyChannelBlock({ channel, tasks, onToggle, onGenerate, onQC, loading
   );
 }
 
-function DailyWork() {
-  const [channels, setChannels] = useState([]);
-  const [tasks, setTasks] = useState([]);
+function DailyWork({ channels, setChannels, tasks, setTasks, reminder, onDismissReminder }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingTaskId, setLoadingTaskId] = useState(null);
   const [generatingAllId, setGeneratingAllId] = useState(null);
@@ -849,6 +1096,7 @@ function DailyWork() {
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{todayLabel()}</span></div>
       <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
+      <div className="mt-3"><ReminderBanner reminder={reminder} onDismiss={onDismissReminder} /></div>
       <div className="flex items-center justify-between gap-3 mt-3 mb-6">
         <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
         <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
@@ -867,7 +1115,7 @@ function DailyWork() {
           <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onGenerate={generateTask} onQC={runQC} loadingTaskId={loadingTaskId} qcLoadingId={qcLoadingId} onRemove={removeChannel} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
         ))
       )}
-      <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ต้นแบบนี้ยังไม่มีฐานข้อมูล เช็คลิสต์จะหายเมื่อรีเฟรชหน้า</p>
+      <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่</p>
     </div>
   );
 }
@@ -878,27 +1126,114 @@ export default function CompanyPortal() {
   const [user, setUser] = useState(null);
   const [activeDept, setActiveDept] = useState(null);
   const [denied, setDenied] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [lastActiveDate, setLastActiveDate] = useState(null);
+  const [reminder, setReminder] = useState(null);
 
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
   function handleLogin(account) {
-    setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: Date.now() } : a)));
-    setUser({ name: account.name, clearance: account.clearance });
+    setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: account.lastLogin || Date.now() } : a)));
+    setUser({ name: account.name, clearance: account.clearance, email: account.email });
     setStage('daily');
   }
-  function updateAccountClearance(email, clearance) {
+  async function updateAccountClearance(email, clearance) {
     setAccounts((prev) => prev.map((a) => (a.email === email ? { ...a, clearance } : a)));
+    try {
+      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateClearance', email, clearance }) });
+    } catch (err) {}
+  }
+  async function updateProfile(patch) {
+    setAccounts((prev) => prev.map((a) => (a.email === user.email ? { ...a, ...patch } : a)));
+    if (patch.name) setUser((u) => ({ ...u, name: patch.name }));
+    try {
+      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateProfile', email: user.email, patch }) });
+    } catch (err) {}
   }
 
-  // ลบบัญชีที่ไม่ได้เข้าสู่ระบบเกิน 30 วันอัตโนมัติ (ยกเว้นเจ้าของระบบ)
+  // โหลดข้อมูลจากฐานข้อมูลตอนเปิดเว็บ (บัญชี + ช่อง/เพจ + งาน + ประวัติ) ลบบัญชีหมดอายุ และเก็บประวัติวันก่อนหน้าถ้าข้ามวันมาแล้ว
   useEffect(() => {
-    setAccounts((prev) => prev.filter((a) => !isExpired(a)));
+    async function loadAll() {
+      try {
+        const [accRes, chRes, taskRes, histRes, dateRes] = await Promise.all([
+          fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pruneExpired' }) }),
+          fetch('/api/store?key=channels'),
+          fetch('/api/store?key=tasks'),
+          fetch('/api/store?key=history'),
+          fetch('/api/store?key=lastActiveDate'),
+        ]);
+        const accData = await accRes.json();
+        const chData = await chRes.json();
+        const taskData = await taskRes.json();
+        const histData = await histRes.json();
+        const dateData = await dateRes.json();
+
+        const loadedChannels = Array.isArray(chData.value) ? chData.value : [];
+        let loadedTasks = Array.isArray(taskData.value) ? taskData.value : [];
+        let loadedHistory = Array.isArray(histData.value) ? histData.value : [];
+        const loadedLastDate = dateData.value || null;
+        const today = todayDateStr();
+
+        if (loadedLastDate && loadedLastDate !== today && loadedTasks.length > 0) {
+          const missed = loadedTasks.filter((t) => !t.done).map((t) => {
+            const ch = loadedChannels.find((c) => c.id === t.channelId);
+            return { channelName: ch ? ch.name : '-', label: t.label };
+          });
+          const entry = { date: loadedLastDate, totalTasks: loadedTasks.length, doneTasks: loadedTasks.filter((t) => t.done).length, missed };
+          if (!loadedHistory.some((h) => h.date === loadedLastDate)) {
+            loadedHistory = [...loadedHistory, entry];
+          }
+          if (missed.length > 0) setReminder(entry);
+          loadedTasks = loadedTasks.map((t) => ({ ...t, done: false, content: null, qc: null }));
+        }
+
+        setAccounts(Array.isArray(accData.accounts) ? accData.accounts : []);
+        setChannels(loadedChannels);
+        setTasks(loadedTasks);
+        setHistory(loadedHistory);
+        setLastActiveDate(today);
+      } catch (err) {
+        setLastActiveDate(todayDateStr());
+      } finally {
+        setDataLoaded(true);
+      }
+    }
+    loadAll();
   }, []);
+
+  // บันทึกช่อง/เพจ งานประจำวัน และประวัติ ลงฐานข้อมูลทุกครั้งที่เปลี่ยน (หลังโหลดข้อมูลเสร็จแล้วเท่านั้น)
+  useEffect(() => {
+    if (!dataLoaded) return;
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'channels', value: channels }) }).catch(() => {});
+  }, [channels, dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded) return;
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'tasks', value: tasks }) }).catch(() => {});
+  }, [tasks, dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded) return;
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'history', value: history }) }).catch(() => {});
+  }, [history, dataLoaded]);
+  useEffect(() => {
+    if (!dataLoaded || !lastActiveDate) return;
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'lastActiveDate', value: lastActiveDate }) }).catch(() => {});
+  }, [lastActiveDate, dataLoaded]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
   function logout() { setUser(null); setStage('terminal'); setActiveDept(null); }
+
+  if (!dataLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: C.bg }}>
+        <Loader2 size={28} className="animate-spin" style={{ color: C.blue }} />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen font-body" style={{ background: C.bg }}>
@@ -919,12 +1254,14 @@ export default function CompanyPortal() {
 
       {stage !== 'terminal' && user && (
         <>
-          <Header user={user} stage={stage} setStage={setStage} logout={logout} />
-          {stage === 'daily' && <DailyWork />}
+          <Header user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} />
+          {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} reminder={reminder} onDismissReminder={() => setReminder(null)} />}
           {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
           {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
+          {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
           {stage === 'platforms' && <PlatformsPanel />}
           {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
+          {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
           {stage === 'security' && <SecurityProtocol />}
         </>
       )}
