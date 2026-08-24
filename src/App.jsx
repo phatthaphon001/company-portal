@@ -1354,19 +1354,7 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
                 </div>
               )}
 
-              <div className="mt-3">
-                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ลิงก์ยืนยันการส่งงาน</label>
-                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-              </div>
-
-              {task.link.trim() && <VideoPreviewBox link={task.link.trim()} />}
-
-              {!task.qc && (
-                <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-2 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
-                  {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
-                </button>
-              )}
-              <VerdictBox verdict={task.qc} />
+              <p className="font-mono text-2xs mt-3" style={{ color: C.muted }}>* ส่งลิงก์ยืนยันงาน/QC ย้ายไปอยู่กล่อง "ส่งงาน QC" แถบขวาแล้ว</p>
             </div>
           )}
         </div>
@@ -1375,17 +1363,28 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
   );
 }
 
-function VideoPreviewBox({ link }) {
+function getYoutubeEmbedUrl(link) {
+  const m = link.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([\w-]{6,})/i);
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
+
+function VideoPreviewBox({ link, compact }) {
   const isDirectVideo = /\.(mp4|webm|mov|m3u8)(\?|$)/i.test(link);
+  const ytEmbed = getYoutubeEmbedUrl(link);
   return (
-    <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
-      <div className="font-mono text-2xs mb-1.5" style={{ color: C.muted }}>ดูงานที่ส่ง</div>
+    <div className={compact ? 'mt-1.5' : 'mt-2 p-2.5 rounded-xl'} style={compact ? {} : { background: C.bgDeep, border: `1px solid ${C.border}` }}>
+      {!compact && <div className="font-mono text-2xs mb-1.5" style={{ color: C.muted }}>ดูงานที่ส่ง</div>}
       {isDirectVideo ? (
-        <video src={link} controls className="w-full rounded-lg" style={{ maxHeight: 240, background: '#000' }} />
+        <video src={link} controls className="w-full rounded-lg" style={{ maxHeight: compact ? 160 : 240, background: '#000' }} />
+      ) : ytEmbed ? (
+        <iframe src={ytEmbed} title="ดูงานที่ส่ง" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen className="w-full rounded-lg" style={{ aspectRatio: '16/9', border: 'none' }} />
       ) : (
-        <a href={link} target="_blank" rel="noopener noreferrer" className="font-mono text-2xs px-3 py-1.5 inline-flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff' }}>
-          <PlayCircle size={12} /> เปิดดูงานที่ลิงก์นี้
-        </a>
+        <div>
+          <a href={link} target="_blank" rel="noopener noreferrer" className="font-mono text-2xs px-3 py-1.5 inline-flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff' }}>
+            <PlayCircle size={12} /> เปิดดูงานที่ลิงก์นี้
+          </a>
+          {!compact && <p className="font-mono text-2xs mt-1" style={{ color: C.muted }}>* ฝังดูในหน้าตรงๆ ได้เฉพาะ YouTube หรือลิงก์ไฟล์วิดีโอโดยตรง แพลตฟอร์มอื่นต้องเปิดลิงก์</p>}
+        </div>
       )}
     </div>
   );
@@ -1562,12 +1561,12 @@ function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   return (
-    <button onClick={onOpenCalendar} className="p-4 rounded-2xl text-left" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{THAI_MONTHS[month]} {year + 543}</span>
+    <button onClick={onOpenCalendar} className="w-full p-5 rounded-2xl text-left" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="font-mono text-xs tracking-widest" style={{ color: C.blue }}>{THAI_MONTHS[month]} {year + 543}</span>
         <span className="font-mono text-2xs" style={{ color: C.muted }}>ดูปฏิทินเต็ม →</span>
       </div>
-      <div className="grid grid-cols-7 gap-1">
+      <div className="grid grid-cols-7 gap-1.5">
         {cells.map((d, i) => {
           if (!d) return <div key={i} />;
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -1576,11 +1575,53 @@ function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
           const hasData = isToday || !!historyByDate[dateStr];
           const color = isToday ? C.blue : entryColor(entry);
           return (
-            <div key={i} className="aspect-square rounded flex items-center justify-center font-mono text-2xs" style={{ border: `1px solid ${hasData ? color : C.border}`, color: hasData ? C.text : C.muted }}>{d}</div>
+            <div key={i} className="aspect-square rounded-md flex items-center justify-center font-mono text-xs" style={{ border: `1px solid ${hasData ? color : C.border}`, color: hasData ? C.text : C.muted }}>{d}</div>
           );
         })}
       </div>
     </button>
+  );
+}
+
+function QCQueuePanel({ channels, tasks, loadingMap, onUpdate, onQC }) {
+  if (tasks.length === 0) {
+    return (
+      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>ส่งงาน QC</div>
+        <p className="font-body text-xs" style={{ color: C.muted }}>เพิ่มช่องและงานก่อนถึงจะส่ง QC ได้</p>
+      </div>
+    );
+  }
+  return (
+    <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ส่งงาน QC</div>
+      <div className="space-y-3">
+        {tasks.map((t) => {
+          const channel = channels.find((c) => c.id === t.channelId);
+          const platMeta = PLATFORM_META[t.platform];
+          const PlatformIcon = platMeta ? platMeta.icon : null;
+          const busy = !!loadingMap[t.id];
+          return (
+            <div key={t.id} className="pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: channel?.color || C.blue }} />
+                <span className="font-body text-xs truncate" style={{ color: C.text }}>{channel?.name} · {t.label}</span>
+                {PlatformIcon && <PlatformIcon size={11} style={{ color: platMeta.color }} className="shrink-0 ml-auto" />}
+              </div>
+              <input value={t.link} onChange={(e) => onUpdate(t.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              {t.link.trim() && <VideoPreviewBox link={t.link.trim()} compact />}
+              {!t.qc ? (
+                <button onClick={() => onQC(t)} disabled={busy || !t.link.trim()} className="mt-1.5 font-mono text-2xs flex items-center gap-1" style={{ color: t.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
+                  {loadingMap[t.id] === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
+                </button>
+              ) : (
+                <VerdictBox verdict={t.qc} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -1614,7 +1655,7 @@ function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
                 <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ml-auto" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={10} />{meta.label}</span>
               </div>
               <input value={r.checkLink} onChange={(e) => onUpdateCheckLink(r.channelId, r.platform, e.target.value)} placeholder="ลิงก์เช็คงาน (เพจ/โปรไฟล์)" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-              {r.checkLink.trim() && <a href={r.checkLink.trim()} target="_blank" rel="noopener noreferrer" className="font-mono text-2xs mt-1 inline-block" style={{ color: meta.color }}>เปิดเช็คงาน →</a>}
+              {r.checkLink.trim() && <VideoPreviewBox link={r.checkLink.trim()} compact />}
             </div>
           );
         })}
@@ -1806,6 +1847,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
       <div className="space-y-4 lg:sticky lg:top-6">
         <TodayStatusCard tasks={tasks} history={history} />
         <MiniCalendarCard history={history} tasks={tasks} onOpenCalendar={onOpenCalendar} />
+        <QCQueuePanel channels={channels} tasks={tasks} loadingMap={loadingMap} onUpdate={updateTaskField} onQC={runQC} />
         <PlatformCheckPanel channels={channels} onUpdateCheckLink={updateCheckLink} />
       </div>
     </div>
