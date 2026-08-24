@@ -1198,85 +1198,100 @@ const CAPTION_LANGS = [
 ];
 
 function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingAction }) {
+  const [expanded, setExpanded] = useState(false);
   const Icon = task.type === 'video' ? VideoIcon : ImageIcon;
   const platMeta = PLATFORM_META[task.platform];
   const hasMeta = task.title || task.captionTh;
   const busy = !!loadingAction;
+  const statusBits = [];
+  if (task.outline) statusBits.push('มีโครงเรื่อง');
+  if (task.videoPrompt || task.coverPrompt || task.imagePrompt) statusBits.push('มี Prompt');
+  if (hasMeta) statusBits.push('มีชื่อ/คำบรรยาย');
+  if (task.link) statusBits.push('ส่งลิงก์แล้ว');
+  if (task.qc) statusBits.push(task.qc.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข');
   return (
     <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
       <div className="flex items-start gap-3">
         <button onClick={() => onToggle(task.id)} style={{ color: task.done ? C.emerald : C.muted }} className="mt-0.5 shrink-0">{task.done ? <CheckSquare size={18} /> : <Square size={18} />}</button>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Icon size={13} style={{ color: C.muted }} /><span className="font-body text-sm" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span>
+            <button onClick={() => setExpanded((e) => !e)} className="flex-1 flex items-center gap-2 flex-wrap text-left min-w-0">
+              <Icon size={13} style={{ color: C.muted }} className="shrink-0" /><span className="font-body text-sm shrink-0" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span>
               {platMeta && <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: platMeta.color, border: `1px solid ${platMeta.color}` }}>{platMeta.label}</span>}
-            </div>
-            <button onClick={() => onReset(task)} className="font-mono text-2xs flex items-center gap-1 shrink-0" style={{ color: C.muted }}><RefreshCw size={11} /> รีเซ็ต</button>
-          </div>
-
-          <div className="mt-2.5">
-            <label className="font-mono text-2xs block mb-1" style={{ color: C.blue }}>โครงเรื่อง / แนวคิดคอนเทนต์</label>
-            <textarea value={task.outline} onChange={(e) => onUpdate(task.id, { outline: e.target.value })} rows={2} placeholder="เช่น พาชมฟาร์มปลาหมึกยามเช้า..." className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-            <button onClick={() => onGenOutline(task)} disabled={busy} className="mt-1.5 font-mono text-2xs px-2.5 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue, opacity: busy ? 0.6 : 1 }}>
-              {loadingAction === 'outline' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} ให้ AI คิดโครงเรื่องให้
+              {!expanded && statusBits.length > 0 && <span className="font-mono text-2xs truncate" style={{ color: C.muted }}>· {statusBits.join(' · ')}</span>}
             </button>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => onReset(task)} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.muted }}><RefreshCw size={11} /> รีเซ็ต</button>
+              <button onClick={() => setExpanded((e) => !e)} style={{ color: C.muted }}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+            </div>
           </div>
 
-          <div className="mt-2.5">
-            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง (ถ้ามี)</label>
-            <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={2} placeholder="วางสไตล์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-          </div>
-
-          {task.type === 'video' && (
-            <div className="mt-2.5">
-              <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ความยาววิดีโอ</label>
-              <div className="flex flex-wrap gap-1.5">
-                {DURATION_OPTIONS.map((s) => (
-                  <button key={s} onClick={() => onUpdate(task.id, { durationSec: s })} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ background: task.durationSec === s ? BRAND : 'transparent', color: task.durationSec === s ? '#fff' : C.muted, border: `1px solid ${task.durationSec === s ? 'transparent' : C.border}` }}>{s} วิ</button>
-                ))}
+          {expanded && (
+            <div className="anim-fade">
+              <div className="mt-2.5">
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.blue }}>โครงเรื่อง / แนวคิดคอนเทนต์</label>
+                <textarea value={task.outline} onChange={(e) => onUpdate(task.id, { outline: e.target.value })} rows={2} placeholder="เช่น พาชมฟาร์มปลาหมึกยามเช้า..." className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                <button onClick={() => onGenOutline(task)} disabled={busy} className="mt-1.5 font-mono text-2xs px-2.5 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue, opacity: busy ? 0.6 : 1 }}>
+                  {loadingAction === 'outline' ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} ให้ AI คิดโครงเรื่องให้
+                </button>
               </div>
-            </div>
-          )}
 
-          <button onClick={() => onGenPrompts(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
-            {loadingAction === 'prompts' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้าง Prompt {task.type === 'video' ? 'วิดีโอ + หน้าปก' : 'รูปภาพ'}
-          </button>
+              <div className="mt-2.5">
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง (ถ้ามี)</label>
+                <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={2} placeholder="วางสไตล์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-none" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              </div>
 
-          <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
-          <PromptBox label="Prompt หน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
-          <PromptBox label="Prompt รูปภาพ" color={C.violet} value={task.imagePrompt} copied={task.imagePromptCopied} made={task.imagePromptMade} onCopiedChange={(v) => onUpdate(task.id, { imagePromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { imagePromptMade: v })} />
-
-          <button onClick={() => onGenMeta(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald, opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
-            {loadingAction === 'meta' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้างชื่อ + คำบรรยาย + แฮชแท็ก
-          </button>
-
-          {hasMeta && (
-            <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
-              <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task.title}</span></div>
-              {CAPTION_LANGS.map((l) => (
-                task[`caption${l.key}`] ? (
-                  <div key={l.key}>
-                    <div className="font-mono text-2xs" style={{ color: C.emerald }}>คำบรรยาย ({l.label}):</div>
-                    <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${l.key}`]}</p>
-                    {task[`hashtags${l.key}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${l.key}`]}</p>}
+              {task.type === 'video' && (
+                <div className="mt-2.5">
+                  <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ความยาววิดีโอ</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DURATION_OPTIONS.map((s) => (
+                      <button key={s} onClick={() => onUpdate(task.id, { durationSec: s })} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ background: task.durationSec === s ? BRAND : 'transparent', color: task.durationSec === s ? '#fff' : C.muted, border: `1px solid ${task.durationSec === s ? 'transparent' : C.border}` }}>{s} วิ</button>
+                    ))}
                   </div>
-                ) : null
-              ))}
+                </div>
+              )}
+
+              <button onClick={() => onGenPrompts(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
+                {loadingAction === 'prompts' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้าง Prompt {task.type === 'video' ? 'วิดีโอ + หน้าปก' : 'รูปภาพ'}
+              </button>
+
+              <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
+              <PromptBox label="Prompt หน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
+              <PromptBox label="Prompt รูปภาพ" color={C.violet} value={task.imagePrompt} copied={task.imagePromptCopied} made={task.imagePromptMade} onCopiedChange={(v) => onUpdate(task.id, { imagePromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { imagePromptMade: v })} />
+
+              <button onClick={() => onGenMeta(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald, opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
+                {loadingAction === 'meta' ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} สร้างชื่อ + คำบรรยาย + แฮชแท็ก
+              </button>
+
+              {hasMeta && (
+                <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                  <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task.title}</span></div>
+                  {CAPTION_LANGS.map((l) => (
+                    task[`caption${l.key}`] ? (
+                      <div key={l.key}>
+                        <div className="font-mono text-2xs" style={{ color: C.emerald }}>คำบรรยาย ({l.label}):</div>
+                        <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${l.key}`]}</p>
+                        {task[`hashtags${l.key}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${l.key}`]}</p>}
+                      </div>
+                    ) : null
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-3">
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ลิงก์ยืนยันการส่งงาน</label>
+                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              </div>
+
+              {!task.qc && (
+                <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-2 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
+                  {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
+                </button>
+              )}
+              <VerdictBox verdict={task.qc} />
             </div>
           )}
-
-          <div className="mt-3">
-            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ลิงก์ยืนยันการส่งงาน</label>
-            <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-          </div>
-
-          {!task.qc && (
-            <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-2 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
-              {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
-            </button>
-          )}
-          <VerdictBox verdict={task.qc} />
         </div>
       </div>
     </div>
@@ -1341,7 +1356,7 @@ function channelStatusLabel(done, total) {
 }
 
 function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
   const done = tasks.filter((t) => t.done).length;
   const status = channelStatusLabel(done, tasks.length);
