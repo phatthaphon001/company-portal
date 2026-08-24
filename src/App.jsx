@@ -138,7 +138,7 @@ const PLATFORMS = [
 ];
 
 const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ถ้าผู้ใช้ระบุสไตล์หรือแนวที่ต้องการมา ต้องยึดตามนั้นเป็นหลักเสมอ (เช่น ถ้าขอการ์ตูนเด็ก โครงเรื่องต้องเป็นการ์ตูนเด็ก ไม่ใช่แค่พูดถึงหัวข้อช่องเฉยๆ) ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
-const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างวิดีโอ และ prompt สำหรับ AI สร้างภาพหน้าปก เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุความยาว สไตล์ และรายละเอียดฉากให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "..."}';
+const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง 3 อย่างแยกกันชัดเจน ห้ามปนกัน: (1) videoPrompt = prompt สำหรับ AI สร้างวิดีโอ/ความเคลื่อนไหวโดยตรง ถ้าข้อความระบุ "จำนวนฉากที่ควรแบ่ง" มากกว่า 1 ฉาก ให้แบ่งเป็นฉากลำดับชัดเจนรูปแบบ "Scene 1: ... Scene 2: ... Scene 3: ..." แต่ละฉากยาวประมาณ 5-10 วินาที บรรยายแยกฉากละเอียดพอเอาไปสร้างทีละฉากแล้วต่อกันได้จริง ถ้าแค่ 1 ฉากให้เขียนต่อเนื่องปกติ (2) coverPrompt = prompt สำหรับสร้างภาพหน้าปก/thumbnail ที่จะโชว์บนแพลตฟอร์ม เป็นภาพนิ่งภาพเดียว (3) sourceImagePrompt = prompt สำหรับสร้างภาพนิ่งตั้งต้นภาพเดียว (ไม่ใช่หน้าปก) ที่จะเอาไปใช้กับ AI แบบ image-to-video เพื่อสร้างความเคลื่อนไหวต่อ เขียน prompt ทั้ง 3 เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุสไตล์ให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "...", "sourceImagePrompt": "..."}';
 const PROMPTS_SYS_IMAGE = 'คุณคือฝ่ายคิดคอนเทนต์โพสต์รูปภาพ จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างภาพโพสต์ เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพเข้าใจง่าย ระบุสไตล์และรายละเอียดให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"imagePrompt": "..."}';
 const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ (ภาษาไทย) คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"title":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
 const QC_NOTE = 'หมายเหตุ: ระบบไม่สามารถเปิดดูวิดีโอ/รูปภาพจริงจากลิงก์ได้ ตรวจได้แค่จากข้อมูลที่กรอกในระบบเท่านั้น';
@@ -203,6 +203,7 @@ function emptyTask(id, channelId, platform, type, label) {
     imagePrompt: '', imagePromptCopied: false, imagePromptMade: false,
     videoPrompt: '', videoPromptCopied: false, videoPromptMade: false,
     coverPrompt: '', coverPromptCopied: false, coverPromptMade: false,
+    sourceImagePrompt: '', sourceImagePromptCopied: false, sourceImagePromptMade: false,
     title: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
     link: '', qc: null, lastError: '', referenceLink: '',
@@ -1193,6 +1194,72 @@ function PromptBox({ label, color, value, copied, made, onCopiedChange, onMadeCh
   );
 }
 
+function parseScenes(text) {
+  if (!text) return null;
+  const matches = [...text.matchAll(/Scene\s*(\d+)\s*:\s*/gi)];
+  if (matches.length < 2) return null;
+  const scenes = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index + matches[i][0].length;
+    const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+    scenes.push({ number: matches[i][1], text: text.slice(start, end).trim() });
+  }
+  return scenes;
+}
+
+function VideoPromptBox({ value, copied, made, onCopiedChange, onMadeChange }) {
+  const [sceneCopyMsg, setSceneCopyMsg] = useState({});
+  const [wholeCopyMsg, setWholeCopyMsg] = useState('');
+  if (!value) return null;
+  const scenes = parseScenes(value);
+
+  if (!scenes) {
+    return <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={value} copied={copied} made={made} onCopiedChange={onCopiedChange} onMadeChange={onMadeChange} />;
+  }
+
+  function copyWhole() {
+    navigator.clipboard.writeText(value).then(() => {
+      onCopiedChange(true);
+      setWholeCopyMsg('คัดลอกแล้ว ✓');
+      setTimeout(() => setWholeCopyMsg(''), 1500);
+    }).catch(() => {});
+  }
+  function copyScene(idx, sceneText) {
+    navigator.clipboard.writeText(sceneText).then(() => {
+      setSceneCopyMsg((m) => ({ ...m, [idx]: 'คัดลอกแล้ว ✓' }));
+      setTimeout(() => setSceneCopyMsg((m) => ({ ...m, [idx]: '' })), 1500);
+    }).catch(() => {});
+  }
+
+  return (
+    <div className="p-2.5 rounded-xl mt-2" style={{ background: C.bgDeep, border: `1px solid ${C.cyan}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="font-mono text-2xs" style={{ color: C.cyan }}>Prompt วิดีโอ ({scenes.length} ฉาก)</span>
+        <button onClick={copyWhole} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ border: `1px solid ${C.cyan}`, color: C.cyan }}>{wholeCopyMsg || 'คัดลอกทั้งหมด'}</button>
+      </div>
+      <div className="space-y-2">
+        {scenes.map((s, i) => (
+          <div key={i} className="p-2 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="font-mono text-2xs" style={{ color: C.text }}>ฉากที่ {s.number}</span>
+              <button onClick={() => copyScene(i, s.text)} className="font-mono text-2xs px-1.5 py-0.5 rounded" style={{ border: `1px solid ${C.border}`, color: C.muted }}>{sceneCopyMsg[i] || 'คัดลอก'}</button>
+            </div>
+            <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{s.text}</p>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-4 mt-2">
+        <label className="flex items-center gap-1.5 font-mono text-2xs cursor-pointer" style={{ color: copied ? C.emerald : C.muted }}>
+          <input type="checkbox" checked={copied} onChange={(e) => onCopiedChange(e.target.checked)} /> คัดลอกครบทุกฉากแล้ว
+        </label>
+        <label className="flex items-center gap-1.5 font-mono text-2xs cursor-pointer" style={{ color: made ? C.emerald : C.muted }}>
+          <input type="checkbox" checked={made} onChange={(e) => onMadeChange(e.target.checked)} /> สร้างครบทุกฉากแล้ว
+        </label>
+      </div>
+    </div>
+  );
+}
+
 const CAPTION_LANGS = [
   { key: 'Th', label: 'ไทย' },
   { key: 'En', label: 'English' },
@@ -1207,7 +1274,7 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
   const busy = !!loadingAction;
   const statusBits = [];
   if (task.outline) statusBits.push('มีโครงเรื่อง');
-  if (task.videoPrompt || task.coverPrompt || task.imagePrompt) statusBits.push('มี Prompt');
+  if (task.videoPrompt || task.coverPrompt || task.sourceImagePrompt || task.imagePrompt) statusBits.push('มี Prompt');
   if (hasMeta) statusBits.push('มีชื่อ/คำบรรยาย');
   if (task.link) statusBits.push('ส่งลิงก์แล้ว');
   if (task.qc) statusBits.push(task.qc.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข');
@@ -1263,8 +1330,9 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
               </button>
               {task.lastError && <p className="font-mono text-2xs mt-1.5" style={{ color: C.red }}>{task.lastError}</p>}
 
-              <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
-              <PromptBox label="Prompt หน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
+              <PromptBox label="Prompt รูป" color={C.orange} value={task.sourceImagePrompt} copied={task.sourceImagePromptCopied} made={task.sourceImagePromptMade} onCopiedChange={(v) => onUpdate(task.id, { sourceImagePromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { sourceImagePromptMade: v })} />
+              <VideoPromptBox value={task.videoPrompt} copied={task.videoPromptCopied} made={task.videoPromptMade} onCopiedChange={(v) => onUpdate(task.id, { videoPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { videoPromptMade: v })} />
+              <PromptBox label="Prompt รูปหน้าปก" color={C.violet} value={task.coverPrompt} copied={task.coverPromptCopied} made={task.coverPromptMade} onCopiedChange={(v) => onUpdate(task.id, { coverPromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { coverPromptMade: v })} />
               <PromptBox label="Prompt รูปภาพ" color={C.violet} value={task.imagePrompt} copied={task.imagePromptCopied} made={task.imagePromptMade} onCopiedChange={(v) => onUpdate(task.id, { imagePromptCopied: v })} onMadeChange={(v) => onUpdate(task.id, { imagePromptMade: v })} />
 
               <button onClick={() => onGenMeta(task)} disabled={busy || !task.outline.trim()} className="mt-2.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald, opacity: (busy || !task.outline.trim()) ? 0.5 : 1 }}>
@@ -1516,6 +1584,45 @@ function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
   );
 }
 
+function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
+  const rows = [];
+  channels.forEach((c) => {
+    c.platforms.forEach((p) => {
+      rows.push({ channelId: c.id, channelName: c.name, channelColor: c.color, ...p });
+    });
+  });
+  if (rows.length === 0) {
+    return (
+      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>เช็คงานตามแพลตฟอร์ม</div>
+        <p className="font-body text-xs" style={{ color: C.muted }}>เพิ่มช่องก่อนถึงจะเช็คงานตรงนี้ได้</p>
+      </div>
+    );
+  }
+  return (
+    <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เช็คงานตามแพลตฟอร์ม</div>
+      <div className="space-y-3">
+        {rows.map((r) => {
+          const meta = PLATFORM_META[r.platform];
+          const PlatformIcon = meta.icon;
+          return (
+            <div key={`${r.channelId}-${r.platform}`} className="pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.channelColor }} />
+                <span className="font-body text-xs truncate" style={{ color: C.text }}>{r.channelName}</span>
+                <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ml-auto" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={10} />{meta.label}</span>
+              </div>
+              <input value={r.checkLink} onChange={(e) => onUpdateCheckLink(r.channelId, r.platform, e.target.value)} placeholder="ลิงก์เช็คงาน (เพจ/โปรไฟล์)" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              {r.checkLink.trim() && <a href={r.checkLink.trim()} target="_blank" rel="noopener noreferrer" className="font-mono text-2xs mt-1 inline-block" style={{ color: meta.color }}>เปิดเช็คงาน →</a>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, onDismissReminder, onOpenCalendar }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
@@ -1530,7 +1637,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
 
   function addChannel(name, platform, dailyVideos, dailyImages) {
     const color = CHANNEL_COLORS[channels.length % CHANNEL_COLORS.length];
-    const channel = { id: Date.now().toString(), name, color, platforms: [{ platform, dailyVideos, dailyImages }] };
+    const channel = { id: Date.now().toString(), name, color, platforms: [{ platform, dailyVideos, dailyImages, checkLink: '' }] };
     setChannels((prev) => [...prev, channel]);
     setTasks((prev) => [...prev, ...buildTasksForPlatform(channel.id, channel.platforms[0], 0, 0)]);
   }
@@ -1538,8 +1645,11 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
     const chTasks = tasksRef.current.filter((t) => t.channelId === channelId);
     const videoOffset = chTasks.filter((t) => t.type === 'video').length;
     const imageOffset = chTasks.filter((t) => t.type === 'image').length;
-    setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: [...c.platforms, { platform, dailyVideos, dailyImages }] } : c)));
+    setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: [...c.platforms, { platform, dailyVideos, dailyImages, checkLink: '' }] } : c)));
     setTasks((prev) => [...prev, ...buildTasksForPlatform(channelId, { platform, dailyVideos, dailyImages }, videoOffset, imageOffset)]);
+  }
+  function updateCheckLink(channelId, platform, checkLink) {
+    setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.map((p) => (p.platform === platform ? { ...p, checkLink } : p)) } : c)));
   }
   function removePlatform(channelId, platform) {
     setChannels((prev) => prev.map((c) => (c.id === channelId ? { ...c, platforms: c.platforms.filter((p) => p.platform !== platform) } : c)));
@@ -1581,7 +1691,8 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
     updateTaskField(task.id, { lastError: '' });
     const channel = channels.find((c) => c.id === task.channelId);
     const sys = task.type === 'video' ? PROMPTS_SYS_VIDEO : PROMPTS_SYS_IMAGE;
-    const durationLine = task.type === 'video' ? `\nความยาว: ${task.durationSec} วินาที` : '';
+    const sceneCount = task.type === 'video' ? (task.durationSec <= 20 ? 1 : Math.max(2, Math.round(task.durationSec / 8))) : 0;
+    const durationLine = task.type === 'video' ? `\nความยาว: ${task.durationSec} วินาที\nจำนวนฉากที่ควรแบ่ง: ${sceneCount} ฉาก` : '';
     const styleLine = task.styleTemplate.trim() ? `\nเทมเพลต/สไตล์อ้างอิง: ${task.styleTemplate.trim()}` : '';
     try {
       const text = await callClaude(sys, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}${durationLine}${styleLine}`);
@@ -1589,9 +1700,11 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
       updateTaskField(task.id, {
         videoPrompt: json.videoPrompt || task.videoPrompt,
         coverPrompt: json.coverPrompt || task.coverPrompt,
+        sourceImagePrompt: json.sourceImagePrompt || task.sourceImagePrompt,
         imagePrompt: json.imagePrompt || task.imagePrompt,
         videoPromptCopied: false, videoPromptMade: false,
         coverPromptCopied: false, coverPromptMade: false,
+        sourceImagePromptCopied: false, sourceImagePromptMade: false,
         imagePromptCopied: false, imagePromptMade: false,
       });
     } catch (e) {
@@ -1663,35 +1776,38 @@ function DailyWork({ channels, setChannels, tasks, setTasks, history, reminder, 
   const totalDone = tasks.filter((t) => t.done).length;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{todayLabel()}</span></div>
-      <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
-      <div className="mt-3"><ReminderBanner reminder={reminder} onDismiss={onDismissReminder} /></div>
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8 anim-fade grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 mb-1"><Calendar size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{todayLabel()}</span></div>
+        <h2 className="font-body text-xl" style={{ color: C.text }}>งานประจำวัน</h2>
+        <div className="mt-3"><ReminderBanner reminder={reminder} onDismiss={onDismissReminder} /></div>
 
-      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <div className="flex items-center justify-between gap-3 mt-4 mb-6">
+          <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
+          <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
+        </div>
+
+        {showAdd ? (
+          <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
+        ) : (
+          <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
+        )}
+
+        {channels.length === 0 ? (
+          <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น</p>
+        ) : (
+          channels.map((c) => (
+            <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
+          ))
+        )}
+        <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่</p>
+      </div>
+
+      <div className="space-y-4 lg:sticky lg:top-6">
         <TodayStatusCard tasks={tasks} history={history} />
         <MiniCalendarCard history={history} tasks={tasks} onOpenCalendar={onOpenCalendar} />
+        <PlatformCheckPanel channels={channels} onUpdateCheckLink={updateCheckLink} />
       </div>
-
-      <div className="flex items-center justify-between gap-3 mt-4 mb-6">
-        <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={tasks.length} color={C.blue} /></div>
-        <button onClick={resetToday} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>เริ่มวันใหม่</button>
-      </div>
-
-      {showAdd ? (
-        <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
-      ) : (
-        <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
-      )}
-
-      {channels.length === 0 ? (
-        <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น</p>
-      ) : (
-        channels.map((c) => (
-          <DailyChannelBlock key={c.id} channel={c} tasks={tasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
-        ))
-      )}
-      <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่</p>
     </div>
   );
 }
@@ -1752,10 +1868,10 @@ export default function CompanyPortal() {
         const oldPlatformByChannelId = {};
         const loadedChannels = rawChannels.map((c, idx) => {
           const color = c.color || CHANNEL_COLORS[idx % CHANNEL_COLORS.length];
-          if (Array.isArray(c.platforms)) return { ...c, color };
+          if (Array.isArray(c.platforms)) return { ...c, color, platforms: c.platforms.map((p) => ({ ...p, checkLink: p.checkLink || '' })) };
           const plat = c.platform || 'other';
           oldPlatformByChannelId[c.id] = plat;
-          return { id: c.id, name: c.name, color, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0 }] };
+          return { id: c.id, name: c.name, color, platforms: [{ platform: plat, dailyVideos: c.dailyVideos || 0, dailyImages: c.dailyImages || 0, checkLink: '' }] };
         });
         let loadedTasks = rawTasks.map((t) => {
           if (t.platform) return t;
