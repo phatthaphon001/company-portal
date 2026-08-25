@@ -142,7 +142,7 @@ const PLATFORMS = [
 const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ถ้าผู้ใช้ระบุสไตล์หรือแนวที่ต้องการมา ต้องยึดตามนั้นเป็นหลักเสมอ (เช่น ถ้าขอการ์ตูนเด็ก โครงเรื่องต้องเป็นการ์ตูนเด็ก ไม่ใช่แค่พูดถึงหัวข้อช่องเฉยๆ) ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
 const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง 3 อย่างแยกกันชัดเจน ห้ามปนกัน: (1) videoPrompt = prompt สำหรับ AI สร้างวิดีโอ/ความเคลื่อนไหวโดยตรง ถ้าข้อความระบุ "จำนวนฉากที่ควรแบ่ง" มากกว่า 1 ฉาก ให้แบ่งเป็นฉากลำดับชัดเจนรูปแบบ "Scene 1: ... Scene 2: ... Scene 3: ..." แต่ละฉากยาวประมาณ 3-5 วินาที บรรยายแยกฉากละเอียดพอเอาไปสร้างทีละฉากแล้วต่อกันได้จริง ถ้าแค่ 1 ฉากให้เขียนต่อเนื่องปกติ (2) coverPrompt = prompt สำหรับสร้างภาพหน้าปก/thumbnail ที่จะโชว์บนแพลตฟอร์ม เป็นภาพนิ่งภาพเดียว (3) sourceImagePrompt = prompt สำหรับสร้างภาพนิ่งตั้งต้นภาพเดียว (ไม่ใช่หน้าปก) ที่จะเอาไปใช้กับ AI แบบ image-to-video เพื่อสร้างความเคลื่อนไหวต่อ เขียน prompt ทั้ง 3 เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุสไตล์ให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "...", "sourceImagePrompt": "..."}';
 const PROMPTS_SYS_IMAGE = 'คุณคือฝ่ายคิดคอนเทนต์โพสต์รูปภาพ จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างภาพโพสต์ เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพเข้าใจง่าย ระบุสไตล์และรายละเอียดให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"imagePrompt": "..."}';
-const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ (ภาษาไทย) คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"title":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
+const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ทั้งชื่อและคำบรรยายต้องมีครบทั้ง 3 ภาษา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"titleTh":"...","titleEn":"...","titleZh":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
 const QC_NOTE = 'หมายเหตุ: ระบบไม่สามารถเปิดดูวิดีโอ/รูปภาพจริงจากลิงก์ได้ ตรวจได้แค่จากข้อมูลที่กรอกในระบบเท่านั้น';
 const QC_SYS_VIDEO = `คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์คลิปวิดีโอ จากโครงเรื่อง พรอมต์วิดีโอ พรอมต์หน้าปก ชื่อคลิป และคำบรรยายที่ให้มา ตรวจว่าเหมาะสม ชัดเจน สอดคล้องกัน ไม่เข้าข่ายผิดกฎทั่วไปของแพลตฟอร์มโซเชียล (เนื้อหารุนแรง ล่อแหลม ผิดกฎหมาย ฯลฯ) ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด ${QC_NOTE}`;
 const QC_SYS_IMAGE = `คุณคือฝ่าย QC ตรวจสอบเนื้อหาที่เตรียมไว้สำหรับโพสต์รูปภาพ จากโครงเรื่อง พรอมต์รูปภาพ ชื่อโพสต์ และคำบรรยายที่ให้มา ตรวจว่าเหมาะสม ชัดเจน สอดคล้องกัน ไม่เข้าข่ายผิดกฎทั่วไปของแพลตฟอร์มโซเชียล (เนื้อหารุนแรง ล่อแหลม ผิดกฎหมาย ฯลฯ) ตอบเป็นภาษาไทย บรรทัดแรกขึ้นต้นด้วยคำว่า "ผ่าน" หรือ "ควรแก้ไข" ตามด้วยเหตุผลสั้นๆ ไม่เกิน 3 บรรทัด ${QC_NOTE}`;
@@ -216,7 +216,7 @@ function emptyTask(id, channelId, platform, type, label, date) {
     videoPrompt: '', videoPromptCopied: false, videoPromptMade: false,
     coverPrompt: '', coverPromptCopied: false, coverPromptMade: false,
     sourceImagePrompt: '', sourceImagePromptCopied: false, sourceImagePromptMade: false,
-    title: '', captionTh: '', captionEn: '', captionZh: '',
+    titleTh: '', titleEn: '', titleZh: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
     link: '', qc: null, lastError: '', referenceLink: '',
     templateLinks: [''], // ลิงก์วิดีโอ/รูปต้นแบบให้ AI ดูสไตล์ (เพิ่มได้หลายลิงก์)
@@ -271,7 +271,7 @@ function dedupeTasks(list) {
       seen.set(key, t);
       continue;
     }
-    const score = (x) => (x.outline ? 1 : 0) + (x.videoPrompt || x.imagePrompt ? 1 : 0) + (x.title ? 1 : 0) + (x.link ? 1 : 0) + (x.done ? 1 : 0);
+    const score = (x) => (x.outline ? 1 : 0) + (x.videoPrompt || x.imagePrompt ? 1 : 0) + (x.titleTh ? 1 : 0) + (x.link ? 1 : 0) + (x.done ? 1 : 0);
     if (score(t) > score(existing)) seen.set(key, t);
   }
   return Array.from(seen.values());
@@ -610,7 +610,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
           <button type="button" onClick={() => setLoginStep('credentials')} className="w-full font-mono text-2xs tracking-widest" style={{ color: C.muted }}>← กลับ</button>
         </form>
       )}
-      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* เข้าสู่ระบบ 6 ครั้งแรกไม่ต้องยืนยันอีเมล ตั้งแต่ครั้งที่ 7 เป็นต้นไปต้องยืนยันรหัสทางอีเมลทุกครั้ง</p></div>
+      <div className="px-6 pb-5"><p className="font-mono text-2xs leading-relaxed" style={{ color: C.muted }}>* เข้าสู่ระบบ 6 ครั้งแรก<b>ของแต่ละวัน</b>ไม่ต้องยืนยันอีเมล ตั้งแต่ครั้งที่ 7 ของวันนั้นเป็นต้นไปต้องยืนยันรหัสทางอีเมลทุกครั้ง · พอขึ้นวันใหม่ (เที่ยงคืน เวลาไทย) ระบบจะเริ่มนับใหม่เอง</p></div>
     </AuthShell>
   );
 }
@@ -705,10 +705,11 @@ function PlatformsPanel() {
   );
 }
 
-function SecurityProtocol({ user }) {
+function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
   const [security, setSecurity] = useState({ forceOtpAlways: false });
   const [loaded, setLoaded] = useState(false);
   const [savingToggle, setSavingToggle] = useState(false);
+  const [savingOwnToggle, setSavingOwnToggle] = useState(false);
   const [resetMsg, setResetMsg] = useState('');
   const [resetting, setResetting] = useState(false);
 
@@ -743,11 +744,35 @@ function SecurityProtocol({ user }) {
     setTimeout(() => setResetMsg(''), 4000);
   }
 
+  async function handleToggleOwn() {
+    setSavingOwnToggle(true);
+    try {
+      await onToggleOwnOtpExempt();
+    } finally {
+      setSavingOwnToggle(false);
+    }
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><ScrollText size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SECURITY PROTOCOL</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>มาตรการความปลอดภัยสำหรับระบบจริง</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ระบบล็อกอิน ฐานข้อมูล และรหัสผ่าน เชื่อมต่อทำงานจริงแล้วทั้งหมด</p>
+
+      {user.isOwner && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.violet }}>เฉพาะบัญชีของคุณ (เจ้าของระบบ)</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-body text-sm" style={{ color: C.text }}>ตัวฉันเองไม่ต้องยืนยันอีเมล</div>
+              <p className="font-body text-xs leading-relaxed" style={{ color: C.muted }}>เปิดไว้ = บัญชีของคุณจะไม่โดนขอ OTP เลย ไม่ว่าจะล็อกอินกี่ครั้ง หรือเปิด "บังคับยืนยันทุกครั้ง" ด้านล่างไว้ก็ตาม ผู้ใช้คนอื่นไม่มีสิทธิ์ปิดให้ตัวเอง ต้องทำตามกฎที่คุณตั้งไว้เสมอ</p>
+            </div>
+            <button onClick={handleToggleOwn} disabled={savingOwnToggle} className="shrink-0 w-11 h-6 rounded-full relative" style={{ background: user.otpExempt ? C.violet : C.border }}>
+              <span className="absolute top-0.5 w-5 h-5 rounded-full" style={{ left: user.otpExempt ? 22 : 2, background: '#fff', transition: 'left 0.2s ease' }} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {user.clearance === 3 && (
         <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -755,7 +780,7 @@ function SecurityProtocol({ user }) {
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="min-w-0">
               <div className="font-body text-sm" style={{ color: C.text }}>บังคับยืนยันอีเมลทุกครั้ง</div>
-              <p className="font-body text-xs" style={{ color: C.muted }}>ปกติ 6 ครั้งแรกไม่ต้องยืนยัน เปิดตัวนี้เพื่อบังคับยืนยันทุกครั้งแทน</p>
+              <p className="font-body text-xs" style={{ color: C.muted }}>ปกติ 6 ครั้งแรกของแต่ละวันไม่ต้องยืนยัน (นับใหม่ทุกเที่ยงคืน) เปิดตัวนี้เพื่อบังคับยืนยันทุกครั้งแทน</p>
             </div>
             <button onClick={toggleForceOtp} disabled={savingToggle || !loaded} className="shrink-0 w-11 h-6 rounded-full relative" style={{ background: security.forceOtpAlways ? C.emerald : C.border }}>
               <span className="absolute top-0.5 w-5 h-5 rounded-full" style={{ left: security.forceOtpAlways ? 22 : 2, background: '#fff', transition: 'left 0.2s ease' }} />
@@ -1082,7 +1107,9 @@ function AnalyticsPage({ history, tasks, channels }) {
   const trend = [...history, todayEntry].slice(-14).map((h) => ({ date: h.date.slice(5), pct: h.totalTasks ? Math.round((h.doneTasks / h.totalTasks) * 100) : 0 }));
   const byChannel = channels.map((c) => {
     const chTasks = tasks.filter((t) => t.channelId === c.id);
-    return { name: c.name, platform: c.platforms.map((p) => PLATFORM_META[p.platform].label).join(', '), done: chTasks.filter((t) => t.done).length, total: chTasks.length };
+    const done = chTasks.filter((t) => t.done).length;
+    const total = chTasks.length;
+    return { name: c.name, platform: c.platforms.map((p) => PLATFORM_META[p.platform].label).join(', '), done, total, remaining: Math.max(0, total - done) };
   });
   const qcPassed = tasks.filter((t) => t.qc && t.qc.passed).length;
   const qcFailed = tasks.filter((t) => t.qc && !t.qc.passed).length;
@@ -1186,16 +1213,28 @@ function AnalyticsPage({ history, tasks, channels }) {
       </div>
 
       <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>วันนี้แยกตามช่อง</div>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>วันนี้แยกตามช่อง (ชาร์ตแท่ง)</div>
         {byChannel.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีช่อง</p> : (
-          <div className="space-y-2">
-            {byChannel.map((c) => (
-              <div key={c.name} className="flex items-center justify-between">
-                <span className="font-body text-xs" style={{ color: C.text }}>{c.name} <span style={{ color: C.muted }}>({c.platform})</span></span>
-                <span className="font-mono text-2xs" style={{ color: C.muted }}>{c.done}/{c.total}</span>
-              </div>
-            ))}
-          </div>
+          <>
+            <ResponsiveContainer width="100%" height={Math.max(120, byChannel.length * 44)}>
+              <BarChart data={byChannel} layout="vertical" margin={{ left: 8, right: 16 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
+                <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fill: C.text, fontSize: 11 }} width={90} />
+                <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                <Bar dataKey="done" stackId="a" fill={C.emerald} radius={[0, 0, 0, 0]} name="เสร็จแล้ว" />
+                <Bar dataKey="remaining" stackId="a" fill={C.border} radius={[0, 4, 4, 0]} name="เหลืออีก" />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mt-2 space-y-1">
+              {byChannel.map((c) => (
+                <div key={c.name} className="flex items-center justify-between">
+                  <span className="font-body text-xs" style={{ color: C.text }}>{c.name} <span style={{ color: C.muted }}>({c.platform})</span></span>
+                  <span className="font-mono text-2xs" style={{ color: C.muted }}>{c.done}/{c.total}</span>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -1442,7 +1481,7 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
   const [capLang, setCapLang] = useState('Th');
   const Icon = task.type === 'video' ? VideoIcon : ImageIcon;
   const platMeta = PLATFORM_META[task.platform];
-  const hasMeta = task.title || task.captionTh;
+  const hasMeta = task.titleTh || task.title || task.captionTh;
   const busy = !!loadingAction;
   const statusBits = [];
   if (task.outline) statusBits.push('มีโครงเรื่อง');
@@ -1533,19 +1572,19 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
 
               {hasMeta && (
                 <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
-                  <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task.title}</span></div>
                   <div className="flex gap-1.5">
                     {CAPTION_LANGS.map((l) => (
                       <button key={l.key} onClick={() => setCapLang(l.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: capLang === l.key ? BRAND : 'transparent', color: capLang === l.key ? '#fff' : C.muted, border: `1px solid ${capLang === l.key ? 'transparent' : C.border}` }}>{l.label}</button>
                     ))}
                   </div>
-                  {task[`caption${capLang}`] ? (
+                  {task[`caption${capLang}`] || task[`title${capLang}`] || (capLang === 'Th' && task.title) ? (
                     <div>
-                      <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${capLang}`]}</p>
+                      {(task[`title${capLang}`] || (capLang === 'Th' && task.title)) && <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task[`title${capLang}`] || task.title}</span></div>}
+                      <p className="font-body text-xs mt-1" style={{ color: C.text }}>{task[`caption${capLang}`]}</p>
                       {task[`hashtags${capLang}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${capLang}`]}</p>}
                     </div>
                   ) : (
-                    <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีคำบรรยายภาษานี้</p>
+                    <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีชื่อ/คำบรรยายภาษานี้</p>
                   )}
                 </div>
               )}
@@ -2016,7 +2055,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
   async function genOutline(task) {
     setLoading(task.id, 'outline');
     const channel = channels.find((c) => c.id === task.channelId);
-    const avoidList = activeTasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
+    const avoidList = activeTasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.titleTh || t.outline)).map((t) => t.titleTh || t.outline).slice(0, 10);
     const avoidText = avoidList.length ? `\nเคยทำไปแล้ว (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
     const styleLine = task.styleTemplate.trim() ? `\nสไตล์/แนวที่ต้องการ: ${task.styleTemplate.trim()}` : '';
     const templateLinkList = (task.templateLinks || []).map((l) => l.trim()).filter(Boolean);
@@ -2072,7 +2111,8 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
       const text = await callClaude(META_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}`);
       const json = parseJsonLoose(text) || {};
       updateTaskField(task.id, {
-        title: json.title || '', captionTh: json.captionTh || '', captionEn: json.captionEn || '', captionZh: json.captionZh || '',
+        titleTh: json.titleTh || json.title || '', titleEn: json.titleEn || '', titleZh: json.titleZh || '',
+        captionTh: json.captionTh || '', captionEn: json.captionEn || '', captionZh: json.captionZh || '',
         hashtagsTh: json.hashtagsTh || '', hashtagsEn: json.hashtagsEn || '', hashtagsZh: json.hashtagsZh || '',
       });
     } catch (e) {
@@ -2086,8 +2126,8 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     setLoading(task.id, 'qc');
     const sys = task.type === 'video' ? QC_SYS_VIDEO : QC_SYS_IMAGE;
     const summary = task.type === 'video'
-      ? `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์วิดีโอ: ${task.videoPrompt || '-'}\nพรอมต์หน้าปก: ${task.coverPrompt || '-'}\nชื่อคลิป: ${task.title || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`
-      : `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์รูปภาพ: ${task.imagePrompt || '-'}\nชื่อโพสต์: ${task.title || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`;
+      ? `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์วิดีโอ: ${task.videoPrompt || '-'}\nพรอมต์หน้าปก: ${task.coverPrompt || '-'}\nชื่อคลิป: ${task.titleTh || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`
+      : `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์รูปภาพ: ${task.imagePrompt || '-'}\nชื่อโพสต์: ${task.titleTh || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`;
     try {
       const text = await callClaude(sys, summary);
       const passed = text.trim().startsWith('ผ่าน');
@@ -2192,13 +2232,21 @@ export default function CompanyPortal() {
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
   function handleLogin(account) {
     setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: account.lastLogin || Date.now() } : a)));
-    setUser({ name: account.name, clearance: account.clearance, email: account.email });
+    setUser({ name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt });
     setStage('daily');
   }
   async function updateAccountClearance(email, clearance) {
     setAccounts((prev) => prev.map((a) => (a.email === email ? { ...a, clearance } : a)));
     try {
       await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateClearance', email, clearance }) });
+    } catch (err) {}
+  }
+  // เจ้าของระบบตั้งค่ายกเว้นตัวเองจากการยืนยัน OTP ได้ (ผู้ใช้คนอื่นไม่มีปุ่มนี้ ต้องทำตามกฎปกติเสมอ)
+  async function toggleOwnOtpExempt() {
+    const next = !user.otpExempt;
+    setUser((u) => ({ ...u, otpExempt: next }));
+    try {
+      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateOtpExempt', email: user.email, otpExempt: next }) });
     } catch (err) {}
   }
   async function updateProfile(patch) {
@@ -2366,7 +2414,7 @@ export default function CompanyPortal() {
             {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
             {stage === 'settings' && <SettingsPage user={user} accounts={accounts} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
-            {stage === 'security' && <SecurityProtocol user={user} />}
+            {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
           </div>
         </div>
       )}
