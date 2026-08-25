@@ -81,7 +81,8 @@ export default async function handler(req, res) {
       accounts[idx].lastLogin = Date.now();
       await saveAccounts(accounts);
       const security = await getSecurity();
-      const requireOtp = security.forceOtpAlways || loginCount > 6;
+      // เจ้าของระบบตั้งค่ายกเว้นตัวเองได้ (otpExempt) — ถ้าเปิดไว้ จะไม่ต้องยืนยัน OTP เลยไม่ว่ากรณีใด บัญชีอื่นไม่มีสิทธิ์นี้
+      const requireOtp = !accounts[idx].otpExempt && (security.forceOtpAlways || loginCount > 6);
       return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp });
     }
 
@@ -144,6 +145,17 @@ export default async function handler(req, res) {
       const kept = accounts.filter((a) => a.isOwner || (Date.now() - (a.lastLogin || a.createdAt || Date.now())) <= THIRTY_DAYS_MS);
       if (kept.length !== accounts.length) await saveAccounts(kept);
       return res.status(200).json({ accounts: kept.map(sanitize) });
+    }
+
+    if (action === 'updateOtpExempt') {
+      const { email, otpExempt } = req.body;
+      const accounts = await getAccounts();
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      if (!accounts[idx].isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้นที่ตั้งค่านี้ได้' });
+      accounts[idx].otpExempt = !!otpExempt;
+      await saveAccounts(accounts);
+      return res.status(200).json({ account: sanitize(accounts[idx]) });
     }
 
     return res.status(400).json({ error: 'ไม่รู้จัก action นี้' });
