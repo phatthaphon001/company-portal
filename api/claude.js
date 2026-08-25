@@ -8,10 +8,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า GEMINI_API_KEY ใน Vercel' });
   }
 
-  const { system, content } = req.body || {};
+  const { system, content, images } = req.body || {};
   if (!content) {
     return res.status(400).json({ error: 'ต้องระบุ content' });
   }
+
+  // images (ถ้ามี) = [{ mimeType: 'image/jpeg', data: 'base64...' }, ...] ให้ AI ดูรูปประกอบการวิเคราะห์
+  const imageParts = Array.isArray(images)
+    ? images.filter((im) => im && im.data).map((im) => ({ inline_data: { mime_type: im.mimeType || 'image/jpeg', data: im.data } }))
+    : [];
 
   try {
     const response = await fetch(
@@ -24,7 +29,7 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           system_instruction: system ? { parts: [{ text: system }] } : undefined,
-          contents: [{ role: 'user', parts: [{ text: content }] }],
+          contents: [{ role: 'user', parts: [{ text: content }, ...imageParts] }],
         }),
       }
     );
