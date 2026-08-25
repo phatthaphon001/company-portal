@@ -1,6 +1,13 @@
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000; // Asia/Bangkok = UTC+7 (ไม่มี DST)
+
+// วันที่ปัจจุบันตามเขตเวลาไทย ใช้เทียบว่าล็อกอินนี้อยู่ "วันเดียวกัน" กับครั้งก่อนหรือขึ้นวันใหม่แล้ว
+function bangkokDateStr(ts) {
+  const d = new Date((ts || Date.now()) + BANGKOK_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
 
 async function getAccounts() {
   const r = await fetch(`${REDIS_URL}/get/accounts`, { headers: { Authorization: `Bearer ${REDIS_TOKEN}` } });
@@ -65,8 +72,12 @@ export default async function handler(req, res) {
       const accounts = await getAccounts();
       const idx = accounts.findIndex((a) => (a.email === identifier || a.username === identifier) && a.password === password);
       if (idx === -1) return res.status(400).json({ error: 'อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง' });
-      const loginCount = (accounts[idx].loginCount || 0) + 1;
+      // นับจำนวนครั้งที่ล็อกอิน "ต่อวันปฏิทิน" (เขตเวลาไทย) — ขึ้นวันใหม่แล้วให้เริ่มนับ 1 ใหม่เสมอ
+      const today = bangkokDateStr();
+      const isNewDay = accounts[idx].loginCountDate !== today;
+      const loginCount = isNewDay ? 1 : (accounts[idx].loginCount || 0) + 1;
       accounts[idx].loginCount = loginCount;
+      accounts[idx].loginCountDate = today;
       accounts[idx].lastLogin = Date.now();
       await saveAccounts(accounts);
       const security = await getSecurity();
@@ -87,7 +98,7 @@ export default async function handler(req, res) {
 
     if (action === 'resetLoginCounts') {
       const accounts = await getAccounts();
-      const reset = accounts.map((a) => ({ ...a, loginCount: 0 }));
+      const reset = accounts.map((a) => ({ ...a, loginCount: 0, loginCountDate: null }));
       await saveAccounts(reset);
       return res.status(200).json({ ok: true });
     }
