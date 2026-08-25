@@ -6,9 +6,11 @@ import {
   CheckSquare, Square, Plus, Trash2, Loader2, RefreshCw, ChevronDown, ChevronUp,
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
   CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
+  X, Upload, PieChart as PieChartIcon,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 
 const C = {
@@ -185,15 +187,25 @@ function daysAgoLabel(ts) {
   return `${days} วันที่แล้ว`;
 }
 
-async function callClaude(system, content) {
+async function callClaude(system, content, images) {
   const response = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, content }),
+    body: JSON.stringify({ system, content, images }),
   });
   const data = await response.json();
   if (!response.ok || data?.error) throw new Error(data.error || 'เกิดข้อผิดพลาด');
   return data.text || '(ไม่มีคำตอบ)';
+}
+
+// อ่านไฟล์รูปเป็น base64 (ไม่รวม prefix "data:image/...;base64,") สำหรับส่งให้ AI วิเคราะห์
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function emptyTask(id, channelId, platform, type, label, date) {
@@ -207,7 +219,14 @@ function emptyTask(id, channelId, platform, type, label, date) {
     title: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
     link: '', qc: null, lastError: '', referenceLink: '',
+    templateLinks: [''], // ลิงก์วิดีโอ/รูปต้นแบบให้ AI ดูสไตล์ (เพิ่มได้หลายลิงก์)
   };
+}
+
+// ป้ายชื่องาน (Thai) มาพร้อมเลขลำดับอยู่แล้ว เช่น "วิดีโอ 3" / "โพสต์ 2" — แปลงเป็นอังกฤษกำกับไว้ด้วย
+function taskLabelEn(task) {
+  const n = (task.label.match(/\d+/) || [''])[0];
+  return task.type === 'video' ? `Video ${n}` : `Post ${n}`;
 }
 
 function buildTasksForPlatform(channelId, platformEntry, videoOffset, imageOffset, date) {
@@ -338,9 +357,9 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks }) {
 
   return (
     <div className="w-16 sm:w-56 shrink-0 flex flex-col sticky top-0" style={{ height: '100vh', background: C.bgDeep, borderRight: `1px solid ${C.border}` }}>
-      <div className="p-4 flex items-center justify-center sm:justify-start">
+      <button onClick={() => setStage('daily')} className="p-4 flex items-center justify-center sm:justify-start" aria-label="กลับหน้างานประจำวัน">
         <Wordmark fontSize={15} />
-      </div>
+      </button>
       <div className="flex-1 overflow-y-auto px-2 space-y-1">
         {navItems.map((n) => (
           <SidebarNavItem key={n.key} Icon={n.Icon} label={n.label} active={stage === n.key || (n.key === 'directory' && stage === 'department')} onClick={() => setStage(n.key)} />
@@ -944,7 +963,7 @@ function ReminderBanner({ reminder, onDismiss }) {
   );
 }
 
-function CalendarPage({ history, tasks, channels }) {
+function CalendarPage({ history, tasks, channels, onOpenDay }) {
   const todayStr = todayDateStr();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const now = new Date();
@@ -1003,6 +1022,8 @@ function CalendarPage({ history, tasks, channels }) {
               <button
                 key={i}
                 onClick={() => hasData && setSelectedDate(dateStr)}
+                onDoubleClick={() => onOpenDay && onOpenDay(dateStr)}
+                title="ดับเบิลคลิกเพื่อเปิดดู/แก้ไขงานของวันนี้"
                 className="aspect-square rounded-lg flex items-center justify-center font-mono text-2xs"
                 style={{
                   background: dateStr === selectedDate && hasData ? `${color}33` : 'transparent',
@@ -1020,7 +1041,10 @@ function CalendarPage({ history, tasks, channels }) {
 
       {selectedEntry ? (
         <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-          <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</span>
+            <button onClick={() => onOpenDay && onOpenDay(selectedDate)} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0" style={{ background: BRAND, color: '#fff' }}>เปิดดู/แก้ไขงานวันนี้</button>
+          </div>
           <div style={{ width: '100%', height: 8, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
             <div style={{ width: selectedEntry.totalTasks ? `${Math.round((selectedEntry.doneTasks / selectedEntry.totalTasks) * 100)}%` : '0%', height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
           </div>
@@ -1037,17 +1061,21 @@ function CalendarPage({ history, tasks, channels }) {
           )}
         </div>
       ) : (
-        <p className="font-body text-sm text-center py-6" style={{ color: C.muted }}>เลือกวันที่มีข้อมูล (มีกรอบสี) เพื่อดูรายละเอียด</p>
+        <p className="font-body text-sm text-center py-6" style={{ color: C.muted }}>เลือกวันที่มีข้อมูล (มีกรอบสี) เพื่อดูรายละเอียด — ดับเบิลคลิกวันที่ หรือกด "เปิดดู/แก้ไขงานวันนี้" เพื่อเข้าไปแก้ไขงานของวันนั้น</p>
       )}
     </div>
   );
 }
 
 const ANALYSIS_SYS = 'คุณคือฝ่ายวิเคราะห์ข้อมูลในองค์กรผลิตคอนเทนต์ จากข้อมูลสถิติการทำงานที่ให้มา (อัตราการทำงานเสร็จรายวัน แยกตามช่อง จำนวนงานที่ผ่าน/ไม่ผ่าน QC) ให้วิเคราะห์แนวโน้มสั้นๆ และให้คำแนะนำแนวทางการทำงานที่เป็นประโยชน์ 3-5 ข้อ ตอบเป็นภาษาไทย กระชับ ไม่เกิน 10 บรรทัด หมายเหตุ: ข้อมูลที่มีคือสถิติภายในระบบเท่านั้น ไม่มีข้อมูลยอดวิว/ยอดไลก์จริงจากแพลตฟอร์ม ห้ามอ้างว่ามีข้อมูลนั้น';
+const IMAGE_ANALYSIS_SYS = 'คุณคือฝ่ายวิเคราะห์คอนเทนต์ ดูรูปภาพตัวอย่างผลงาน/โพสต์ที่แนบมา แล้ววิเคราะห์จุดเด่น จุดที่ควรปรับปรุง (องค์ประกอบภาพ สี ความชัดเจนของข้อความ ความน่าสนใจ) และให้คำแนะนำเชิงปฏิบัติ 3-5 ข้อ ตอบเป็นภาษาไทย กระชับ ไม่เกิน 12 บรรทัด';
 
 function AnalyticsPage({ history, tasks, channels }) {
   const [analysis, setAnalysis] = useState('');
   const [loading, setLoading] = useState(false);
+  const [images, setImages] = useState([]); // { id, name, base64, mimeType, dataUrl, platform }
+  const [platformResults, setPlatformResults] = useState({}); // platform (หรือ 'all') -> ข้อความผลวิเคราะห์
+  const [platformLoading, setPlatformLoading] = useState({}); // platform (หรือ 'all') -> true ระหว่างกำลังวิเคราะห์
 
   const todayStr = todayDateStr();
   const todayEntry = { date: todayStr, totalTasks: tasks.length, doneTasks: tasks.filter((t) => t.done).length };
@@ -1058,6 +1086,11 @@ function AnalyticsPage({ history, tasks, channels }) {
   });
   const qcPassed = tasks.filter((t) => t.qc && t.qc.passed).length;
   const qcFailed = tasks.filter((t) => t.qc && !t.qc.passed).length;
+  const qcPieData = (qcPassed + qcFailed) > 0 ? [
+    { name: 'QC ผ่าน', value: qcPassed, color: C.emerald },
+    { name: 'QC ไม่ผ่าน', value: qcFailed, color: C.red },
+  ] : [];
+  const availablePlatforms = Array.from(new Set(channels.flatMap((c) => c.platforms.map((p) => p.platform))));
 
   async function runAnalysis() {
     setLoading(true);
@@ -1073,6 +1106,44 @@ function AnalyticsPage({ history, tasks, channels }) {
     }
   }
 
+  async function handleAddImages(e) {
+    const files = Array.from(e.target.files || []);
+    const newOnes = await Promise.all(files.map(async (f) => {
+      const base64 = await fileToBase64(f);
+      const mimeType = f.type || 'image/jpeg';
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: f.name, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}`, platform: availablePlatforms[0] || 'other' };
+    }));
+    setImages((prev) => [...prev, ...newOnes]);
+    e.target.value = '';
+  }
+  function updateImagePlatform(id, platform) { setImages((prev) => prev.map((im) => (im.id === id ? { ...im, platform } : im))); }
+  function removeImage(id) { setImages((prev) => prev.filter((im) => im.id !== id)); }
+
+  async function analyzeGroup(key, groupImages, label) {
+    setPlatformLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const imgPayload = groupImages.map((im) => ({ mimeType: im.mimeType, data: im.base64 }));
+      const text = await callClaude(IMAGE_ANALYSIS_SYS, `วิเคราะห์ภาพตัวอย่างผลงาน/โพสต์ (${label}) จำนวน ${groupImages.length} รูปที่แนบมา`, imgPayload);
+      setPlatformResults((prev) => ({ ...prev, [key]: text }));
+    } catch (e) {
+      setPlatformResults((prev) => ({ ...prev, [key]: 'เรียก AI วิเคราะห์รูปไม่สำเร็จ ลองใหม่อีกครั้ง' }));
+    } finally {
+      setPlatformLoading((prev) => ({ ...prev, [key]: false }));
+    }
+  }
+  async function analyzeByPlatform() {
+    const groups = {};
+    images.forEach((im) => { (groups[im.platform] = groups[im.platform] || []).push(im); });
+    for (const platform of Object.keys(groups)) {
+      const label = PLATFORM_META[platform] ? PLATFORM_META[platform].label : platform;
+      await analyzeGroup(platform, groups[platform], label);
+    }
+  }
+  function analyzeAllTogether() {
+    if (images.length === 0) return;
+    analyzeGroup('all', images, 'รวมทุกแพลตฟอร์ม');
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><TrendingUp size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ANALYTICS</span></div>
@@ -1083,14 +1154,34 @@ function AnalyticsPage({ history, tasks, channels }) {
         <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มอัตราทำงานเสร็จ (14 วันล่าสุด)</div>
         {trend.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={trend}>
+            <LineChart data={trend}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
               <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
               <YAxis tick={{ fill: C.muted, fontSize: 10 }} domain={[0, 100]} />
               <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}` }} />
-              <Bar dataKey="pct" fill={C.blue} radius={[4, 4, 0, 0]} />
-            </BarChart>
+              <Line type="monotone" dataKey="pct" stroke={C.blue} strokeWidth={2} dot={{ r: 3, fill: C.blue }} />
+            </LineChart>
           </ResponsiveContainer>
+        )}
+      </div>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>สัดส่วน QC ผ่าน/ไม่ผ่าน</div>
+        {qcPieData.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีงานที่ส่ง QC</p> : (
+          <div className="flex items-center gap-4">
+            <ResponsiveContainer width={120} height={120}>
+              <PieChart>
+                <Pie data={qcPieData} dataKey="value" nameKey="name" innerRadius={30} outerRadius={55} stroke="none">
+                  {qcPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: C.emerald }} /><span className="font-mono text-2xs" style={{ color: C.text }}>ผ่าน: {qcPassed}</span></div>
+              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: C.red }} /><span className="font-mono text-2xs" style={{ color: C.text }}>ไม่ผ่าน: {qcFailed}</span></div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -1106,10 +1197,56 @@ function AnalyticsPage({ history, tasks, channels }) {
             ))}
           </div>
         )}
-        <div className="mt-3 pt-3 flex items-center gap-4" style={{ borderTop: `1px solid ${C.border}` }}>
-          <span className="font-mono text-2xs" style={{ color: C.emerald }}>QC ผ่าน: {qcPassed}</span>
-          <span className="font-mono text-2xs" style={{ color: C.red }}>QC ไม่ผ่าน: {qcFailed}</span>
+      </div>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center justify-between mb-3 gap-2">
+          <div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>แนบรูปภาพเพื่อวิเคราะห์</div>
+          <label className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg cursor-pointer" style={{ border: `1px solid ${C.blue}`, color: C.blue }}>
+            <Upload size={12} /> แนบรูป
+            <input type="file" accept="image/*" multiple onChange={handleAddImages} className="hidden" />
+          </label>
         </div>
+        {images.length === 0 ? (
+          <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีรูปแนบ — แนบรูปตัวอย่างผลงาน/โพสต์เพื่อให้ AI ช่วยดูและวิเคราะห์</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
+              {images.map((im) => (
+                <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                  <img src={im.dataUrl} alt={im.name} className="w-full aspect-square object-cover" />
+                  <button onClick={() => removeImage(im.id)} aria-label="ลบรูปนี้" className="absolute top-1 right-1 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}><X size={12} /></button>
+                  <select value={im.platform} onChange={(e) => updateImagePlatform(im.id, e.target.value)} className="w-full font-mono text-2xs px-1 py-1 outline-none" style={{ background: C.bgDeep, color: C.text, border: 'none' }}>
+                    {(availablePlatforms.length ? availablePlatforms : Object.keys(PLATFORM_META)).map((p) => (
+                      <option key={p} value={p}>{PLATFORM_META[p] ? PLATFORM_META[p].label : p}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <button onClick={analyzeByPlatform} disabled={Object.values(platformLoading).some(Boolean)} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: Object.values(platformLoading).some(Boolean) ? 0.6 : 1 }}>
+                <PieChartIcon size={12} /> วิเคราะห์แยกตามแพลตฟอร์ม
+              </button>
+              <button onClick={analyzeAllTogether} disabled={!!platformLoading.all} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.violet}`, color: C.violet, opacity: platformLoading.all ? 0.6 : 1 }}>
+                {platformLoading.all ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์รวมทั้งหมด
+              </button>
+            </div>
+            {Object.keys(platformResults).length > 0 && (
+              <div className="space-y-3">
+                {Object.entries(platformResults).map(([key, text]) => (
+                  <div key={key} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                    <div className="font-mono text-2xs mb-1 flex items-center gap-1" style={{ color: C.emerald }}>
+                      {platformLoading[key] && <Loader2 size={11} className="animate-spin" />}
+                      {key === 'all' ? 'รวมทุกแพลตฟอร์ม' : (PLATFORM_META[key] ? PLATFORM_META[key].label : key)}
+                    </div>
+                    <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -1300,8 +1437,9 @@ const CAPTION_LANGS = [
   { key: 'Zh', label: '中文' },
 ];
 
-function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingAction }) {
+function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, onDelete, loadingAction }) {
   const [expanded, setExpanded] = useState(false);
+  const [capLang, setCapLang] = useState('Th');
   const Icon = task.type === 'video' ? VideoIcon : ImageIcon;
   const platMeta = PLATFORM_META[task.platform];
   const hasMeta = task.title || task.captionTh;
@@ -1312,6 +1450,17 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
   if (hasMeta) statusBits.push('มีชื่อ/คำบรรยาย');
   if (task.link) statusBits.push('ส่งลิงก์แล้ว');
   if (task.qc) statusBits.push(task.qc.passed ? 'QC ผ่าน' : 'QC ให้แก้ไข');
+
+  const templateLinks = (task.templateLinks && task.templateLinks.length) ? task.templateLinks : [''];
+  function updateTemplateLink(idx, value) {
+    const next = [...templateLinks]; next[idx] = value; onUpdate(task.id, { templateLinks: next });
+  }
+  function addTemplateLink() { onUpdate(task.id, { templateLinks: [...templateLinks, ''] }); }
+  function removeTemplateLink(idx) {
+    const next = templateLinks.filter((_, i) => i !== idx);
+    onUpdate(task.id, { templateLinks: next.length ? next : [''] });
+  }
+
   return (
     <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
       <div className="flex items-start gap-3">
@@ -1319,12 +1468,15 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <button onClick={() => setExpanded((e) => !e)} className="flex-1 flex items-center gap-2 flex-wrap text-left min-w-0">
-              <Icon size={13} style={{ color: C.muted }} className="shrink-0" /><span className="font-body text-sm shrink-0" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span>
+              <Icon size={13} style={{ color: C.muted }} className="shrink-0" />
+              <span className="font-body text-sm shrink-0" style={{ color: task.done ? C.muted : C.text, textDecoration: task.done ? 'line-through' : 'none' }}>{task.label}</span>
+              <span className="font-mono text-2xs shrink-0" style={{ color: C.muted }}>({taskLabelEn(task)})</span>
               {platMeta && <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: platMeta.color, border: `1px solid ${platMeta.color}` }}>{platMeta.label}</span>}
               {!expanded && statusBits.length > 0 && <span className="font-mono text-2xs truncate" style={{ color: C.muted }}>· {statusBits.join(' · ')}</span>}
             </button>
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => onReset(task)} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.muted }}><RefreshCw size={11} /> รีเซ็ต</button>
+              {onDelete && <button onClick={() => onDelete(task.id)} aria-label="ลบงานนี้" style={{ color: C.red }}><Trash2 size={13} /></button>}
               <button onClick={() => setExpanded((e) => !e)} style={{ color: C.muted }}>{expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
             </div>
           </div>
@@ -1334,9 +1486,15 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
               <div className="mt-2.5">
                 <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>เทมเพลต / สคริปต์อ้างอิง</label>
                 <textarea value={task.styleTemplate} onChange={(e) => onUpdate(task.id, { styleTemplate: e.target.value })} rows={3} placeholder="วางสไตล์/สคริปต์ที่ต้องการให้ AI เลียนแบบ" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-                <div className="mt-1.5">
-                  <input value={task.referenceLink} onChange={(e) => onUpdate(task.id, { referenceLink: e.target.value })} placeholder="+ แนบลิงก์คลิปตัวอย่าง (ถ้ามี ให้ AI ดูองค์ประกอบ)" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px dashed ${C.border}` }} />
-                  <p className="font-mono text-2xs mt-1 leading-relaxed" style={{ color: C.muted }}>* วางเป็นลิงก์เท่านั้น (อัปโหลดไฟล์วิดีโอโดยตรงยังทำไม่ได้)</p>
+                <div className="mt-1.5 space-y-1.5">
+                  <label className="font-mono text-2xs block leading-relaxed" style={{ color: C.muted }}>ลิงก์วิดีโอ/โพสต์ต้นแบบ — ใช้บอก AI ว่ากำลังออกแบบตามสไตล์ไหน (AI อ่านเป็นข้อมูลอ้างอิงเท่านั้น ไม่ได้เปิดดูคลิปจริงจากลิงก์)</label>
+                  {templateLinks.map((link, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <input value={link} onChange={(e) => updateTemplateLink(idx, e.target.value)} placeholder="วางลิงก์วิดีโอ/โพสต์ต้นแบบ" className="flex-1 min-w-0 px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px dashed ${C.border}` }} />
+                      {templateLinks.length > 1 && <button onClick={() => removeTemplateLink(idx)} aria-label="ลบลิงก์นี้" style={{ color: C.muted }}><XCircle size={14} /></button>}
+                    </div>
+                  ))}
+                  <button onClick={addTemplateLink} className="font-mono text-2xs flex items-center gap-1" style={{ color: C.blue }}><Plus size={11} /> เพิ่มลิงก์ต้นแบบ</button>
                 </div>
               </div>
 
@@ -1376,19 +1534,34 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
               {hasMeta && (
                 <div className="mt-2 p-2.5 rounded-xl space-y-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
                   <div><span className="font-mono text-2xs" style={{ color: C.emerald }}>ชื่อ: </span><span className="font-body text-xs" style={{ color: C.text }}>{task.title}</span></div>
-                  {CAPTION_LANGS.map((l) => (
-                    task[`caption${l.key}`] ? (
-                      <div key={l.key}>
-                        <div className="font-mono text-2xs" style={{ color: C.emerald }}>คำบรรยาย ({l.label}):</div>
-                        <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${l.key}`]}</p>
-                        {task[`hashtags${l.key}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${l.key}`]}</p>}
-                      </div>
-                    ) : null
-                  ))}
+                  <div className="flex gap-1.5">
+                    {CAPTION_LANGS.map((l) => (
+                      <button key={l.key} onClick={() => setCapLang(l.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: capLang === l.key ? BRAND : 'transparent', color: capLang === l.key ? '#fff' : C.muted, border: `1px solid ${capLang === l.key ? 'transparent' : C.border}` }}>{l.label}</button>
+                    ))}
+                  </div>
+                  {task[`caption${capLang}`] ? (
+                    <div>
+                      <p className="font-body text-xs" style={{ color: C.text }}>{task[`caption${capLang}`]}</p>
+                      {task[`hashtags${capLang}`] && <p className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{task[`hashtags${capLang}`]}</p>}
+                    </div>
+                  ) : (
+                    <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีคำบรรยายภาษานี้</p>
+                  )}
                 </div>
               )}
 
-              <p className="font-mono text-2xs mt-3" style={{ color: C.muted }}>* ส่งลิงก์ยืนยันงาน/QC ย้ายไปอยู่กล่อง "ส่งงาน QC" แถบขวาแล้ว</p>
+              <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.violet }}>ส่งงาน QC</label>
+                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                {task.link.trim() && <VideoPreviewBox link={task.link.trim()} compact />}
+                {!task.qc ? (
+                  <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-1.5 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
+                    {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
+                  </button>
+                ) : (
+                  <VerdictBox verdict={task.qc} />
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1481,46 +1654,52 @@ function channelStatusLabel(done, total) {
   return { text: `ทำอยู่ ${done}/${total}`, color: C.orange };
 }
 
-function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning }) {
+function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, onDeleteTask, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning, readOnly }) {
   const [open, setOpen] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
+  const [activeTaskId, setActiveTaskId] = useState(null);
   const done = tasks.filter((t) => t.done).length;
   const status = channelStatusLabel(done, tasks.length);
   const qcable = tasks.some((t) => t.link && t.link.trim() && !t.qc);
   const accentColor = channel.color || C.blue;
+  const activeTask = tasks.find((t) => t.id === activeTaskId) || tasks[0] || null;
+
   return (
     <div className="relative mb-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}`, boxShadow: `0 8px 24px -16px ${accentColor}66`, overflow: 'hidden' }}>
       <div style={{ height: 3, background: `linear-gradient(90deg, ${accentColor}, transparent)` }} />
       <div className="p-4">
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left min-w-0 flex items-center gap-2 flex-wrap">
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 flex-wrap text-left min-w-0">
             <span className="font-body text-sm truncate" style={{ color: C.text }}>{channel.name}</span>
             <span className="font-mono text-2xs px-2 py-0.5 rounded-md shrink-0" style={{ color: status.color, border: `1px solid ${status.color}` }}>{status.text}</span>
           </button>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => onRemove(channel.id)} style={{ color: C.muted }} aria-label="ลบช่อง"><Trash2 size={15} /></button>
+          {/* ปุ่มแพลตฟอร์ม (Facebook / +แพลตฟอร์ม) ย้ายมาฝั่งขวาของหัวการ์ด */}
+          <div className="flex items-center gap-2 flex-wrap justify-end ml-auto">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {channel.platforms.map((p) => {
+                const meta = PLATFORM_META[p.platform];
+                const PlatformIcon = meta.icon;
+                return (
+                  <span key={p.platform} className="font-mono text-2xs pl-2 pr-1.5 py-1 rounded-md flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>
+                    <PlatformIcon size={11} />{meta.label}
+                    {!readOnly && channel.platforms.length > 1 && (
+                      <button onClick={() => onRemovePlatform(channel.id, p.platform)} aria-label="ลบแพลตฟอร์มนี้ออกจากช่อง" style={{ color: meta.color, opacity: 0.7 }}><XCircle size={11} /></button>
+                    )}
+                  </span>
+                );
+              })}
+              {!readOnly && (
+                <button onClick={() => setShowAddPlatform((s) => !s)} className="font-mono text-2xs px-2 py-1 rounded-md flex items-center gap-1" style={{ color: C.muted, border: `1px dashed ${C.border}` }}>
+                  <Plus size={11} /> แพลตฟอร์ม
+                </button>
+              )}
+            </div>
+            {!readOnly && <button onClick={() => onRemove(channel.id)} style={{ color: C.muted }} aria-label="ลบช่อง"><Trash2 size={15} /></button>}
             <button onClick={() => setOpen((o) => !o)} style={{ color: C.muted }}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {channel.platforms.map((p) => {
-            const meta = PLATFORM_META[p.platform];
-            const PlatformIcon = meta.icon;
-            return (
-              <span key={p.platform} className="font-mono text-2xs pl-2 pr-1.5 py-1 rounded-md flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>
-                <PlatformIcon size={11} />{meta.label}
-                {channel.platforms.length > 1 && (
-                  <button onClick={() => onRemovePlatform(channel.id, p.platform)} aria-label="ลบแพลตฟอร์มนี้ออกจากช่อง" style={{ color: meta.color, opacity: 0.7 }}><XCircle size={11} /></button>
-                )}
-              </span>
-            );
-          })}
-          <button onClick={() => setShowAddPlatform((s) => !s)} className="font-mono text-2xs px-2 py-1 rounded-md flex items-center gap-1" style={{ color: C.muted, border: `1px dashed ${C.border}` }}>
-            <Plus size={11} /> แพลตฟอร์ม
-          </button>
-        </div>
-        {showAddPlatform && <AddPlatformForm existingPlatforms={channel.platforms.map((p) => p.platform)} onAdd={(platform, v, im) => { onAddPlatform(channel.id, platform, v, im); setShowAddPlatform(false); }} onClose={() => setShowAddPlatform(false)} />}
-        <div className="mt-3 max-w-xs"><ProgressBar done={done} total={tasks.length} color={accentColor} /></div>
+        {!readOnly && showAddPlatform && <AddPlatformForm existingPlatforms={channel.platforms.map((p) => p.platform)} onAdd={(platform, v, im) => { onAddPlatform(channel.id, platform, v, im); setShowAddPlatform(false); }} onClose={() => setShowAddPlatform(false)} />}
+        <div className="max-w-xs"><ProgressBar done={done} total={tasks.length} color={accentColor} /></div>
       </div>
       {open && (
         <div className="anim-fade">
@@ -1534,9 +1713,27 @@ function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, o
               </button>
             )}
           </div>
-          {tasks.map((t) => (
-            <DailyTaskCard key={t.id} task={t} onToggle={onToggle} onUpdate={onUpdate} onGenOutline={onGenOutline} onGenPrompts={onGenPrompts} onGenMeta={onGenMeta} onQC={onQC} onReset={onReset} loadingAction={loadingMap[t.id]} />
-          ))}
+
+          {tasks.length === 0 ? (
+            <p className="px-3 pb-4 font-body text-xs" style={{ color: C.muted }}>ยังไม่มีงานในช่องนี้ — เพิ่มแพลตฟอร์มด้านบนเพื่อสร้างงาน</p>
+          ) : (
+            <>
+              {/* แท็บสลับดูงานแต่ละชิ้น (วิดีโอ 1 / วิดีโอ 2 / โพสต์ 1 ...) แทนรายการเรียงต่อกันแบบเดิม */}
+              <div className="px-3 pb-2 flex items-center gap-1.5 flex-wrap" style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+                {tasks.map((t) => {
+                  const isActive = activeTask && activeTask.id === t.id;
+                  return (
+                    <button key={t.id} onClick={() => setActiveTaskId(t.id)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: isActive ? accentColor : 'transparent', color: isActive ? '#fff' : (t.done ? C.emerald : C.muted), border: `1px solid ${isActive ? 'transparent' : C.border}` }}>
+                      {t.done && <CheckSquare size={10} />} {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+              {activeTask && (
+                <DailyTaskCard key={activeTask.id} task={activeTask} onToggle={onToggle} onUpdate={onUpdate} onGenOutline={onGenOutline} onGenPrompts={onGenPrompts} onGenMeta={onGenMeta} onQC={onQC} onReset={onReset} onDelete={onDeleteTask} loadingAction={loadingMap[activeTask.id]} />
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1547,31 +1744,61 @@ function TodayStatusCard({ tasks, history }) {
   const todayStr = todayDateStr();
   const doneToday = tasks.filter((t) => t.done).length;
   const totalToday = tasks.length;
+  const remaining = Math.max(0, totalToday - doneToday);
   const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
   const todayEntry = { date: todayStr, totalTasks: totalToday, doneTasks: doneToday };
   const trend = [...history, todayEntry].slice(-7).map((h) => ({ date: h.date.slice(5), pct: h.totalTasks ? Math.round((h.doneTasks / h.totalTasks) * 100) : 0 }));
+  const pieData = totalToday === 0 ? [] : [
+    { name: 'เสร็จแล้ว', value: doneToday, color: C.emerald },
+    { name: 'ยังไม่เสร็จ', value: remaining, color: C.border },
+  ];
+  const statusText = totalToday === 0
+    ? 'ยังไม่มีงานวันนี้'
+    : doneToday === totalToday
+      ? `เสร็จครบทุกงานแล้ว (${totalToday} งาน) 🎉`
+      : `เสร็จแล้ว ${doneToday} จาก ${totalToday} งาน · เหลืออีก ${remaining} งาน`;
+
   return (
-    <div className="p-4 rounded-2xl flex items-center gap-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
-      <div className="shrink-0 text-center">
-        <div className="font-display text-2xl font-bold" style={{ color: C.emerald }}>{pct}%</div>
-        <div className="font-mono text-2xs" style={{ color: C.muted }}>สถานะวันนี้</div>
+    <div className="p-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-4">
+        <div className="shrink-0 relative" style={{ width: 64, height: 64 }}>
+          {pieData.length > 0 ? (
+            <ResponsiveContainer width={64} height={64}>
+              <PieChart>
+                <Pie data={pieData} dataKey="value" innerRadius={20} outerRadius={30} startAngle={90} endAngle={-270} stroke="none">
+                  {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="w-full h-full rounded-full" style={{ border: `3px solid ${C.border}` }} />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center font-display text-xs font-bold" style={{ color: C.emerald }}>{pct}%</div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-mono text-2xs mb-0.5" style={{ color: C.blue }}>สถานะวันนี้</div>
+          <p className="font-body text-xs leading-relaxed" style={{ color: C.text }}>{statusText}</p>
+        </div>
       </div>
-      <div className="flex-1 min-w-0" style={{ height: 50 }}>
+      <div className="mt-3" style={{ height: 56 }}>
         {trend.length > 1 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={trend}>
-              <Bar dataKey="pct" fill={C.emerald} radius={[3, 3, 0, 0]} />
-            </BarChart>
+            <LineChart data={trend} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 9 }} axisLine={false} tickLine={false} />
+              <YAxis hide domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              <Line type="monotone" dataKey="pct" stroke={C.emerald} strokeWidth={2} dot={{ r: 2, fill: C.emerald }} />
+            </LineChart>
           </ResponsiveContainer>
         ) : (
-          <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลย้อนหลัง</p>
+          <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลแนวโน้มย้อนหลัง</p>
         )}
       </div>
     </div>
   );
 }
 
-function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
+function MiniCalendarCard({ history, tasks, activeDate, onSelectDate, onOpenCalendar }) {
   const todayStr = todayDateStr();
   const now = new Date();
   const year = now.getFullYear();
@@ -1595,63 +1822,24 @@ function MiniCalendarCard({ history, tasks, onOpenCalendar }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   return (
-    <button onClick={onOpenCalendar} className="w-full p-5 rounded-2xl text-left" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+    <div className="w-full p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
       <div className="flex items-center justify-between mb-3">
         <span className="font-mono text-xs tracking-widest" style={{ color: C.blue }}>{THAI_MONTHS[month]} {year + 543}</span>
-        <span className="font-mono text-2xs" style={{ color: C.muted }}>ดูปฏิทินเต็ม →</span>
+        <button onClick={onOpenCalendar} className="font-mono text-2xs" style={{ color: C.muted }}>ดูปฏิทินเต็ม →</button>
       </div>
       <div className="grid grid-cols-7 gap-1.5">
         {cells.map((d, i) => {
           if (!d) return <div key={i} />;
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
           const isToday = dateStr === todayStr;
+          const isActive = dateStr === activeDate;
           const entry = isToday ? todayEntry : historyByDate[dateStr];
           const hasData = isToday || !!historyByDate[dateStr];
           const color = isToday ? C.blue : entryColor(entry);
           return (
-            <div key={i} className="aspect-square rounded-md flex items-center justify-center font-mono text-xs" style={{ border: `1px solid ${hasData ? color : C.border}`, color: hasData ? C.text : C.muted }}>{d}</div>
-          );
-        })}
-      </div>
-    </button>
-  );
-}
-
-function QCQueuePanel({ channels, tasks, loadingMap, onUpdate, onQC }) {
-  if (tasks.length === 0) {
-    return (
-      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>ส่งงาน QC</div>
-        <p className="font-body text-xs" style={{ color: C.muted }}>เพิ่มช่องและงานก่อนถึงจะส่ง QC ได้</p>
-      </div>
-    );
-  }
-  return (
-    <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ส่งงาน QC</div>
-      <div className="space-y-3">
-        {tasks.map((t) => {
-          const channel = channels.find((c) => c.id === t.channelId);
-          const platMeta = PLATFORM_META[t.platform];
-          const PlatformIcon = platMeta ? platMeta.icon : null;
-          const busy = !!loadingMap[t.id];
-          return (
-            <div key={t.id} className="pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: channel?.color || C.blue }} />
-                <span className="font-body text-xs truncate" style={{ color: C.text }}>{channel?.name} · {t.label}</span>
-                {PlatformIcon && <PlatformIcon size={11} style={{ color: platMeta.color }} className="shrink-0 ml-auto" />}
-              </div>
-              <input value={t.link} onChange={(e) => onUpdate(t.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-              {t.link.trim() && <VideoPreviewBox link={t.link.trim()} compact />}
-              {!t.qc ? (
-                <button onClick={() => onQC(t)} disabled={busy || !t.link.trim()} className="mt-1.5 font-mono text-2xs flex items-center gap-1" style={{ color: t.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
-                  {loadingMap[t.id] === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
-                </button>
-              ) : (
-                <VerdictBox verdict={t.qc} />
-              )}
-            </div>
+            <button key={i} onClick={() => onSelectDate(dateStr)} className="aspect-square rounded-md flex items-center justify-center font-mono text-xs" style={{ border: `1px solid ${hasData ? color : C.border}`, background: isActive ? `${color}33` : 'transparent', color: hasData ? C.text : C.muted }}>
+              {d}
+            </button>
           );
         })}
       </div>
@@ -1701,51 +1889,83 @@ function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
 function DayNavigator({ viewDate, setViewDate }) {
   const today = todayDateStr();
   const active = viewDate || today;
+  const diffDays = Math.round((new Date(active + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+  const isPast = diffDays < 0;
+  const isFuture = diffDays > 0;
   function shift(days) {
     const next = shiftDateStr(active, days);
     setViewDate(next === today ? null : next);
   }
-  function labelFor(dateStr) {
-    const diffDays = Math.round((new Date(dateStr) - new Date(today)) / 86400000);
-    if (diffDays === 1) return 'พรุ่งนี้';
-    if (diffDays === 2) return 'มะรืนนี้';
-    const d = new Date(dateStr);
-    return `${THAI_DAYS[d.getDay()]} ${d.getDate()} ${THAI_MONTHS[d.getMonth()]}`;
+  function labelFor(dateStr, d) {
+    if (d === 1) return 'พรุ่งนี้';
+    if (d === 2) return 'มะรืนนี้';
+    if (d === -1) return 'เมื่อวาน';
+    if (d === -2) return 'วานซืน';
+    const dt = new Date(dateStr + 'T00:00:00');
+    return `${THAI_DAYS[dt.getDay()]} ${dt.getDate()} ${THAI_MONTHS[dt.getMonth()]}`;
   }
+  const bannerColor = isPast ? C.violet : isFuture ? C.orange : C.blue;
+  const bannerText = isPast ? `กำลังดูงานย้อนหลัง: ${labelFor(active, diffDays)}` : isFuture ? `กำลังเตรียมล่วงหน้า: ${labelFor(active, diffDays)}` : 'วันนี้';
   return (
-    <div className="flex items-center gap-2 mb-4 p-2.5 rounded-xl" style={{ background: viewDate ? `${C.orange}18` : C.panel, border: `1px solid ${viewDate ? C.orange : C.border}` }}>
-      <button onClick={() => shift(-1)} disabled={active === today} className="font-mono text-xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: active === today ? C.border : C.muted, border: `1px solid ${C.border}` }}>← ก่อนหน้า</button>
+    <div className="flex items-center gap-2 mb-4 p-2.5 rounded-xl" style={{ background: viewDate ? `${bannerColor}18` : C.panel, border: `1px solid ${viewDate ? bannerColor : C.border}` }}>
+      <button onClick={() => shift(-1)} className="font-mono text-xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: C.muted, border: `1px solid ${C.border}` }}>← ก่อนหน้า</button>
       <div className="flex-1 text-center min-w-0">
-        <span className="font-mono text-xs truncate" style={{ color: viewDate ? C.orange : C.blue }}>{viewDate ? `กำลังเตรียมล่วงหน้า: ${labelFor(active)}` : 'วันนี้'}</span>
+        <span className="font-mono text-xs truncate" style={{ color: viewDate ? bannerColor : C.blue }}>{bannerText}</span>
       </div>
       <button onClick={() => shift(1)} className="font-mono text-xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: C.muted, border: `1px solid ${C.border}` }}>ถัดไป →</button>
     </div>
   );
 }
 
-function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, reminder, onDismissReminder, onOpenCalendar }) {
+function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, setHistory, reminder, onDismissReminder, onOpenCalendar, initialViewDate, onConsumeInitialViewDate }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
   const [qcAllId, setQcAllId] = useState(null);
-  const [viewDate, setViewDate] = useState(null); // null = วันนี้, else = วันที่กำลังเตรียมล่วงหน้า
+  const [viewDate, setViewDate] = useState(null); // null = วันนี้, มากกว่าวันนี้ = เตรียมล่วงหน้า, น้อยกว่าวันนี้ = ดูย้อนหลัง
   const todayStr = todayDateStr();
-  const isFutureView = !!viewDate;
+
+  // เปิดมาจากหน้าปฏิทิน (ดับเบิลคลิกวันที่) — พาไปที่วันนั้นให้อัตโนมัติ
+  useEffect(() => {
+    if (initialViewDate) {
+      setViewDate(initialViewDate === todayStr ? null : initialViewDate);
+      if (onConsumeInitialViewDate) onConsumeInitialViewDate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialViewDate]);
+
+  const isFutureView = !!viewDate && viewDate > todayStr;
+  const isPastView = !!viewDate && viewDate < todayStr;
   const activeDate = viewDate || todayStr;
-  const activeTasks = isFutureView ? (futureTasks[viewDate] || buildDefaultTasksForChannels(channels, viewDate)) : tasks;
+  const pastEntry = isPastView ? history.find((h) => h.date === viewDate) : null;
+  const activeTasks = isFutureView
+    ? (futureTasks[viewDate] || buildDefaultTasksForChannels(channels, viewDate))
+    : isPastView
+      ? ((pastEntry && Array.isArray(pastEntry.tasks)) ? pastEntry.tasks : [])
+      : tasks;
   const activeTasksRef = useRef(activeTasks);
   useEffect(() => { activeTasksRef.current = activeTasks; }, [activeTasks]);
 
   function setActiveTasksUpdater(updater) {
-    if (!isFutureView) {
-      setTasks((prev) => (typeof updater === 'function' ? updater(prev) : updater));
-    } else {
+    if (isFutureView) {
       setFutureTasks((prev) => {
         const current = prev[viewDate] || buildDefaultTasksForChannels(channels, viewDate);
         const next = typeof updater === 'function' ? updater(current) : updater;
         return { ...prev, [viewDate]: next };
       });
+    } else if (isPastView) {
+      setHistory((prev) => prev.map((h) => {
+        if (h.date !== viewDate) return h;
+        const current = Array.isArray(h.tasks) ? h.tasks : [];
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        return { ...h, tasks: next, totalTasks: next.length, doneTasks: next.filter((t) => t.done).length };
+      }));
+    } else {
+      setTasks((prev) => (typeof updater === 'function' ? updater(prev) : updater));
     }
+  }
+  function removeTask(id) {
+    setActiveTasksUpdater((prev) => prev.filter((t) => t.id !== id));
   }
 
   function setLoading(id, action) { setLoadingMap((prev) => ({ ...prev, [id]: action })); }
@@ -1799,8 +2019,10 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     const avoidList = activeTasksRef.current.filter((t) => t.channelId === task.channelId && t.id !== task.id && (t.title || t.outline)).map((t) => t.title || t.outline).slice(0, 10);
     const avoidText = avoidList.length ? `\nเคยทำไปแล้ว (ห้ามซ้ำ): ${avoidList.join(' / ')}` : '';
     const styleLine = task.styleTemplate.trim() ? `\nสไตล์/แนวที่ต้องการ: ${task.styleTemplate.trim()}` : '';
+    const templateLinkList = (task.templateLinks || []).map((l) => l.trim()).filter(Boolean);
+    const templateLine = templateLinkList.length ? `\nลิงก์วิดีโอ/โพสต์ต้นแบบอ้างอิง (ยึดแนวสไตล์ตามนี้): ${templateLinkList.join(' , ')}` : '';
     try {
-      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${avoidText}`);
+      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${templateLine}${avoidText}`);
       const outline = text.trim();
       updateTaskField(task.id, { outline });
       return outline;
@@ -1899,12 +2121,13 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
   function resetActiveDay() {
     if (isFutureView) {
       setFutureTasks((prev) => ({ ...prev, [viewDate]: buildDefaultTasksForChannels(channels, viewDate) }));
-    } else {
+    } else if (!isPastView) {
       setTasks((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label, todayStr)));
     }
   }
 
   const totalDone = activeTasks.filter((t) => t.done).length;
+  const visibleChannels = isPastView ? channels.filter((c) => activeTasks.some((t) => t.channelId === c.id)) : channels;
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8 anim-fade grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
@@ -1917,29 +2140,34 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
 
         <div className="flex items-center justify-between gap-3 mb-6">
           <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={activeTasks.length} color={C.blue} /></div>
-          <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
+          {!isPastView && (
+            <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
+          )}
         </div>
 
-        {showAdd ? (
-          <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
-        ) : (
-          <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
+        {!isPastView && (
+          showAdd ? (
+            <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
+          ) : (
+            <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
+          )
         )}
 
-        {channels.length === 0 ? (
-          <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น</p>
+        {visibleChannels.length === 0 ? (
+          <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>
+            {isPastView ? 'ไม่มีข้อมูลงานที่บันทึกไว้สำหรับวันนี้' : 'ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น'}
+          </p>
         ) : (
-          channels.map((c) => (
-            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} />
+          visibleChannels.map((c) => (
+            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} onDeleteTask={removeTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} readOnly={isPastView} />
           ))
         )}
-        <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่ · งานที่เตรียมล่วงหน้าจะขึ้นเป็นงานจริงอัตโนมัติเมื่อถึงวันนั้น</p>
+        <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่ · งานที่เตรียมล่วงหน้าจะขึ้นเป็นงานจริงอัตโนมัติเมื่อถึงวันนั้น · กด "← ก่อนหน้า" เพื่อย้อนกลับไปดู/แก้งานของวันก่อนๆ ได้</p>
       </div>
 
       <div className="space-y-4 lg:sticky lg:top-6">
         <TodayStatusCard tasks={tasks} history={history} />
-        <MiniCalendarCard history={history} tasks={tasks} onOpenCalendar={onOpenCalendar} />
-        <QCQueuePanel channels={channels} tasks={tasks} loadingMap={loadingMap} onUpdate={updateTaskField} onQC={runQC} />
+        <MiniCalendarCard history={history} tasks={tasks} activeDate={activeDate} onSelectDate={(d) => setViewDate(d === todayStr ? null : d)} onOpenCalendar={onOpenCalendar} />
         <PlatformCheckPanel channels={channels} onUpdateCheckLink={updateCheckLink} />
       </div>
     </div>
@@ -1959,6 +2187,7 @@ export default function CompanyPortal() {
   const [futureTasks, setFutureTasks] = useState({});
   const [lastActiveDate, setLastActiveDate] = useState(null);
   const [reminder, setReminder] = useState(null);
+  const [pendingViewDate, setPendingViewDate] = useState(null); // เปิดจากหน้าปฏิทิน (ดับเบิลคลิกวันที่) แล้วพาไปหน้างานประจำวันของวันนั้น
 
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
   function handleLogin(account) {
@@ -2026,9 +2255,12 @@ export default function CompanyPortal() {
             const ch = loadedChannels.find((c) => c.id === t.channelId);
             return { channelName: ch ? ch.name : '-', label: t.label };
           });
-          const entry = { date: loadedLastDate, totalTasks: loadedTasks.length, doneTasks: loadedTasks.filter((t) => t.done).length, missed };
+          // เก็บงานของวันก่อนหน้าแบบเต็ม (ไม่ใช่แค่สรุปตัวเลข) ไว้ใน history เพื่อให้ย้อนกลับไปดู/แก้ไขงานค้างของวันก่อนๆ ได้จริง
+          const entry = { date: loadedLastDate, totalTasks: loadedTasks.length, doneTasks: loadedTasks.filter((t) => t.done).length, missed, tasks: loadedTasks };
           if (!loadedHistory.some((h) => h.date === loadedLastDate)) {
             loadedHistory = [...loadedHistory, entry];
+          } else {
+            loadedHistory = loadedHistory.map((h) => (h.date === loadedLastDate && !Array.isArray(h.tasks) ? { ...h, tasks: loadedTasks } : h));
           }
           if (missed.length > 0) setReminder(entry);
           if (loadedFutureTasks[today]) {
@@ -2125,10 +2357,10 @@ export default function CompanyPortal() {
         <div className="flex">
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} />
           <div className="flex-1 min-w-0">
-            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} />}
+            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
-            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
