@@ -2532,6 +2532,8 @@ export default function CompanyPortal() {
   const [channels, setChannels] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const [loadOk, setLoadOk] = useState(false);   // true เมื่อโหลดข้อมูลจากฐานข้อมูลสำเร็จจริง
+  const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
   const [lastActiveDate, setLastActiveDate] = useState(null);
@@ -2621,7 +2623,10 @@ export default function CompanyPortal() {
   }
 
   // โหลดข้อมูลจากฐานข้อมูลตอนเปิดเว็บ (บัญชี + ช่อง/เพจ + งาน + ประวัติ) ลบบัญชีหมดอายุ และเก็บประวัติวันก่อนหน้าถ้าข้ามวันมาแล้ว
+  // โหลดข้อมูลหลังล็อกอินแล้วเท่านั้น (ก่อนหน้านี้โหลดทันทีตอนเปิดหน้า ทำให้โดนปฏิเสธสิทธิ์แล้วได้ค่าว่าง)
   useEffect(() => {
+    if (!user) return;
+    if (dataLoaded) return;
     async function loadAll() {
       try {
         const [accRes, chRes, taskRes, histRes, dateRes, futureRes] = await Promise.all([
@@ -2689,42 +2694,49 @@ export default function CompanyPortal() {
         setHistory(loadedHistory);
         setFutureTasks(loadedFutureTasks);
         setLastActiveDate(today);
+        setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
-        setLastActiveDate(todayDateStr());
+        setLoadError('โหลดข้อมูลไม่สำเร็จ — ระบบจะไม่บันทึกทับข้อมูลเดิม เพื่อกันข้อมูลหาย กรุณารีเฟรชหน้าใหม่');
       } finally {
         setDataLoaded(true);
       }
     }
     loadAll();
-  }, []);
+  }, [user, dataLoaded]);
 
   // บันทึกช่อง/เพจ งานประจำวัน และประวัติ ลงฐานข้อมูลทุกครั้งที่เปลี่ยน (หลังโหลดข้อมูลเสร็จแล้วเท่านั้น)
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'channels', value: channels }).catch(() => {});
-  }, [channels, dataLoaded]);
+  }, [channels, dataLoaded, loadOk, user]);
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'tasks', value: tasks }).catch(() => {});
-  }, [tasks, dataLoaded]);
+  }, [tasks, dataLoaded, loadOk, user]);
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'history', value: history }).catch(() => {});
-  }, [history, dataLoaded]);
+  }, [history, dataLoaded, loadOk, user]);
   useEffect(() => {
-    if (!dataLoaded) return;
+    if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'futureTasks', value: futureTasks }).catch(() => {});
-  }, [futureTasks, dataLoaded]);
+  }, [futureTasks, dataLoaded, loadOk, user]);
   useEffect(() => {
-    if (!dataLoaded || !lastActiveDate) return;
+    if (!dataLoaded || !loadOk || !user || !lastActiveDate) return;
     apiPost('/api/store', { key: 'lastActiveDate', value: lastActiveDate }).catch(() => {});
-  }, [lastActiveDate, dataLoaded]);
+  }, [lastActiveDate, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
-  function logout() { clearSession(); setUser(null); setStage('terminal'); setActiveDept(null); }
+  function logout() {
+    clearSession();
+    setUser(null); setStage('terminal'); setActiveDept(null);
+    // ล้างสถานะการโหลด เพื่อไม่ให้ข้อมูลของคนก่อนหน้าค้างอยู่ และไม่ให้บันทึกทับตอนยังไม่ได้ล็อกอิน
+    setDataLoaded(false); setLoadOk(false); setLoadError('');
+    setChannels([]); setTasks([]); setHistory([]); setFutureTasks({});
+  }
 
   // กู้คืนการล็อกอินเดิมตอนเปิดหน้าใหม่ (รีเฟรชแล้วไม่ต้องล็อกอินซ้ำ)
   useEffect(() => {
@@ -2804,7 +2816,7 @@ export default function CompanyPortal() {
     return () => document.removeEventListener('keydown', handleKey);
   }, [user, stage, channels, tasks, futureTasks]);
 
-  if (!dataLoaded) {
+  if (user && !dataLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: C.bg }}>
         <Loader2 size={28} className="animate-spin" style={{ color: C.blue }} />
@@ -2853,6 +2865,17 @@ export default function CompanyPortal() {
             <button onClick={redo} disabled={undoInfo.redo === 0} title="ทำซ้ำ (⌘⇧Z / Ctrl+Y)" aria-label="ทำซ้ำ" className="p-1.5 rounded-lg" style={{ color: undoInfo.redo === 0 ? C.border : C.text }}>
               <Redo2 size={15} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* แจ้งเตือนเมื่อโหลดข้อมูลไม่สำเร็จ — สำคัญมาก เพราะถ้าไม่บอก จะดูเหมือนข้อมูลหายทั้งที่ยังอยู่ */}
+      {loadError && (
+        <div className="fixed top-3 left-1/2 z-50" style={{ transform: 'translateX(-50%)' }}>
+          <div className="px-4 py-2.5 rounded-xl font-body text-xs flex items-center gap-2" style={{ background: `${C.red}22`, color: C.text, border: `1px solid ${C.red}` }}>
+            <AlertTriangle size={14} style={{ color: C.red }} className="shrink-0" />
+            <span>{loadError}</span>
+            <button onClick={() => window.location.reload()} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ border: `1px solid ${C.red}`, color: C.red }}>รีเฟรช</button>
           </div>
         </div>
       )}
