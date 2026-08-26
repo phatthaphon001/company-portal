@@ -225,25 +225,37 @@ function fileToBase64(file) {
   });
 }
 
-// ---------- session: จำการเข้าสู่ระบบไว้ 7 วัน (รีเฟรชหน้าแล้วไม่ต้องล็อกอินใหม่) ----------
-const SESSION_KEY = 'forge_session';
-const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-function saveSession(user) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user, at: Date.now() })); } catch (e) {}
+// ---------- session: เก็บเฉพาะ "โทเค็น" ที่เซิร์ฟเวอร์เซ็นมา ----------
+// ไม่เก็บระดับสิทธิ์ไว้ในเบราว์เซอร์อีกต่อไป เพราะผู้ใช้แก้เองได้
+// ข้อมูลบัญชีจริงจะถามจากเซิร์ฟเวอร์ทุกครั้งที่เปิดหน้าใหม่
+const SESSION_KEY = 'forge_token';
+
+function saveSession(token) {
+  try { localStorage.setItem(SESSION_KEY, token); } catch (e) {}
 }
 function loadSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (!d || !d.user || !d.at) return null;
-    if (Date.now() - d.at > SESSION_MAX_AGE_MS) { localStorage.removeItem(SESSION_KEY); return null; }
-    return d.user;
-  } catch (e) { return null; }
+  try { return localStorage.getItem(SESSION_KEY) || null; } catch (e) { return null; }
 }
 function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
 }
+
+// เรียก API พร้อมแนบโทเค็นให้อัตโนมัติ
+async function api(path, options = {}) {
+  const token = loadSession();
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { ...options, headers });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (res.status === 401) {
+    clearSession();
+    window.dispatchEvent(new CustomEvent('forge-session-expired'));
+  }
+  return { ok: res.ok, status: res.status, data };
+}
+
+const apiPost = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body) });
 
 // คัดลอกข้อความลงคลิปบอร์ด คืนค่า Promise ที่ resolve เป็น true/false
 function copyText(text) {
@@ -531,7 +543,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [otpToken, setOtpToken] = useState('');
   const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
-  const [pendingAccount, setPendingAccount] = useState(null);
+  const [pendingAccount, setPendingAccount] = useState(null); // เก็บไว้แสดงชื่อระหว่างรอ OTP
   const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
@@ -545,29 +557,20 @@ function Terminal({ accounts, onSignup, onLogin }) {
     setLoginError('');
     setOtpLoading(true);
     try {
-      const loginRes = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', identifier: loginForm.identifier.trim(), password: loginForm.password }),
-      });
-      const loginData = await loginRes.json();
-      if (!loginRes.ok) { setOtpLoading(false); setLoginError(loginData.error || 'เข้าสู่ระบบไม่สำเร็จ'); return; }
+      const { ok, data: loginData } = await apiPost('/api/auth', { action: 'login', identifier: loginForm.identifier.trim(), password: loginForm.password });
+      if (!ok) { setOtpLoading(false); setLoginError(loginData.error || 'เข้าสู่ระบบไม่สำเร็จ'); return; }
       const acc = loginData.account;
 
       if (!loginData.requireOtp) {
         setOtpLoading(false);
+        saveSession(loginData.token);
         onLogin(acc);
         return;
       }
 
-      const res = await fetch('/api/send-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: acc.email }),
-      });
-      const data = await res.json();
+      const { ok: sendOk, data } = await apiPost('/api/send-code', { email: acc.email });
       setOtpLoading(false);
-      if (!res.ok) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
+      if (!sendOk) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
       setOtpToken(data.token);
       setOtpEmail(acc.email);
       setPendingAccount(acc);
@@ -584,15 +587,12 @@ function Terminal({ accounts, onSignup, onLogin }) {
     setLoginError('');
     setOtpLoading(true);
     try {
-      const res = await fetch('/api/verify-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: otpToken, code: loginForm.code.trim() }),
-      });
-      const data = await res.json();
+      // เซิร์ฟเวอร์ตรวจ OTP เองแล้วออกโทเค็นให้ — หน้าเว็บปลอมขั้นตอนนี้ไม่ได้
+      const { ok, data } = await apiPost('/api/auth', { action: 'completeOtpLogin', otpToken, code: loginForm.code.trim() });
       setOtpLoading(false);
-      if (!res.ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
-      onLogin(pendingAccount);
+      if (!ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
+      saveSession(data.token);
+      onLogin(data.account);
     } catch (err) {
       setOtpLoading(false);
       setLoginError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง');
@@ -602,17 +602,14 @@ function Terminal({ accounts, onSignup, onLogin }) {
     e.preventDefault();
     setSignupError('');
     if (!signupForm.name.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
+    if (signupForm.password.length < 8) { setSignupError('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     setSignupLoading(true);
     try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password }),
-      });
-      const data = await res.json();
+      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password });
       setSignupLoading(false);
-      if (!res.ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
+      if (!ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
+      if (data.token) saveSession(data.token);
       setSignupRole(data.account.clearance);
       onSignup(data.account);
       setSignupDone(true);
@@ -825,9 +822,8 @@ function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
 
   useEffect(() => {
     if (user.clearance !== 3) return;
-    fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'getSecurity' }) })
-      .then((r) => r.json())
-      .then((d) => { if (d.security) setSecurity(d.security); })
+    apiPost('/api/auth', { action: 'getSecurity' })
+      .then(({ data }) => { if (data.security) setSecurity(data.security); })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, [user.clearance]);
@@ -836,9 +832,8 @@ function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
     setSavingToggle(true);
     const next = { forceOtpAlways: !security.forceOtpAlways };
     try {
-      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateSecurity', ...next }) });
-      const data = await res.json();
-      if (res.ok) setSecurity(data.security);
+      const { ok, data } = await apiPost('/api/auth', { action: 'updateSecurity', ...next });
+      if (ok) setSecurity(data.security);
     } catch (e) {}
     setSavingToggle(false);
   }
@@ -847,8 +842,8 @@ function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
     setResetting(true);
     setResetMsg('');
     try {
-      const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'resetLoginCounts' }) });
-      if (res.ok) setResetMsg('ตั้งค่าแล้ว — ทุกบัญชีต้องยืนยันอีเมลใหม่ตั้งแต่การล็อกอินครั้งถัดไป');
+      const { ok } = await apiPost('/api/auth', { action: 'resetLoginCounts' });
+      if (ok) setResetMsg('ตั้งค่าแล้ว — ทุกบัญชีต้องยืนยันอีเมลใหม่ตั้งแต่การล็อกอินครั้งถัดไป');
     } catch (e) {}
     setResetting(false);
     setTimeout(() => setResetMsg(''), 4000);
@@ -1001,21 +996,17 @@ function ProfilePage({ user, accounts, tasks, history, onUpdateProfile }) {
     e.preventDefault();
     setPwError('');
     setPwMsg('');
-    if (newPassword.length < 4) { setPwError('รหัสผ่านใหม่สั้นเกินไป'); return; }
+    if (newPassword.length < 8) { setPwError('รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
     if (newPassword !== confirmPassword) { setPwError('รหัสผ่านใหม่ไม่ตรงกัน'); return; }
     setPwLoading(true);
     try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'changePassword', email: user.email, currentPassword, newPassword }),
-      });
-      const data = await res.json();
+      const { ok, data } = await apiPost('/api/auth', { action: 'changePassword', currentPassword, newPassword });
       setPwLoading(false);
-      if (!res.ok) { setPwError(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ'); return; }
+      if (!ok) { setPwError(data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ'); return; }
+      if (data.token) saveSession(data.token); // รับโทเค็นใหม่ เพื่อไม่ให้ตัวเองหลุดออกจากระบบ
       setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-      setPwMsg('เปลี่ยนรหัสผ่านแล้ว');
-      setTimeout(() => setPwMsg(''), 2000);
+      setPwMsg('เปลี่ยนรหัสผ่านแล้ว — อุปกรณ์อื่นที่ล็อกอินค้างไว้จะถูกเตะออก');
+      setTimeout(() => setPwMsg(''), 3000);
     } catch (err) {
       setPwLoading(false);
       setPwError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
@@ -2603,15 +2594,14 @@ export default function CompanyPortal() {
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
   function handleLogin(account) {
     setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: account.lastLogin || Date.now() } : a)));
-    const nextUser = { name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt };
-    setUser(nextUser);
-    saveSession(nextUser); // จำการล็อกอินไว้ รีเฟรชหน้าแล้วไม่ต้องล็อกอินใหม่
+    // โทเค็นถูกบันทึกไว้แล้วตอนล็อกอินสำเร็จ (ในหน้า Terminal)
+    setUser({ name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt });
     setStage('daily');
   }
   async function updateAccountClearance(email, clearance) {
     setAccounts((prev) => prev.map((a) => (a.email === email ? { ...a, clearance } : a)));
     try {
-      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateClearance', email, clearance }) });
+      await apiPost('/api/auth', { action: 'updateClearance', email, clearance });
     } catch (err) {}
   }
   // เจ้าของระบบตั้งค่ายกเว้นตัวเองจากการยืนยัน OTP ได้ (ผู้ใช้คนอื่นไม่มีปุ่มนี้ ต้องทำตามกฎปกติเสมอ)
@@ -2619,14 +2609,14 @@ export default function CompanyPortal() {
     const next = !user.otpExempt;
     setUser((u) => ({ ...u, otpExempt: next }));
     try {
-      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateOtpExempt', email: user.email, otpExempt: next }) });
+      await apiPost('/api/auth', { action: 'updateOtpExempt', otpExempt: next });
     } catch (err) {}
   }
   async function updateProfile(patch) {
     setAccounts((prev) => prev.map((a) => (a.email === user.email ? { ...a, ...patch } : a)));
     if (patch.name) setUser((u) => ({ ...u, name: patch.name }));
     try {
-      await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateProfile', email: user.email, patch }) });
+      await apiPost('/api/auth', { action: 'updateProfile', patch });
     } catch (err) {}
   }
 
@@ -2635,19 +2625,19 @@ export default function CompanyPortal() {
     async function loadAll() {
       try {
         const [accRes, chRes, taskRes, histRes, dateRes, futureRes] = await Promise.all([
-          fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pruneExpired' }) }),
-          fetch('/api/store?key=channels'),
-          fetch('/api/store?key=tasks'),
-          fetch('/api/store?key=history'),
-          fetch('/api/store?key=lastActiveDate'),
-          fetch('/api/store?key=futureTasks'),
+          apiPost('/api/auth', { action: 'listAccounts' }),
+          api('/api/store?key=channels'),
+          api('/api/store?key=tasks'),
+          api('/api/store?key=history'),
+          api('/api/store?key=lastActiveDate'),
+          api('/api/store?key=futureTasks'),
         ]);
-        const accData = await accRes.json();
-        const chData = await chRes.json();
-        const taskData = await taskRes.json();
-        const histData = await histRes.json();
-        const dateData = await dateRes.json();
-        const futureData = await futureRes.json();
+        const accData = accRes.data;
+        const chData = chRes.data;
+        const taskData = taskRes.data;
+        const histData = histRes.data;
+        const dateData = dateRes.data;
+        const futureData = futureRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -2711,23 +2701,23 @@ export default function CompanyPortal() {
   // บันทึกช่อง/เพจ งานประจำวัน และประวัติ ลงฐานข้อมูลทุกครั้งที่เปลี่ยน (หลังโหลดข้อมูลเสร็จแล้วเท่านั้น)
   useEffect(() => {
     if (!dataLoaded) return;
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'channels', value: channels }) }).catch(() => {});
+    apiPost('/api/store', { key: 'channels', value: channels }).catch(() => {});
   }, [channels, dataLoaded]);
   useEffect(() => {
     if (!dataLoaded) return;
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'tasks', value: tasks }) }).catch(() => {});
+    apiPost('/api/store', { key: 'tasks', value: tasks }).catch(() => {});
   }, [tasks, dataLoaded]);
   useEffect(() => {
     if (!dataLoaded) return;
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'history', value: history }) }).catch(() => {});
+    apiPost('/api/store', { key: 'history', value: history }).catch(() => {});
   }, [history, dataLoaded]);
   useEffect(() => {
     if (!dataLoaded) return;
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'futureTasks', value: futureTasks }) }).catch(() => {});
+    apiPost('/api/store', { key: 'futureTasks', value: futureTasks }).catch(() => {});
   }, [futureTasks, dataLoaded]);
   useEffect(() => {
     if (!dataLoaded || !lastActiveDate) return;
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'lastActiveDate', value: lastActiveDate }) }).catch(() => {});
+    apiPost('/api/store', { key: 'lastActiveDate', value: lastActiveDate }).catch(() => {});
   }, [lastActiveDate, dataLoaded]);
 
   function openDept(dept) {
@@ -2739,10 +2729,32 @@ export default function CompanyPortal() {
   // กู้คืนการล็อกอินเดิมตอนเปิดหน้าใหม่ (รีเฟรชแล้วไม่ต้องล็อกอินซ้ำ)
   useEffect(() => {
     const saved = loadSession();
-    if (saved && saved.email) {
-      setUser(saved);
-      setStage('daily');
+    if (saved) {
+      // ไม่เชื่อข้อมูลในเบราว์เซอร์ — ถามเซิร์ฟเวอร์ว่าโทเค็นนี้เป็นของใครและมีสิทธิ์แค่ไหน
+      apiPost('/api/auth', { action: 'me' })
+        .then(({ ok, data }) => {
+          if (ok && data.account) {
+            setUser({
+              name: data.account.name,
+              email: data.account.email,
+              clearance: data.account.clearance,
+              isOwner: !!data.account.isOwner,
+              otpExempt: !!data.account.otpExempt,
+            });
+            setStage('daily');
+          } else {
+            clearSession();
+          }
+        })
+        .catch(() => clearSession());
     }
+  }, []);
+
+  // โทเค็นหมดอายุหรือถูกเพิกถอน — เด้งกลับหน้าล็อกอินทันที
+  useEffect(() => {
+    function onExpired() { setUser(null); setStage('terminal'); setActiveDept(null); }
+    window.addEventListener('forge-session-expired', onExpired);
+    return () => window.removeEventListener('forge-session-expired', onExpired);
   }, []);
 
   // เขียนทับข้อมูลทั้งหมดจากไฟล์สำรอง (ระบบบันทึกขึ้นฐานข้อมูลให้เองอัตโนมัติหลังจากนี้)
