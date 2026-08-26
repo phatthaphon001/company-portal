@@ -7,6 +7,7 @@ import {
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
   CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
   X, Upload, PieChart as PieChartIcon, Download, Undo2, Redo2,
+  Target, Trash, RotateCcw, Activity, Search, Flame, Award, Gauge,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -531,6 +532,7 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
     { key: 'platforms', label: 'แพลตฟอร์ม', Icon: Share2 },
     ...(user.clearance === 3 ? [{ key: 'team', label: 'ทีมงาน', Icon: Users }] : []),
     { key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp },
+    { key: 'kpi', label: 'KPI / รายเดือน', Icon: Target },
     { key: 'security', label: 'Protocol', Icon: ScrollText },
     { key: 'settings', label: 'Setting', Icon: SettingsIcon },
   ];
@@ -1378,6 +1380,231 @@ function CalendarPage({ history, tasks, channels, onOpenDay }) {
 const ANALYSIS_SYS = 'คุณคือฝ่ายวิเคราะห์ข้อมูลในองค์กรผลิตคอนเทนต์ จากข้อมูลสถิติการทำงานที่ให้มา (อัตราการทำงานเสร็จรายวัน แยกตามช่อง จำนวนงานที่ผ่าน/ไม่ผ่าน QC) ให้วิเคราะห์แนวโน้มสั้นๆ และให้คำแนะนำแนวทางการทำงานที่เป็นประโยชน์ 3-5 ข้อ ตอบเป็นภาษาไทย กระชับ ไม่เกิน 10 บรรทัด หมายเหตุ: ข้อมูลที่มีคือสถิติภายในระบบเท่านั้น ไม่มีข้อมูลยอดวิว/ยอดไลก์จริงจากแพลตฟอร์ม ห้ามอ้างว่ามีข้อมูลนั้น';
 const IMAGE_ANALYSIS_SYS = 'คุณคือฝ่ายวิเคราะห์คอนเทนต์ ดูรูปภาพตัวอย่างผลงาน/โพสต์ที่แนบมา แล้ววิเคราะห์จุดเด่น จุดที่ควรปรับปรุง (องค์ประกอบภาพ สี ความชัดเจนของข้อความ ความน่าสนใจ) และให้คำแนะนำเชิงปฏิบัติ 3-5 ข้อ ตอบเป็นภาษาไทย กระชับ ไม่เกิน 12 บรรทัด';
 
+// ---------- หน้า KPI / วิเคราะห์รายเดือน ----------
+function monthKey(dateStr) { return String(dateStr || '').slice(0, 7); }
+function thaiMonthLabel(mk) {
+  const [y, m] = mk.split('-');
+  return `${THAI_MONTHS[Number(m) - 1]} ${Number(y) + 543}`;
+}
+
+// รวมงานทุกวัน (ประวัติ + วันนี้) ให้เป็นรายการเดียว เพื่อคำนวณ KPI
+function collectAllDays(history, tasks) {
+  const days = history.map((h) => ({
+    date: h.date,
+    tasks: Array.isArray(h.tasks) ? h.tasks : [],
+    total: h.totalTasks || 0,
+    done: h.doneTasks || 0,
+  }));
+  const today = todayDateStr();
+  if (!days.some((d) => d.date === today)) {
+    days.push({ date: today, tasks, total: tasks.length, done: tasks.filter((t) => t.done).length });
+  }
+  return days.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function StatCard({ label, value, sub, color, Icon }) {
+  return (
+    <div className="p-3.5 rounded-2xl relative overflow-hidden" style={{ background: `linear-gradient(150deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}, transparent)` }} />
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {Icon && <Icon size={12} style={{ color }} />}
+        <span className="font-mono text-2xs tracking-wide" style={{ color: C.muted }}>{label}</span>
+      </div>
+      <div className="font-display text-2xl font-bold leading-none" style={{ color }}>{value}</div>
+      {sub && <div className="font-mono text-2xs mt-1.5" style={{ color: C.muted }}>{sub}</div>}
+    </div>
+  );
+}
+
+function KpiPage({ history, tasks, channels }) {
+  const allDays = collectAllDays(history, tasks);
+  const months = Array.from(new Set(allDays.map((d) => monthKey(d.date)))).sort().reverse();
+  const [selMonth, setSelMonth] = useState(months[0] || monthKey(todayDateStr()));
+  const [query, setQuery] = useState('');
+
+  const monthDays = allDays.filter((d) => monthKey(d.date) === selMonth);
+  const totalTasks = monthDays.reduce((s, d) => s + d.total, 0);
+  const doneTasks = monthDays.reduce((s, d) => s + d.done, 0);
+  const completion = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+  // คะแนนคุณภาพจากผลตรวจ Gemini
+  const scored = monthDays.flatMap((d) => d.tasks.filter((t) => typeof t.reviewScore === 'number').map((t) => ({ ...t, date: d.date })));
+  const avgScore = scored.length ? (scored.reduce((s, t) => s + t.reviewScore, 0) / scored.length) : null;
+  const reviewedPct = totalTasks ? Math.round((scored.length / totalTasks) * 100) : 0;
+
+  // วันที่ทำครบติดต่อกัน (streak)
+  let streak = 0;
+  for (let i = allDays.length - 1; i >= 0; i--) {
+    const d = allDays[i];
+    if (d.total > 0 && d.done >= d.total) streak++;
+    else if (d.total > 0) break;
+  }
+
+  const perfectDays = monthDays.filter((d) => d.total > 0 && d.done >= d.total).length;
+  const activeDays = monthDays.filter((d) => d.total > 0).length;
+
+  // แนวโน้มรายวันในเดือนนี้
+  const dailyTrend = monthDays.map((d) => ({
+    date: d.date.slice(8),
+    pct: d.total ? Math.round((d.done / d.total) * 100) : 0,
+    score: (() => {
+      const ss = d.tasks.filter((t) => typeof t.reviewScore === 'number');
+      return ss.length ? Math.round((ss.reduce((a, t) => a + t.reviewScore, 0) / ss.length) * 10) : null;
+    })(),
+  }));
+
+  // เทียบรายเดือน
+  const monthCompare = months.slice(0, 6).reverse().map((mk) => {
+    const ds = allDays.filter((d) => monthKey(d.date) === mk);
+    const tt = ds.reduce((s, d) => s + d.total, 0);
+    const dd = ds.reduce((s, d) => s + d.done, 0);
+    const sc = ds.flatMap((d) => d.tasks.filter((t) => typeof t.reviewScore === 'number'));
+    return {
+      month: thaiMonthLabel(mk).split(' ')[0],
+      completion: tt ? Math.round((dd / tt) * 100) : 0,
+      quality: sc.length ? Math.round((sc.reduce((a, t) => a + t.reviewScore, 0) / sc.length) * 10) : 0,
+    };
+  });
+
+  // แยกตามช่อง
+  const byChannel = channels.map((c) => {
+    const ts = monthDays.flatMap((d) => d.tasks.filter((t) => t.channelId === c.id));
+    const sc = ts.filter((t) => typeof t.reviewScore === 'number');
+    return {
+      name: c.name,
+      color: c.color,
+      total: ts.length,
+      done: ts.filter((t) => t.done).length,
+      avg: sc.length ? (sc.reduce((a, t) => a + t.reviewScore, 0) / sc.length).toFixed(1) : '-',
+    };
+  }).filter((c) => c.total > 0);
+
+  // ค้นหางานย้อนหลัง
+  const q = query.trim().toLowerCase();
+  const searchResults = !q ? [] : allDays.flatMap((d) =>
+    d.tasks.filter((t) =>
+      [t.titleTh, t.title, t.outline, t.captionTh, t.styleTemplate].filter(Boolean).join(' ').toLowerCase().includes(q)
+    ).map((t) => ({ ...t, date: d.date, channelName: (channels.find((c) => c.id === t.channelId) || {}).name || '-' }))
+  ).slice(0, 30);
+
+  const scoreColor = avgScore == null ? C.muted : avgScore >= 8 ? C.emerald : avgScore >= 5 ? C.orange : C.red;
+  const compColor = completion >= 80 ? C.emerald : completion >= 50 ? C.orange : C.red;
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><Target size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>KPI DASHBOARD</span></div>
+      <div className="flex items-end justify-between gap-3 flex-wrap mb-6">
+        <div>
+          <h2 className="font-body text-xl" style={{ color: C.text }}>ตัวชี้วัดผลงาน</h2>
+          <p className="font-body text-xs" style={{ color: C.muted }}>วัดผลจริงจากงานที่ทำและคะแนนตรวจคลิป</p>
+        </div>
+        <select value={selMonth} onChange={(e) => setSelMonth(e.target.value)} className="px-3 py-1.5 font-mono text-xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }}>
+          {months.map((mk) => <option key={mk} value={mk}>{thaiMonthLabel(mk)}</option>)}
+        </select>
+      </div>
+
+      {/* การ์ดตัวเลขหลัก */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
+        <StatCard label="อัตราทำงานเสร็จ" value={`${completion}%`} sub={`${doneTasks}/${totalTasks} งาน`} color={compColor} Icon={Gauge} />
+        <StatCard label="คะแนนคุณภาพเฉลี่ย" value={avgScore == null ? '—' : avgScore.toFixed(1)} sub={avgScore == null ? 'ยังไม่มีผลตรวจ' : `จาก ${scored.length} คลิป`} color={scoreColor} Icon={Award} />
+        <StatCard label="วันที่ทำครบติดกัน" value={streak} sub="วัน" color={C.violet} Icon={Flame} />
+        <StatCard label="ส่งตรวจแล้ว" value={`${reviewedPct}%`} sub={`${perfectDays}/${activeDays} วันทำครบ`} color={C.cyan} Icon={ClipboardCheck} />
+      </div>
+
+      {/* แนวโน้มรายวัน */}
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มรายวัน — {thaiMonthLabel(selMonth)}</div>
+        {dailyTrend.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลเดือนนี้</p> : (
+          <ResponsiveContainer width="100%" height={190}>
+            <LineChart data={dailyTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 10 }} domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="pct" name="ทำเสร็จ %" stroke={C.emerald} strokeWidth={2} dot={{ r: 2 }} />
+              <Line type="monotone" dataKey="score" name="คุณภาพ (x10)" stroke={C.violet} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* เทียบรายเดือน */}
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เทียบย้อนหลัง 6 เดือน</div>
+        {monthCompare.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={monthCompare}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="month" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 10 }} domain={[0, 100]} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="completion" name="ทำเสร็จ %" fill={C.emerald} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="quality" name="คุณภาพ (x10)" fill={C.violet} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* แยกตามช่อง */}
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ผลงานแยกตามช่อง</div>
+        {byChannel.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลเดือนนี้</p> : (
+          <div className="space-y-2.5">
+            {byChannel.map((c) => {
+              const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+              return (
+                <div key={c.name}>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+                      <span className="font-body text-xs truncate" style={{ color: C.text }}>{c.name}</span>
+                    </div>
+                    <span className="font-mono text-2xs shrink-0" style={{ color: C.muted }}>{c.done}/{c.total} · คะแนน {c.avg}</span>
+                  </div>
+                  <div style={{ width: '100%', height: 6, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${c.color}, ${c.color}88)` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ค้นหางานย้อนหลัง */}
+      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.blue }}>ค้นหางานย้อนหลัง</div>
+        <div className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+          <Search size={13} style={{ color: C.muted }} className="shrink-0" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="พิมพ์คำที่อยากหา เช่น ปลาหมึก, ยามเช้า..." className="flex-1 min-w-0 font-body text-xs outline-none" style={{ background: 'transparent', color: C.text }} />
+          {query && <button onClick={() => setQuery('')} style={{ color: C.muted }}><X size={13} /></button>}
+        </div>
+        {q && (
+          searchResults.length === 0 ? (
+            <p className="font-body text-xs mt-2.5" style={{ color: C.muted }}>ไม่พบงานที่ตรงกับ "{query}"</p>
+          ) : (
+            <div className="mt-2.5 space-y-1.5 max-h-72 overflow-y-auto">
+              <p className="font-mono text-2xs" style={{ color: C.muted }}>พบ {searchResults.length} รายการ</p>
+              {searchResults.map((r, i) => (
+                <div key={i} className="p-2.5 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                    <span className="font-mono text-2xs" style={{ color: C.blue }}>{r.date}</span>
+                    <span className="font-mono text-2xs" style={{ color: C.muted }}>{r.channelName} · {r.label}</span>
+                    {typeof r.reviewScore === 'number' && <span className="font-mono text-2xs px-1.5 rounded" style={{ color: r.reviewScore >= 8 ? C.emerald : r.reviewScore >= 5 ? C.orange : C.red }}>{r.reviewScore}/10</span>}
+                  </div>
+                  <p className="font-body text-xs line-clamp-2" style={{ color: C.text }}>{r.titleTh || r.title || r.outline || '(ไม่มีชื่อ)'}</p>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsPage({ history, tasks, channels }) {
   const [analysis, setAnalysis] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1601,7 +1828,146 @@ const SHORTCUTS = [
   { keys: 'Esc', action: 'ออกจากช่องพิมพ์ที่กำลังกรอกอยู่' },
 ];
 
-function SettingsPage({ user, accounts, backupData, onImportBackup }) {
+const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// ---------- ถังขยะ: เก็บของที่ลบไว้ 30 วัน กู้คืนได้ ----------
+function TrashPanel({ trash, onRestore, onPurge, onEmpty }) {
+  const items = (trash || []).filter((t) => Date.now() - t.at < TRASH_TTL_MS);
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <Trash size={14} style={{ color: C.orange }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>ถังขยะ ({items.length})</span>
+        </div>
+        {items.length > 0 && (
+          <button onClick={onEmpty} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.red}`, color: C.red }}>ล้างถังขยะ</button>
+        )}
+      </div>
+      <p className="font-body text-xs mb-2.5 leading-relaxed" style={{ color: C.muted }}>ของที่ลบจะเก็บไว้ 30 วันก่อนหายถาวร กดกู้คืนได้ตลอดในช่วงนี้</p>
+      {items.length === 0 ? (
+        <p className="font-body text-xs" style={{ color: C.muted }}>ถังขยะว่าง</p>
+      ) : (
+        <div className="space-y-1.5 max-h-64 overflow-y-auto">
+          {items.slice().reverse().map((it) => {
+            const daysLeft = Math.ceil((TRASH_TTL_MS - (Date.now() - it.at)) / 86400000);
+            return (
+              <div key={it.id} className="flex items-center justify-between gap-2 p-2.5 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="min-w-0">
+                  <div className="font-body text-xs truncate" style={{ color: C.text }}>
+                    {it.kind === 'channel' ? '📁 ช่อง: ' : '📄 งาน: '}{it.label}
+                  </div>
+                  <div className="font-mono text-2xs" style={{ color: C.muted, fontSize: 10 }}>
+                    ลบเมื่อ {new Date(it.at).toLocaleDateString('th-TH')} · เหลืออีก {daysLeft} วัน
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => onRestore(it.id)} title="กู้คืน" className="font-mono text-2xs px-2 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.emerald}`, color: C.emerald }}>
+                    <RotateCcw size={10} /> กู้คืน
+                  </button>
+                  <button onClick={() => onPurge(it.id)} title="ลบถาวร" style={{ color: C.muted }}><X size={13} /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- ตรวจสุขภาพระบบ ----------
+function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
+  const [checks, setChecks] = useState(null);
+  const [running, setRunning] = useState(false);
+
+  async function runChecks() {
+    setRunning(true);
+    const out = [];
+    const add = (name, ok, detail, warn) => out.push({ name, ok, detail, warn });
+
+    add('เชื่อมต่อฐานข้อมูล', loadOk, loadOk ? 'อ่านข้อมูลได้ปกติ' : 'โหลดข้อมูลไม่สำเร็จ — อย่าเพิ่งแก้ไขอะไร');
+
+    // โทเค็นยังใช้ได้ไหม
+    try {
+      const { ok } = await apiPost('/api/auth', { action: 'me' });
+      add('สถานะการล็อกอิน', ok, ok ? 'โทเค็นใช้งานได้' : 'โทเค็นหมดอายุ ต้องล็อกอินใหม่');
+    } catch (e) { add('สถานะการล็อกอิน', false, 'ตรวจไม่สำเร็จ'); }
+
+    // มีชุดสำรองไหม
+    try {
+      const { data } = await apiPost('/api/auth', { action: 'listBackups' });
+      const n = (data.backups || []).length;
+      add('ชุดสำรองข้อมูล', n > 0, n > 0 ? `มี ${n} ชุด (ล่าสุด ${data.backups[data.backups.length - 1]})` : 'ยังไม่มีชุดสำรอง — กดสำรองในหน้า Protocol');
+    } catch (e) { add('ชุดสำรองข้อมูล', false, 'ตรวจไม่สำเร็จ'); }
+
+    // งานที่ไม่มีช่องรองรับ (ข้อมูลกำพร้า)
+    const ids = new Set(channels.map((c) => c.id));
+    const orphan = tasks.filter((t) => !ids.has(t.channelId)).length;
+    add('ความสมบูรณ์ของข้อมูล', orphan === 0, orphan === 0 ? 'ไม่พบงานกำพร้า' : `พบงาน ${orphan} ชิ้นที่ไม่มีช่องรองรับ`);
+
+    // งาน id ซ้ำ
+    const seen = new Set(); let dup = 0;
+    tasks.forEach((t) => { if (seen.has(t.id)) dup++; seen.add(t.id); });
+    add('รหัสงานไม่ซ้ำ', dup === 0, dup === 0 ? 'ไม่พบรหัสซ้ำ' : `พบรหัสซ้ำ ${dup} รายการ`);
+
+    // ขนาดข้อมูล
+    const bytes = new Blob([JSON.stringify({ channels, tasks, history, futureTasks })]).size;
+    const mb = bytes / 1024 / 1024;
+    add('ขนาดข้อมูล', mb < 4, `${mb.toFixed(2)} MB`, mb >= 2 && mb < 4 ? 'เริ่มใหญ่ ควรล้างประวัติเก่า' : null);
+
+    // AI ใช้งานได้ไหม
+    try {
+      await callClaude('ตอบสั้นๆ ว่า OK', 'ping');
+      add('เชื่อมต่อ AI (Gemini)', true, 'เรียกใช้งานได้ปกติ');
+    } catch (e) {
+      const rate = /ถี่เกินไป|quota|rate/i.test(e.message || '');
+      add('เชื่อมต่อ AI (Gemini)', rate, rate ? 'ใช้งานได้ แต่ตอนนี้ชนลิมิตชั่วคราว' : `เรียกไม่สำเร็จ: ${e.message || ''}`);
+    }
+
+    setChecks(out);
+    setRunning(false);
+  }
+
+  const failed = checks ? checks.filter((c) => !c.ok).length : 0;
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <Activity size={14} style={{ color: C.cyan }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>ตรวจสุขภาพระบบ</span>
+        </div>
+        <button onClick={runChecks} disabled={running} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: BRAND, color: '#fff', opacity: running ? 0.6 : 1 }}>
+          {running ? <Loader2 size={11} className="animate-spin" /> : <Activity size={11} />} เริ่มตรวจ
+        </button>
+      </div>
+      <p className="font-body text-xs mb-2.5 leading-relaxed" style={{ color: C.muted }}>ตรวจว่าระบบทำงานครบทุกส่วนหรือไม่ — ควรกดทุกครั้งหลังอัปเดตเว็บ</p>
+      {!checks ? (
+        <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่ได้ตรวจ</p>
+      ) : (
+        <>
+          <div className="mb-2 font-mono text-2xs" style={{ color: failed === 0 ? C.emerald : C.red }}>
+            {failed === 0 ? '✓ ผ่านทั้งหมด ระบบพร้อมใช้งาน' : `พบปัญหา ${failed} รายการ`}
+          </div>
+          <div className="space-y-1">
+            {checks.map((c, i) => (
+              <div key={i} className="flex items-start gap-2 py-1.5" style={{ borderBottom: `1px solid ${C.border}` }}>
+                {c.ok ? <CheckCircle2 size={13} style={{ color: c.warn ? C.orange : C.emerald }} className="shrink-0 mt-0.5" /> : <XCircle size={13} style={{ color: C.red }} className="shrink-0 mt-0.5" />}
+                <div className="min-w-0">
+                  <div className="font-body text-xs" style={{ color: C.text }}>{c.name}</div>
+                  <div className="font-mono text-2xs" style={{ color: c.warn ? C.orange : C.muted, fontSize: 10 }}>{c.warn || c.detail}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SettingsPage({ user, accounts, backupData, onImportBackup, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
   const [importMsg, setImportMsg] = useState('');
   const [importing, setImporting] = useState(false);
 
@@ -1644,7 +2010,10 @@ function SettingsPage({ user, accounts, backupData, onImportBackup }) {
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><SettingsIcon size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SETTINGS</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
-      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าที่ใช้งานได้จริงตอนนี้ — ส่วนธีมสี/ฟอนต์/ย้ายตำแหน่งปุ่มเองยังอยู่ระหว่างพัฒนา เพราะต้องปรับโครงสร้างสีทั้งระบบก่อนถึงจะปลอดภัยและไม่พังส่วนอื่น</p>
+      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
+
+      <HealthCheckPanel channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />
+      <TrashPanel trash={trash} onRestore={onRestoreTrash} onPurge={onPurgeTrash} onEmpty={onEmptyTrash} />
 
       <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
         <div className="flex items-center gap-2 mb-3"><Download size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>สำรอง / กู้คืนข้อมูล</span></div>
@@ -2484,7 +2853,7 @@ function DayNavigator({ viewDate, setViewDate }) {
   );
 }
 
-function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, setHistory, reminder, onDismissReminder, onOpenCalendar, initialViewDate, onConsumeInitialViewDate }) {
+function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, setHistory, reminder, onDismissReminder, onOpenCalendar, initialViewDate, onConsumeInitialViewDate, onTrash }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
@@ -2546,7 +2915,12 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     }
   }
   function removeTask(id) {
-    setActiveTasksUpdater((prev) => prev.filter((t) => t.id !== id));
+    const t = activeTasksRef.current.find((x) => x.id === id);
+    if (t && onTrash) {
+      const ch = channels.find((c) => c.id === t.channelId);
+      onTrash('task', `${ch ? ch.name + ' · ' : ''}${t.label}`, { task: t });
+    }
+    setActiveTasksUpdater((prev) => prev.filter((x) => x.id !== id));
   }
 
   // คัดลอกสไตล์/เทมเพลต/ความยาว จากวันก่อนหน้าล่าสุดที่มีข้อมูล มาใส่งานของวันที่กำลังดูอยู่
@@ -2606,6 +2980,10 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     });
   }
   function removeChannel(id) {
+    const ch = channels.find((c) => c.id === id);
+    const chTasks = tasks.filter((t) => t.channelId === id);
+    if (ch && !window.confirm(`ลบช่อง "${ch.name}" และงานทั้งหมดของช่องนี้?\n\n(ยังกู้คืนได้จากถังขยะภายใน 30 วัน)`)) return;
+    if (ch && onTrash) onTrash('channel', ch.name, { channel: ch, tasks: chTasks });
     setChannels((prev) => prev.filter((c) => c.id !== id));
     setTasks((prev) => prev.filter((t) => t.channelId !== id));
     setFutureTasks((prev) => {
@@ -2851,6 +3229,7 @@ export default function CompanyPortal() {
   const [tasks, setTasks] = useState([]);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [loadOk, setLoadOk] = useState(false);   // true เมื่อโหลดข้อมูลจากฐานข้อมูลสำเร็จจริง
+  const [trash, setTrash] = useState([]);       // ถังขยะ เก็บของที่ลบไว้ 30 วัน
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -2947,13 +3326,14 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
           api('/api/store?key=history'),
           api('/api/store?key=lastActiveDate'),
           api('/api/store?key=futureTasks'),
+          api('/api/store?key=trash'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -2961,6 +3341,7 @@ export default function CompanyPortal() {
         const histData = histRes.data;
         const dateData = dateRes.data;
         const futureData = futureRes.data;
+        const trashData = trashRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -3011,6 +3392,9 @@ export default function CompanyPortal() {
         setTasks(loadedTasks);
         setHistory(loadedHistory);
         setFutureTasks(loadedFutureTasks);
+        // ล้างของในถังขยะที่เกิน 30 วันออกอัตโนมัติ
+        const rawTrash = Array.isArray(trashData.value) ? trashData.value : [];
+        setTrash(rawTrash.filter((t) => Date.now() - (t.at || 0) < 30 * 24 * 60 * 60 * 1000));
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -3043,11 +3427,40 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user || !lastActiveDate) return;
     apiPost('/api/store', { key: 'lastActiveDate', value: lastActiveDate }).catch(() => {});
   }, [lastActiveDate, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'trash', value: trash }).catch(() => {});
+  }, [trash, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
+  // ---------- ถังขยะ ----------
+  function sendToTrash(kind, label, payload) {
+    setTrash((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, kind, label, payload, at: Date.now() }].slice(-200));
+  }
+  function restoreFromTrash(id) {
+    const item = trash.find((t) => t.id === id);
+    if (!item) return;
+    if (item.kind === 'channel') {
+      setChannels((prev) => (prev.some((c) => c.id === item.payload.channel.id) ? prev : [...prev, item.payload.channel]));
+      setTasks((prev) => [...prev, ...(item.payload.tasks || []).filter((t) => !prev.some((x) => x.id === t.id))]);
+    } else if (item.kind === 'task') {
+      setTasks((prev) => (prev.some((t) => t.id === item.payload.task.id) ? prev : [...prev, item.payload.task]));
+    }
+    setTrash((prev) => prev.filter((t) => t.id !== id));
+    showToast('กู้คืนแล้ว');
+  }
+  function purgeFromTrash(id) {
+    if (!window.confirm('ลบถาวร กู้คืนไม่ได้อีก ยืนยันหรือไม่?')) return;
+    setTrash((prev) => prev.filter((t) => t.id !== id));
+  }
+  function emptyTrash() {
+    if (!window.confirm('ล้างถังขยะทั้งหมด กู้คืนไม่ได้อีก ยืนยันหรือไม่?')) return;
+    setTrash([]);
+  }
+
   // "ไม่ทำแล้ว" — ลบเฉพาะงานที่ยังไม่เสร็จของวันนั้นออก งานที่ทำเสร็จแล้วยังอยู่ครบ
   function dismissOverdueDay(dateStr) {
     setHistory((prev) => prev.map((h) => {
@@ -3172,14 +3585,15 @@ export default function CompanyPortal() {
         <div className="flex">
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
-            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} />}
+            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
-            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} />}
+            {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
           </div>
