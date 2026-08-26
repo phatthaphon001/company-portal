@@ -1,19 +1,21 @@
-const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks'];
+import { redisReady, redisGet, redisSet, requireUser } from './_lib.js';
+
+const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates'];
 
 export default async function handler(req, res) {
-  if (!REDIS_URL || !REDIS_TOKEN) {
+  if (!redisReady()) {
     return res.status(500).json({ error: 'เซิร์ฟเวอร์ยังไม่ได้เชื่อมต่อฐานข้อมูล (ตั้งค่า Upstash ใน Vercel ก่อน)' });
   }
+
+  // ทุกคำสั่งต้องมีโทเค็นที่เซิร์ฟเวอร์ออกให้เท่านั้น — ยิงตรงจากภายนอกไม่ได้อีกต่อไป
+  const session = await requireUser(req);
+  if (!session) return res.status(401).json({ error: 'กรุณาเข้าสู่ระบบใหม่' });
 
   if (req.method === 'GET') {
     const key = req.query.key;
     if (!ALLOWED_KEYS.includes(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
     try {
-      const r = await fetch(`${REDIS_URL}/get/${key}`, { headers: { Authorization: `Bearer ${REDIS_TOKEN}` } });
-      const data = await r.json();
-      return res.status(200).json({ value: data.result ? JSON.parse(data.result) : null });
+      return res.status(200).json({ value: await redisGet(key) });
     } catch (err) {
       return res.status(500).json({ error: 'อ่านข้อมูลไม่สำเร็จ' });
     }
@@ -22,12 +24,10 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { key, value } = req.body || {};
     if (!ALLOWED_KEYS.includes(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
+    // ระดับ 1 ดูได้อย่างเดียว แก้ข้อมูลส่วนกลางไม่ได้
+    if (session.account.clearance < 2) return res.status(403).json({ error: 'สิทธิ์ของคุณแก้ไขข้อมูลนี้ไม่ได้' });
     try {
-      await fetch(`${REDIS_URL}/set/${key}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-        body: JSON.stringify(value),
-      });
+      await redisSet(key, value);
       return res.status(200).json({ ok: true });
     } catch (err) {
       return res.status(500).json({ error: 'บันทึกข้อมูลไม่สำเร็จ' });
