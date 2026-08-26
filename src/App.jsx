@@ -871,6 +871,127 @@ function PlatformsPanel() {
   );
 }
 
+// ---------- แผงผู้ดูแลระบบ: แบน / บันทึกกิจกรรม / สำรองข้อมูล ----------
+function AdminSecurityPanel({ user }) {
+  const [tab, setTab] = useState('bans');
+  const [bans, setBans] = useState([]);
+  const [log, setLog] = useState([]);
+  const [backups, setBackups] = useState([]);
+  const [target, setTarget] = useState('');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (user.clearance !== 3) return;
+    apiPost('/api/auth', { action: 'listBans' }).then(({ data }) => setBans(data.bans || [])).catch(() => {});
+    apiPost('/api/auth', { action: 'activityLog' }).then(({ data }) => setLog(data.log || [])).catch(() => {});
+    apiPost('/api/auth', { action: 'listBackups' }).then(({ data }) => setBackups(data.backups || [])).catch(() => {});
+  }, [user.clearance]);
+
+  if (user.clearance !== 3) return null;
+
+  async function doBan() {
+    if (!target.trim()) return;
+    setBusy(true);
+    const { ok, data } = await apiPost('/api/auth', { action: 'addBan', target: target.trim(), reason });
+    if (ok) { setBans(data.bans || []); setTarget(''); setReason(''); setMsg('แบนแล้ว'); }
+    setBusy(false); setTimeout(() => setMsg(''), 2500);
+  }
+  async function unban(id) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'removeBan', target: id });
+    if (ok) { setBans(data.bans || []); setMsg('ปลดแบนแล้ว'); setTimeout(() => setMsg(''), 2500); }
+  }
+  async function backupNow() {
+    setBusy(true);
+    const { ok, data } = await apiPost('/api/auth', { action: 'runBackup' });
+    if (ok) { setBackups(data.backups || []); setMsg('สำรองข้อมูลแล้ว'); }
+    setBusy(false); setTimeout(() => setMsg(''), 2500);
+  }
+
+  const TABS = [
+    { key: 'bans', label: `รายชื่อที่ถูกแบน (${bans.length})` },
+    { key: 'log', label: 'บันทึกกิจกรรม' },
+    { key: 'backup', label: `สำรองข้อมูล (${backups.length})` },
+  ];
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-2 mb-3">
+        <ShieldAlert size={14} style={{ color: C.red }} />
+        <span className="font-mono text-2xs tracking-widest" style={{ color: C.red }}>ศูนย์ควบคุมความปลอดภัย</span>
+      </div>
+      <div className="flex gap-1.5 mb-3 flex-wrap">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: tab === t.key ? BRAND : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>{t.label}</button>
+        ))}
+      </div>
+      {msg && <p className="font-mono text-2xs mb-2" style={{ color: C.emerald }}>{msg}</p>}
+
+      {tab === 'bans' && (
+        <div>
+          <p className="font-body text-xs mb-2 leading-relaxed" style={{ color: C.muted }}>
+            ระบบแบนอัตโนมัติเมื่อมีพฤติกรรมน่าสงสัยเกิน 15 ครั้งใน 1 ชม. (เช่น กรอกรหัสผิดรัวๆ) หรือแบนเองด้วยการใส่ IP/อีเมลด้านล่าง
+          </p>
+          <div className="flex gap-1.5 mb-2 flex-wrap">
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="IP หรืออีเมลที่ต้องการแบน" className="flex-1 min-w-[140px] px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เหตุผล" className="flex-1 min-w-[100px] px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <button onClick={doBan} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg shrink-0" style={{ background: C.red, color: '#fff' }}>แบน</button>
+          </div>
+          {bans.length === 0 ? (
+            <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีใครถูกแบน</p>
+          ) : (
+            <div className="space-y-1.5">
+              {bans.map((b) => (
+                <div key={b.id} className="flex items-center justify-between gap-2 p-2 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                  <div className="min-w-0">
+                    <div className="font-mono text-2xs truncate" style={{ color: C.text }}>{b.id}</div>
+                    <div className="font-mono text-2xs truncate" style={{ color: C.muted, fontSize: 10 }}>{b.reason} · {b.until ? `ถึง ${new Date(b.until).toLocaleString('th-TH')}` : 'ถาวร'}</div>
+                  </div>
+                  <button onClick={() => unban(b.id)} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ border: `1px solid ${C.emerald}`, color: C.emerald }}>ปลดแบน</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'log' && (
+        log.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีบันทึก</p> : (
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {log.map((e, i) => (
+              <div key={i} className="font-mono text-2xs flex items-center gap-2 py-1" style={{ color: e.type.includes('ban') || e.type === 'suspicious' ? C.red : C.muted, borderBottom: `1px solid ${C.border}` }}>
+                <span className="shrink-0" style={{ fontSize: 10 }}>{new Date(e.at).toLocaleString('th-TH')}</span>
+                <span className="truncate">{e.type} {e.email || e.target || e.ip || ''}</span>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {tab === 'backup' && (
+        <div>
+          <p className="font-body text-xs mb-2 leading-relaxed" style={{ color: C.muted }}>
+            ระบบสำรองข้อมูลอัตโนมัติวันละครั้ง เก็บย้อนหลัง 7 วัน (สำรองเฉพาะตอนมีข้อมูลจริง จะไม่ทับชุดดีด้วยชุดว่าง)
+          </p>
+          <button onClick={backupNow} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1 mb-2" style={{ background: BRAND, color: '#fff' }}>
+            {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} สำรองเดี๋ยวนี้
+          </button>
+          {backups.length === 0 ? (
+            <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีชุดสำรอง</p>
+          ) : (
+            <div className="space-y-1">
+              {backups.slice().reverse().map((d) => (
+                <div key={d} className="font-mono text-2xs py-1.5 px-2 rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>{d}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
   const [security, setSecurity] = useState({ forceOtpAlways: false });
   const [loaded, setLoaded] = useState(false);
@@ -922,6 +1043,8 @@ function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
       <div className="flex items-center gap-2 mb-1"><ScrollText size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SECURITY PROTOCOL</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>มาตรการความปลอดภัยสำหรับระบบจริง</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ระบบล็อกอิน ฐานข้อมูล และรหัสผ่าน เชื่อมต่อทำงานจริงแล้วทั้งหมด</p>
+
+      <AdminSecurityPanel user={user} />
 
       {user.isOwner && (
         <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -1884,8 +2007,6 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
 
               <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
                 <label className="font-mono text-2xs block mb-1" style={{ color: C.violet }}>ตรวจงาน (QC)</label>
-                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว (ไว้อ้างอิง)" className="w-full px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-                {task.link.trim() && <VideoPreviewBox link={task.link.trim()} compact />}
                 <QCReviewBox task={task} channelName={channelName} onUpdate={onUpdate} onAnalyze={onAnalyzeReview} loadingAction={loadingAction} />
               </div>
             </div>
@@ -1902,78 +2023,88 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
 // 3) ให้ระบบสรุปคะแนน + สิ่งที่ต้องแก้ครั้งหน้า แล้วเก็บสถิติไว้ดูรายวัน/รายเดือน
 function QCReviewBox({ task, channelName, onUpdate, onAnalyze, loadingAction }) {
   const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(!!task.geminiReview);
+  const [showPrompt, setShowPrompt] = useState(false);
   const prompt = buildGeminiReviewPrompt(task, channelName);
   const busy = loadingAction === 'review';
+  const scoreColor = task.reviewScore == null ? C.muted : task.reviewScore >= 8 ? C.emerald : task.reviewScore >= 5 ? C.orange : C.red;
 
-  function sendToGemini() {
+  function copyPrompt() {
+    copyText(prompt).then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 3000); });
+  }
+  function copyAndOpen() {
     const win = window.open('https://gemini.google.com/app', '_blank', 'noopener,noreferrer');
-    copyText(prompt).then((ok) => {
-      setCopied(ok);
-      setOpen(true);
-      setTimeout(() => setCopied(false), 4000);
-    });
+    copyText(prompt).then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 4000); });
     if (!win) window.alert('เบราว์เซอร์บล็อกการเปิดแท็บ — อนุญาตป๊อปอัปของเว็บนี้ก่อน');
   }
 
-  const scoreColor = task.reviewScore == null ? C.muted : task.reviewScore >= 8 ? C.emerald : task.reviewScore >= 5 ? C.orange : C.red;
-
   return (
-    <div className="mt-2">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <button onClick={sendToGemini} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff' }}>
-          <Share2 size={11} /> คัดลอกคำสั่งตรวจ + เปิด Gemini
+    <div className="mt-1">
+      {/* ขั้นที่ 1 — คำสั่งตรวจที่ระบบเขียนให้ */}
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="font-mono text-2xs" style={{ color: C.muted }}>1. คำสั่งตรวจคลิป (ระบบเขียนให้อัตโนมัติ)</span>
+        <button onClick={() => setShowPrompt((v) => !v)} className="font-mono text-2xs shrink-0" style={{ color: C.blue }}>
+          {showPrompt ? 'ย่อ' : 'ดูคำสั่งเต็ม'}
         </button>
-        {task.geminiReview && (
-          <button onClick={() => setOpen((o) => !o)} className="font-mono text-2xs px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
-            {open ? 'ย่อ' : 'ดูผลตรวจ'}
-          </button>
-        )}
-        {task.reviewScore != null && (
-          <span className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${scoreColor}`, color: scoreColor }}>
-            คะแนน {task.reviewScore}/10
-          </span>
-        )}
       </div>
-      {copied && <p className="font-mono text-2xs mt-1" style={{ color: C.emerald }}>คัดลอกคำสั่งแล้ว — ใน Gemini ให้กดปุ่ม + แนบไฟล์คลิป แล้ววางคำสั่ง (⌘V) ส่งพร้อมกัน</p>}
+      <textarea
+        readOnly
+        value={showPrompt ? prompt : prompt.slice(0, 180) + ' ...'}
+        rows={showPrompt ? 12 : 3}
+        onClick={copyPrompt}
+        title="คลิกเพื่อคัดลอกคำสั่งทั้งหมด"
+        className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y cursor-pointer"
+        style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
+      />
+      <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+        <button onClick={copyPrompt} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.violet}`, color: C.violet }}>
+          <ClipboardCheck size={11} /> คัดลอกคำสั่ง
+        </button>
+        <button onClick={copyAndOpen} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff' }}>
+          <Share2 size={11} /> คัดลอก + เปิด Gemini
+        </button>
+        {copied && <span className="font-mono text-2xs" style={{ color: C.emerald }}>คัดลอกแล้ว — ใน Gemini กด + แนบไฟล์คลิป แล้ววาง (⌘V) ส่งพร้อมกัน</span>}
+      </div>
 
-      {open && (
-        <div className="mt-2">
-          <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วางผลวิเคราะห์จาก Gemini ที่นี่</label>
-          <textarea
-            value={task.geminiReview}
-            onChange={(e) => onUpdate(task.id, { geminiReview: e.target.value })}
-            rows={5}
-            placeholder="คัดลอกคำตอบทั้งหมดจาก Gemini มาวางตรงนี้..."
-            className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y"
-            style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
-          />
-          <button
-            onClick={() => onAnalyze(task)}
-            disabled={busy || !task.geminiReview.trim()}
-            className="mt-1.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg"
-            style={{ background: BRAND, color: '#fff', opacity: (busy || !task.geminiReview.trim()) ? 0.5 : 1 }}
-          >
-            {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ระบบสรุป + เก็บสถิติ
-          </button>
+      {/* ขั้นที่ 2 — วางผลกลับมา */}
+      <div className="mt-3">
+        <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>2. วางผลวิเคราะห์ที่ได้จาก Gemini</label>
+        <textarea
+          value={task.geminiReview}
+          onChange={(e) => onUpdate(task.id, { geminiReview: e.target.value })}
+          rows={4}
+          placeholder="คัดลอกคำตอบทั้งหมดจาก Gemini มาวางตรงนี้..."
+          className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y"
+          style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
+        />
+      </div>
 
-          {task.reviewSummary && (
-            <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${scoreColor}55` }}>
-              <div className="font-mono text-2xs mb-1" style={{ color: scoreColor }}>สรุปผลตรวจ · คะแนน {task.reviewScore}/10</div>
-              <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{task.reviewSummary}</p>
-            </div>
-          )}
+      {/* ขั้นที่ 3 — ให้ระบบสรุป */}
+      <button
+        onClick={() => onAnalyze(task)}
+        disabled={busy || !task.geminiReview.trim()}
+        className="mt-1.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg"
+        style={{ background: BRAND, color: '#fff', opacity: (busy || !task.geminiReview.trim()) ? 0.5 : 1 }}
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} 3. ให้ระบบสรุป + เก็บสถิติ
+      </button>
+
+      {task.reviewSummary && (
+        <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${scoreColor}55` }}>
+          <div className="font-mono text-2xs mb-1 flex items-center gap-2" style={{ color: scoreColor }}>
+            <span>ผลตรวจ · คะแนน {task.reviewScore}/10</span>
+            {task.reviewAt && <span style={{ color: C.muted }}>{new Date(task.reviewAt).toLocaleDateString('th-TH')}</span>}
+          </div>
+          <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{task.reviewSummary}</p>
         </div>
       )}
+
+      {/* ลิงก์ผลงาน (เก็บไว้อ้างอิง) */}
+      <div className="mt-3">
+        <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>ลิงก์ผลงานที่โพสต์แล้ว (ไม่บังคับ)</label>
+        <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่เผยแพร่แล้ว" className="w-full px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+      </div>
     </div>
   );
-}
-
-// เติม https:// ให้ลิงก์ที่ผู้ใช้พิมพ์มาแบบไม่มี เพื่อให้กดเปิดได้จริง
-function normalizeUrl(link) {
-  const t = String(link || '').trim();
-  if (!t) return '#';
-  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
 function getYoutubeEmbedUrl(link) {
@@ -2253,13 +2384,23 @@ function MiniCalendarCard({ history, tasks, activeDate, onSelectDate, onOpenCale
   );
 }
 
+// เติม https:// ให้ลิงก์ที่ผู้ใช้พิมพ์มาแบบไม่มี เพื่อให้กดเปิดได้จริง
+function normalizeUrl(link) {
+  const t = String(link || '').trim();
+  if (!t) return '#';
+  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
+}
+
 function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
   const rows = [];
   channels.forEach((c) => {
     c.platforms.forEach((p) => {
-      rows.push({ channelId: c.id, channelName: c.name, channelColor: c.color, ...p });
+      rows.push({ key: `${c.id}|${p.platform}`, channelId: c.id, channelName: c.name, channelColor: c.color, ...p });
     });
   });
+  const [selected, setSelected] = useState('');
+  const current = rows.find((r) => r.key === selected) || rows[0];
+
   if (rows.length === 0) {
     return (
       <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -2268,31 +2409,46 @@ function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
       </div>
     );
   }
+
+  const meta = PLATFORM_META[current.platform];
+  const PlatformIcon = meta.icon;
+  const hasLink = current.checkLink && current.checkLink.trim();
+
   return (
     <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-      <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เช็คงานตามแพลตฟอร์ม</div>
-      <div className="space-y-3">
-        {rows.map((r) => {
-          const meta = PLATFORM_META[r.platform];
-          const PlatformIcon = meta.icon;
-          return (
-            <div key={`${r.channelId}-${r.platform}`} className="pb-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.channelColor }} />
-                <span className="font-body text-xs truncate" style={{ color: C.text }}>{r.channelName}</span>
-                {r.checkLink && r.checkLink.trim() && (
-                  <a href={normalizeUrl(r.checkLink)} target="_blank" rel="noopener noreferrer" title="เปิดหน้าเพจนี้" className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>
-                    <Share2 size={9} /> เปิดเพจ
-                  </a>
-                )}
-                <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ml-auto" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={10} />{meta.label}</span>
-              </div>
-              <input value={r.checkLink} onChange={(e) => onUpdateCheckLink(r.channelId, r.platform, e.target.value)} placeholder="ลิงก์เช็คงาน (เพจ/โปรไฟล์)" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
-              {r.checkLink.trim() && <VideoPreviewBox link={r.checkLink.trim()} compact />}
-            </div>
-          );
-        })}
+      <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.blue }}>เช็คงานตามแพลตฟอร์ม</div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: current.channelColor }} />
+        <select
+          value={current.key}
+          onChange={(e) => setSelected(e.target.value)}
+          className="flex-1 min-w-0 px-2 py-1.5 font-body text-xs outline-none rounded-lg"
+          style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
+        >
+          {rows.map((r) => (
+            <option key={r.key} value={r.key}>{r.channelName} · {PLATFORM_META[r.platform].label}</option>
+          ))}
+        </select>
+        <PlatformIcon size={13} style={{ color: meta.color }} className="shrink-0" />
       </div>
+      <input
+        value={current.checkLink}
+        onChange={(e) => onUpdateCheckLink(current.channelId, current.platform, e.target.value)}
+        placeholder="ลิงก์เช็คงาน (เพจ/โปรไฟล์)"
+        className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg"
+        style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
+      />
+      <a
+        href={hasLink ? normalizeUrl(current.checkLink) : undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => { if (!hasLink) e.preventDefault(); }}
+        className="mt-1.5 w-full font-mono text-2xs px-2 py-1.5 rounded-lg flex items-center justify-center gap-1"
+        style={{ background: hasLink ? meta.color : 'transparent', color: hasLink ? '#fff' : C.muted, border: `1px solid ${hasLink ? meta.color : C.border}` }}
+      >
+        <Share2 size={10} /> เปิดหน้า{meta.label}
+      </a>
+      <p className="font-mono text-2xs mt-2" style={{ color: C.muted }}>มีทั้งหมด {rows.length} แพลตฟอร์ม — เลือกจากรายการด้านบน</p>
     </div>
   );
 }
