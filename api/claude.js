@@ -18,22 +18,59 @@ export default async function handler(req, res) {
     ? images.filter((im) => im && im.data).map((im) => ({ inline_data: { mime_type: im.mimeType || 'image/jpeg', data: im.data } }))
     : [];
 
-  try {
-    const response = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': process.env.GEMINI_API_KEY,
-        },
-        body: JSON.stringify({
-          system_instruction: system ? { parts: [{ text: system }] } : undefined,
-          contents: [{ role: 'user', parts: [{ text: content }, ...imageParts] }],
-        }),
+  // ดึงเวลาที่ Google บอกให้รอ (วินาที) จากข้อความ error เช่น "Please retry in 32.25s"
+  function parseRetrySeconds(data) {
+    try {
+      const details = data?.error?.details || [];
+      for (const d of details) {
+        if (d?.retryDelay) {
+          const n = parseFloat(String(d.retryDelay).replace('s', ''));
+          if (!Number.isNaN(n)) return n;
+        }
       }
-    );
-    const data = await response.json();
+      const m = String(data?.error?.message || '').match(/retry in ([\d.]+)s/i);
+      if (m) return parseFloat(m[1]);
+    } catch (e) {}
+    return null;
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  try {
+    let response;
+    let data;
+    // ลองใหม่อัตโนมัติเมื่อโดนจำกัดจำนวนครั้งต่อนาที (แพ็กฟรีจำกัด 5 ครั้ง/นาที)
+    for (let attempt = 0; attempt < 4; attempt++) {
+      response = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': process.env.GEMINI_API_KEY,
+          },
+          body: JSON.stringify({
+            system_instruction: system ? { parts: [{ text: system }] } : undefined,
+            contents: [{ role: 'user', parts: [{ text: content }, ...imageParts] }],
+          }),
+        }
+      );
+      data = await response.json();
+
+      const rateLimited = response.status === 429 || /quota|rate limit/i.test(data?.error?.message || '');
+      if (!rateLimited) break;
+      if (attempt === 3) {
+        const wait = parseRetrySeconds(data);
+        return res.status(429).json({
+          error: `ใช้ AI ถี่เกินไป (แพ็กฟรีของ Gemini จำกัด 5 ครั้งต่อนาที)${wait ? ` — รออีกประมาณ ${Math.ceil(wait)} วินาทีแล้วลองใหม่` : ' — รอสักครู่แล้วลองใหม่'}`,
+          rateLimited: true,
+        });
+      }
+      const waitSec = parseRetrySeconds(data);
+      // รอเท่าที่ Google บอก (บวกเผื่อ 1 วิ) หรือถอยหลังแบบเพิ่มเวลาขึ้นเรื่อยๆ
+      await sleep(waitSec ? Math.min(waitSec + 1, 40) * 1000 : (attempt + 1) * 8000);
+    }
+
     if (!response.ok || data?.error) {
       return res.status(500).json({ error: data?.error?.message || 'เรียก Gemini ไม่สำเร็จ' });
     }
