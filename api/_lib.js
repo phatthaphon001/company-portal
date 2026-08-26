@@ -121,3 +121,103 @@ export async function rateLimit(bucketKey, maxHits, windowMs) {
   try { await redisSet(key, recent); } catch (e) {}
   return { allowed: true, remaining: maxHits - recent.length };
 }
+
+// ---------- สำรองข้อมูลอัตโนมัติ ----------
+// เก็บสแนปช็อตรายวันไว้ 7 ชุด (เขียนทับชุดเดิมของวันเดียวกัน) กู้คืนได้จากหน้า Setting
+const BACKUP_KEYS = ['channels', 'tasks', 'history', 'futureTasks', 'lastActiveDate'];
+
+export async function autoBackup(dateStr) {
+  const index = (await redisGet('backup_index')) || [];
+  if (index.includes(dateStr)) return { skipped: true };
+  const snapshot = {};
+  for (const k of BACKUP_KEYS) {
+    snapshot[k] = await redisGet(k);
+  }
+  // ไม่สำรองถ้าไม่มีข้อมูลจริง — กันการเขียนทับชุดสำรองดีๆ ด้วยชุดว่าง
+  const hasData = Array.isArray(snapshot.channels) && snapshot.channels.length > 0;
+  if (!hasData) return { skipped: true, reason: 'empty' };
+
+  await redisSet(`backup_${dateStr}`, { at: Date.now(), data: snapshot });
+  const nextIndex = [...index, dateStr].slice(-7);
+  await redisSet('backup_index', nextIndex);
+  // ลบชุดที่เกิน 7 วัน
+  for (const old of index) {
+    if (!nextIndex.includes(old)) {
+      try { await redisSet(`backup_${old}`, null); } catch (e) {}
+    }
+  }
+  return { ok: true, kept: nextIndex };
+}
+
+export async function listBackups() {
+  return (await redisGet('backup_index')) || [];
+}
+
+export async function getBackup(dateStr) {
+  return await redisGet(`backup_${dateStr}`);
+}
+
+// ---------- บันทึกกิจกรรม (Activity Log) ----------
+export async function logActivity(entry) {
+  try {
+    const log = (await redisGet('activity_log')) || [];
+    const next = [...log, { ...entry, at: Date.now() }].slice(-300); // เก็บ 300 รายการล่าสุด
+    await redisSet('activity_log', next);
+  } catch (e) {}
+}
+
+export async function getActivityLog() {
+  return (await redisGet('activity_log')) || [];
+}
+
+// ---------- ระบบแบน ----------
+export async function isBanned(identifier) {
+  const bans = (await redisGet('bans')) || [];
+  const hit = bans.find((b) => b.id === identifier);
+  if (!hit) return null;
+  if (hit.until && Date.now() > hit.until) return null; // หมดเวลาแบนแล้ว
+  return hit;
+}
+
+export async function addBan(identifier, reason, byEmail, untilMs) {
+  const bans = (await redisGet('bans')) || [];
+  const next = bans.filter((b) => b.id !== identifier);
+  next.push({ id: identifier, reason, by: byEmail || 'system', at: Date.now(), until: untilMs || null });
+  await redisSet('bans', next.slice(-200));
+}
+
+export async function removeBan(identifier) {
+  const bans = (await redisGet('bans')) || [];
+  await redisSet('bans', bans.filter((b) => b.id !== identifier));
+}
+
+export async function listBans() {
+  return (await redisGet('bans')) || [];
+}
+
+// นับความพยายามน่าสงสัย แล้วแบนอัตโนมัติเมื่อเกินเกณฑ์
+export async function recordSuspicious(ip, kind) {
+  try {
+    const key = `sus_${String(ip).replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
+    const now = Date.now();
+    const hits = ((await redisGet(key)) || []).filter((h) => now - h.at < 60 * 60 * 1000);
+    hits.push({ at: now, kind });
+    await redisSet(key, hits.slice(-50));
+    await logActivity({ type: 'suspicious', ip, kind });
+    // ผิดพลาดน่าสงสัยเกิน 15 ครั้งใน 1 ชม. → แบนอัตโนมัติ 24 ชม.
+    if (hits.length >= 15) {
+      await addBan(ip, `ระบบแบนอัตโนมัติ: พฤติกรรมน่าสงสัย ${hits.length} ครั้งใน 1 ชม. (${kind})`, 'system', now + 24 * 60 * 60 * 1000);
+      await logActivity({ type: 'auto_ban', ip, kind, hits: hits.length });
+      return { banned: true };
+    }
+    return { banned: false, hits: hits.length };
+  } catch (e) {
+    return { banned: false };
+  }
+}
+
+export function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim();
+  return req.headers['x-real-ip'] || 'unknown';
+}
