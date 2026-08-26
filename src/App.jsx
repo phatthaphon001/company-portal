@@ -1605,208 +1605,525 @@ function KpiPage({ history, tasks, channels }) {
   );
 }
 
-function AnalyticsPage({ history, tasks, channels }) {
-  const [analysis, setAnalysis] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [images, setImages] = useState([]); // { id, name, base64, mimeType, dataUrl, platform }
-  const [platformResults, setPlatformResults] = useState({}); // platform (หรือ 'all') -> ข้อความผลวิเคราะห์
-  const [platformLoading, setPlatformLoading] = useState({}); // platform (หรือ 'all') -> true ระหว่างกำลังวิเคราะห์
+// ---------- ระบบอ่านตัวเลขจากภาพหน้าจอสถิติ ----------
+// จุดสำคัญ: ให้ AI "อ่านตัวเลขออกมาเป็นข้อมูล" ไม่ใช่แค่บรรยายภาพ
+// พอเป็นข้อมูลจริงแล้วถึงจะสะสมเป็นสถิติ เทียบแพลตฟอร์ม และดูแนวโน้มได้
+const METRIC_EXTRACT_SYS = `คุณคือระบบอ่านข้อมูลจากภาพหน้าจอสถิติโซเชียลมีเดีย
+ผมจะแนบภาพหน้าจอหน้าสถิติ (insights/analytics) มาให้ กรุณาอ่านตัวเลขทั้งหมดที่เห็นในภาพ แล้วตอบกลับเป็น JSON เท่านั้น
+ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
 
-  const todayStr = todayDateStr();
-  const todayEntry = { date: todayStr, totalTasks: tasks.length, doneTasks: tasks.filter((t) => t.done).length };
-  const trend = [...history, todayEntry].slice(-14).map((h) => ({ date: h.date.slice(5), pct: h.totalTasks ? Math.round((h.doneTasks / h.totalTasks) * 100) : 0 }));
-  const byChannel = channels.map((c) => {
-    const chTasks = tasks.filter((t) => t.channelId === c.id);
-    const done = chTasks.filter((t) => t.done).length;
-    const total = chTasks.length;
-    return { name: c.name, platform: c.platforms.map((p) => PLATFORM_META[p.platform].label).join(', '), done, total, remaining: Math.max(0, total - done) };
-  });
-  const qcPassed = tasks.filter((t) => t.qc && t.qc.passed).length;
-  const qcFailed = tasks.filter((t) => t.qc && !t.qc.passed).length;
-  const qcPieData = (qcPassed + qcFailed) > 0 ? [
-    { name: 'QC ผ่าน', value: qcPassed, color: C.emerald },
-    { name: 'QC ไม่ผ่าน', value: qcFailed, color: C.red },
-  ] : [];
-  const availablePlatforms = Array.from(new Set(channels.flatMap((c) => c.platforms.map((p) => p.platform))));
+รูปแบบ:
+{
+  "platform": "facebook | tiktok | youtube | instagram | other",
+  "platformConfidence": "high | medium | low",
+  "contentTitle": "ชื่อคลิป/โพสต์ที่เห็นในภาพ ถ้าไม่มีใส่ null",
+  "periodLabel": "ช่วงเวลาที่ภาพแสดง เช่น 7 วันล่าสุด ถ้าไม่มีใส่ null",
+  "metrics": {
+    "views": ตัวเลขหรือ null,
+    "reach": ตัวเลขหรือ null,
+    "likes": ตัวเลขหรือ null,
+    "comments": ตัวเลขหรือ null,
+    "shares": ตัวเลขหรือ null,
+    "saves": ตัวเลขหรือ null,
+    "followers": ตัวเลขหรือ null,
+    "newFollowers": ตัวเลขหรือ null,
+    "watchTimeSec": ตัวเลขวินาทีหรือ null,
+    "avgWatchPercent": ตัวเลข 0-100 หรือ null,
+    "ctr": ตัวเลข 0-100 หรือ null
+  },
+  "topInsight": "ข้อสังเกตสำคัญที่สุดจากภาพนี้ 1 ประโยค ภาษาไทย",
+  "notes": "สิ่งที่อ่านไม่ชัดหรือไม่แน่ใจ ภาษาไทย ถ้าไม่มีใส่ null"
+}
 
-  async function runAnalysis() {
-    setLoading(true);
-    try {
-      const trendText = trend.map((t) => `${t.date}: ${t.pct}%`).join(', ');
-      const channelText = byChannel.map((c) => `${c.name} (${c.platform}): ${c.done}/${c.total}`).join(', ');
-      const text = await callClaude(ANALYSIS_SYS, `แนวโน้มอัตราทำงานเสร็จรายวัน: ${trendText || 'ยังไม่มีข้อมูล'}\nวันนี้แยกตามช่อง: ${channelText || 'ยังไม่มีช่อง'}\nQC วันนี้: ผ่าน ${qcPassed} ไม่ผ่าน ${qcFailed}`);
-      setAnalysis(text);
-    } catch (e) {
-      setAnalysis('เรียก AI วิเคราะห์ไม่สำเร็จ ลองใหม่อีกครั้ง');
-    } finally {
-      setLoading(false);
-    }
-  }
+กติกา:
+- แปลงตัวย่อเป็นตัวเลขเต็ม (1.2K = 1200, 3.4M = 3400000, 1.2พัน = 1200, 5หมื่น = 50000)
+- ตัวเลขต้องเป็น number ห้ามใส่เครื่องหมายจุลภาคหรือหน่วย
+- ถ้าไม่เห็นค่าไหนในภาพ ใส่ null อย่าเดา
+- ดูโลโก้ สี และรูปแบบหน้าจอเพื่อระบุแพลตฟอร์ม`;
 
-  async function handleAddImages(e) {
-    const files = Array.from(e.target.files || []);
-    const newOnes = await Promise.all(files.map(async (f) => {
+const DEEP_ANALYSIS_SYS = `คุณคือที่ปรึกษาการเติบโตของช่องโซเชียลมีเดียระดับมืออาชีพ
+ผมจะให้ข้อมูลสถิติจริงที่อ่านมาจากหน้า insights ของแต่ละแพลตฟอร์ม
+วิเคราะห์อย่างละเอียด ตรงไปตรงมา และให้คำแนะนำที่ลงมือทำได้ทันที ตอบเป็น JSON เท่านั้น
+ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+
+รูปแบบ:
+{
+  "headline": "บรรทัดเดียวสรุปสถานการณ์ตอนนี้",
+  "healthScore": ตัวเลข 0-100 (สุขภาพช่องโดยรวม),
+  "bestPlatform": "แพลตฟอร์มที่ทำได้ดีที่สุดและเพราะอะไร",
+  "weakestPlatform": "แพลตฟอร์มที่ต้องแก้ด่วนและเพราะอะไร",
+  "findings": [
+    {"title":"หัวข้อสั้น","detail":"อธิบายพร้อมอ้างตัวเลขจริง","severity":"high|medium|low"}
+  ],
+  "actions": [
+    {"do":"สิ่งที่ต้องทำ ระบุให้ชัดเจนลงมือได้เลย","why":"เหตุผลอ้างอิงตัวเลข","impact":"high|medium|low"}
+  ],
+  "contentAdvice": "แนะนำแนวคอนเทนต์ที่ควรทำต่อ อ้างอิงจากตัวเลขที่เห็น",
+  "warning": "สิ่งที่ต้องระวัง หรือ null"
+}
+
+กติกา:
+- อ้างตัวเลขจริงเสมอ ห้ามพูดลอยๆ
+- findings 3-6 ข้อ, actions 3-5 ข้อ เรียงจากสำคัญที่สุด
+- ถ้าข้อมูลน้อยเกินจะสรุปได้ ให้บอกตรงๆ ใน warning`;
+
+const PLATFORM_TABS = [
+  { key: 'all', label: 'ทั้งหมด' },
+  { key: 'facebook', label: 'Facebook' },
+  { key: 'tiktok', label: 'TikTok' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'instagram', label: 'Instagram' },
+  { key: 'other', label: 'อื่นๆ' },
+];
+
+function fmtNum(n) {
+  if (n == null || Number.isNaN(n)) return '—';
+  if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'K';
+  return String(n);
+}
+
+const METRIC_FIELDS = [
+  { key: 'views', label: 'ยอดวิว', color: '#4A9DFF' },
+  { key: 'reach', label: 'การเข้าถึง', color: '#22D3EE' },
+  { key: 'likes', label: 'ถูกใจ', color: '#F472B6' },
+  { key: 'comments', label: 'คอมเมนต์', color: '#A78BFA' },
+  { key: 'shares', label: 'แชร์', color: '#34D399' },
+  { key: 'saves', label: 'บันทึก', color: '#FBBF24' },
+  { key: 'newFollowers', label: 'ผู้ติดตามใหม่', color: '#FB923C' },
+  { key: 'avgWatchPercent', label: 'ดูเฉลี่ย %', color: '#F87171' },
+];
+
+// อัตราการมีส่วนร่วม = (ไลก์+คอมเมนต์+แชร์+บันทึก) / วิว
+function engagementRate(m) {
+  if (!m || !m.views) return null;
+  const inter = (m.likes || 0) + (m.comments || 0) + (m.shares || 0) + (m.saves || 0);
+  return Math.round((inter / m.views) * 1000) / 10;
+}
+
+function AnalyticsPage({ history, tasks, channels, metrics, setMetrics }) {
+  const [images, setImages] = useState([]);       // { id, name, base64, mimeType, dataUrl, platform, status, result }
+  const [reading, setReading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [deep, setDeep] = useState(null);
+  const [deepLoading, setDeepLoading] = useState(false);
+  const [tab, setTab] = useState('all');
+  const [dragOver, setDragOver] = useState(false);
+  const [err, setErr] = useState('');
+
+  const saved = Array.isArray(metrics) ? metrics : [];
+  const filtered = tab === 'all' ? saved : saved.filter((m) => m.platform === tab);
+
+  async function addFiles(files) {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
+    if (arr.length === 0) return;
+    const newOnes = await Promise.all(arr.map(async (f) => {
       const base64 = await fileToBase64(f);
       const mimeType = f.type || 'image/jpeg';
-      return { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: f.name, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}`, platform: availablePlatforms[0] || 'other' };
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: f.name, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}`, status: 'pending', result: null };
     }));
     setImages((prev) => [...prev, ...newOnes]);
-    e.target.value = '';
   }
-  function updateImagePlatform(id, platform) { setImages((prev) => prev.map((im) => (im.id === id ? { ...im, platform } : im))); }
-  function removeImage(id) { setImages((prev) => prev.filter((im) => im.id !== id)); }
 
-  async function analyzeGroup(key, groupImages, label) {
-    setPlatformLoading((prev) => ({ ...prev, [key]: true }));
+  // อ่านตัวเลขจากทุกรูปทีละใบ (ระบบคิวหน่วงเวลาจัดการให้เองอยู่แล้ว)
+  async function readAll() {
+    const targets = images.filter((im) => im.status !== 'done');
+    if (targets.length === 0) return;
+    setReading(true); setErr(''); setProgress({ done: 0, total: targets.length });
+    const collected = [];
+    for (let i = 0; i < targets.length; i++) {
+      const im = targets[i];
+      setImages((prev) => prev.map((x) => (x.id === im.id ? { ...x, status: 'reading' } : x)));
+      try {
+        const text = await callClaude(METRIC_EXTRACT_SYS, 'อ่านตัวเลขทั้งหมดจากภาพหน้าจอสถิตินี้', [{ mimeType: im.mimeType, data: im.base64 }]);
+        const json = parseJsonLoose(text);
+        const entry = {
+          id: im.id,
+          at: Date.now(),
+          date: todayDateStr(),
+          fileName: im.name,
+          platform: json.platform || 'other',
+          confidence: json.platformConfidence || 'low',
+          contentTitle: json.contentTitle || null,
+          periodLabel: json.periodLabel || null,
+          metrics: json.metrics || {},
+          topInsight: json.topInsight || '',
+          notes: json.notes || null,
+        };
+        collected.push(entry);
+        setImages((prev) => prev.map((x) => (x.id === im.id ? { ...x, status: 'done', result: entry, platform: entry.platform } : x)));
+      } catch (e) {
+        setImages((prev) => prev.map((x) => (x.id === im.id ? { ...x, status: 'error', result: { error: e.message } } : x)));
+        setErr(`อ่านบางรูปไม่สำเร็จ: ${e.message || ''}`);
+      }
+      setProgress({ done: i + 1, total: targets.length });
+    }
+    if (collected.length) setMetrics([...(Array.isArray(metrics) ? metrics : []), ...collected].slice(-500));
+    setReading(false);
+  }
+
+  async function runDeepAnalysis() {
+    if (filtered.length === 0) return;
+    setDeepLoading(true); setDeep(null);
+    const payload = filtered.slice(-40).map((m) => ({
+      date: m.date, platform: m.platform, title: m.contentTitle, period: m.periodLabel,
+      ...m.metrics, engagementRate: engagementRate(m.metrics),
+    }));
     try {
-      const imgPayload = groupImages.map((im) => ({ mimeType: im.mimeType, data: im.base64 }));
-      const text = await callClaude(IMAGE_ANALYSIS_SYS, `วิเคราะห์ภาพตัวอย่างผลงาน/โพสต์ (${label}) จำนวน ${groupImages.length} รูปที่แนบมา`, imgPayload);
-      setPlatformResults((prev) => ({ ...prev, [key]: text }));
+      const text = await callClaude(DEEP_ANALYSIS_SYS, `ข้อมูลสถิติจริงจากหน้า insights (${payload.length} รายการ):\n${JSON.stringify(payload, null, 1)}`);
+      setDeep(parseJsonLoose(text));
     } catch (e) {
-      setPlatformResults((prev) => ({ ...prev, [key]: 'เรียก AI วิเคราะห์รูปไม่สำเร็จ ลองใหม่อีกครั้ง' }));
-    } finally {
-      setPlatformLoading((prev) => ({ ...prev, [key]: false }));
+      setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`);
     }
+    setDeepLoading(false);
   }
-  async function analyzeByPlatform() {
-    const groups = {};
-    images.forEach((im) => { (groups[im.platform] = groups[im.platform] || []).push(im); });
-    for (const platform of Object.keys(groups)) {
-      const label = PLATFORM_META[platform] ? PLATFORM_META[platform].label : platform;
-      await analyzeGroup(platform, groups[platform], label);
-    }
+
+  function removeImage(id) { setImages((prev) => prev.filter((x) => x.id !== id)); }
+  function setImagePlatform(id, platform) {
+    setImages((prev) => prev.map((x) => (x.id === id ? { ...x, platform, result: x.result ? { ...x.result, platform } : x.result } : x)));
+    setMetrics((prev) => (Array.isArray(prev) ? prev : []).map((m) => (m.id === id ? { ...m, platform } : m)));
   }
-  function analyzeAllTogether() {
-    if (images.length === 0) return;
-    analyzeGroup('all', images, 'รวมทุกแพลตฟอร์ม');
-  }
+  function deleteMetric(id) { setMetrics((prev) => (Array.isArray(prev) ? prev : []).filter((m) => m.id !== id)); }
+
+  // ---- สรุปตัวเลขรวม ----
+  const totals = METRIC_FIELDS.reduce((acc, f) => {
+    const vals = filtered.map((m) => m.metrics && m.metrics[f.key]).filter((v) => typeof v === 'number');
+    acc[f.key] = vals.length ? (f.key === 'avgWatchPercent' ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : vals.reduce((a, b) => a + b, 0)) : null;
+    return acc;
+  }, {});
+  const erList = filtered.map((m) => engagementRate(m.metrics)).filter((v) => v != null);
+  const avgER = erList.length ? (erList.reduce((a, b) => a + b, 0) / erList.length).toFixed(1) : null;
+
+  // เทียบแพลตฟอร์ม
+  const platformCompare = PLATFORM_TABS.filter((t) => t.key !== 'all').map((t) => {
+    const rows = saved.filter((m) => m.platform === t.key);
+    const views = rows.map((m) => m.metrics?.views).filter((v) => typeof v === 'number');
+    const ers = rows.map((m) => engagementRate(m.metrics)).filter((v) => v != null);
+    return {
+      name: t.label,
+      โพสต์: rows.length,
+      วิวรวม: views.reduce((a, b) => a + b, 0),
+      ปฏิสัมพันธ์: ers.length ? Math.round((ers.reduce((a, b) => a + b, 0) / ers.length) * 10) / 10 : 0,
+    };
+  }).filter((r) => r.โพสต์ > 0);
+
+  // แนวโน้มตามวัน
+  const byDate = {};
+  filtered.forEach((m) => {
+    const d = m.date;
+    if (!byDate[d]) byDate[d] = { date: d.slice(5), views: 0, er: [] };
+    if (typeof m.metrics?.views === 'number') byDate[d].views += m.metrics.views;
+    const er = engagementRate(m.metrics); if (er != null) byDate[d].er.push(er);
+  });
+  const trend = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)).slice(-20)
+    .map((d) => ({ date: d.date, views: d.views, er: d.er.length ? Math.round((d.er.reduce((a, b) => a + b, 0) / d.er.length) * 10) / 10 : null }));
+
+  // คอนเทนต์ที่ทำได้ดีที่สุด
+  const topContent = [...filtered].filter((m) => typeof m.metrics?.views === 'number')
+    .sort((a, b) => b.metrics.views - a.metrics.views).slice(0, 5);
+
+  const sevColor = (s) => (s === 'high' ? C.red : s === 'medium' ? C.orange : C.blue);
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><TrendingUp size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ANALYTICS</span></div>
-      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การวิเคราะห์</h2>
-      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>วิเคราะห์จากสถิติการทำงานภายในระบบ (ยังไม่เชื่อมข้อมูลยอดวิว/ยอดไลก์จริงจากแพลตฟอร์ม)</p>
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><TrendingUp size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>PERFORMANCE INTELLIGENCE</span></div>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การวิเคราะห์ผลงานจริง</h2>
+      <p className="font-body text-xs mb-6 leading-relaxed" style={{ color: C.muted }}>
+        แนบภาพหน้าจอสถิติจากทุกแพลตฟอร์มพร้อมกันได้เลย — ระบบจะอ่านตัวเลขออกมาเป็นข้อมูลจริง แยกแพลตฟอร์มให้อัตโนมัติ แล้วสะสมเป็นสถิติเทียบข้ามแพลตฟอร์มและดูแนวโน้มได้
+      </p>
 
-      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มอัตราทำงานเสร็จ (14 วันล่าสุด)</div>
-        {trend.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
-              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
-              <YAxis tick={{ fill: C.muted, fontSize: 10 }} domain={[0, 100]} />
-              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}` }} />
-              <Line type="monotone" dataKey="pct" stroke={C.blue} strokeWidth={2} dot={{ r: 3, fill: C.blue }} />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
+      {err && (
+        <div className="mb-4 p-3 rounded-xl flex items-start gap-2" style={{ background: `${C.red}15`, border: `1px solid ${C.red}55` }}>
+          <AlertTriangle size={13} style={{ color: C.red }} className="shrink-0 mt-0.5" />
+          <span className="font-body text-xs" style={{ color: C.text }}>{err}</span>
+        </div>
+      )}
+
+      {/* ---- โซนอัปโหลด ---- */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
+        className="p-5 rounded-2xl mb-4 text-center"
+        style={{ background: dragOver ? `${C.blue}15` : C.panel, border: `1.5px dashed ${dragOver ? C.blue : C.border}`, transition: 'all .15s' }}
+      >
+        <Upload size={22} style={{ color: dragOver ? C.blue : C.muted }} className="mx-auto mb-2" />
+        <p className="font-body text-sm mb-1" style={{ color: C.text }}>ลากภาพหน้าจอสถิติมาวางที่นี่</p>
+        <p className="font-body text-xs mb-3" style={{ color: C.muted }}>แนบหลายรูปพร้อมกันได้ ทุกแพลตฟอร์มปนกันได้เลย ระบบแยกให้เอง</p>
+        <label className="inline-flex font-mono text-2xs px-4 py-2 rounded-lg cursor-pointer items-center gap-1.5" style={{ background: BRAND, color: '#fff' }}>
+          <Upload size={12} /> เลือกรูปจากเครื่อง
+          <input type="file" accept="image/*" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+        </label>
       </div>
 
-      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>สัดส่วน QC ผ่าน/ไม่ผ่าน</div>
-        {qcPieData.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีงานที่ส่ง QC</p> : (
-          <div className="flex items-center gap-4">
-            <ResponsiveContainer width={120} height={120}>
-              <PieChart>
-                <Pie data={qcPieData} dataKey="value" nameKey="name" innerRadius={30} outerRadius={55} stroke="none">
-                  {qcPieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: C.emerald }} /><span className="font-mono text-2xs" style={{ color: C.text }}>ผ่าน: {qcPassed}</span></div>
-              <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: C.red }} /><span className="font-mono text-2xs" style={{ color: C.text }}>ไม่ผ่าน: {qcFailed}</span></div>
+      {/* ---- รายการรูปที่รออ่าน ---- */}
+      {images.length > 0 && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+            <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>รูปที่แนบ ({images.length})</span>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setImages([])} className="font-mono text-2xs px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ล้างทั้งหมด</button>
+              <button onClick={readAll} disabled={reading} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: BRAND, color: '#fff', opacity: reading ? 0.6 : 1 }}>
+                {reading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                {reading ? `กำลังอ่าน ${progress.done}/${progress.total}` : 'อ่านตัวเลขจากรูปทั้งหมด'}
+              </button>
             </div>
           </div>
-        )}
-      </div>
-
-      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>วันนี้แยกตามช่อง (ชาร์ตแท่ง)</div>
-        {byChannel.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีช่อง</p> : (
-          <>
-            <ResponsiveContainer width="100%" height={Math.max(120, byChannel.length * 44)}>
-              <BarChart data={byChannel} layout="vertical" margin={{ left: 8, right: 16 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
-                <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} allowDecimals={false} />
-                <YAxis type="category" dataKey="name" tick={{ fill: C.text, fontSize: 11 }} width={90} />
-                <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
-                <Bar dataKey="done" stackId="a" fill={C.emerald} radius={[0, 0, 0, 0]} name="เสร็จแล้ว" />
-                <Bar dataKey="remaining" stackId="a" fill={C.border} radius={[0, 4, 4, 0]} name="เหลืออีก" />
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="mt-2 space-y-1">
-              {byChannel.map((c) => (
-                <div key={c.name} className="flex items-center justify-between">
-                  <span className="font-body text-xs" style={{ color: C.text }}>{c.name} <span style={{ color: C.muted }}>({c.platform})</span></span>
-                  <span className="font-mono text-2xs" style={{ color: C.muted }}>{c.done}/{c.total}</span>
-                </div>
-              ))}
+          {reading && (
+            <div className="mb-3" style={{ width: '100%', height: 4, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`, height: '100%', background: `linear-gradient(90deg, ${C.blue}, ${C.violet})`, transition: 'width .3s' }} />
             </div>
-          </>
-        )}
-      </div>
-
-      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>แนบรูปภาพเพื่อวิเคราะห์</div>
-          <label className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg cursor-pointer" style={{ border: `1px solid ${C.blue}`, color: C.blue }}>
-            <Upload size={12} /> แนบรูป
-            <input type="file" accept="image/*" multiple onChange={handleAddImages} className="hidden" />
-          </label>
-        </div>
-        {images.length === 0 ? (
-          <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีรูปแนบ — แนบรูปตัวอย่างผลงาน/โพสต์เพื่อให้ AI ช่วยดูและวิเคราะห์</p>
-        ) : (
-          <>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
-              {images.map((im) => (
-                <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
-                  <img src={im.dataUrl} alt={im.name} className="w-full aspect-square object-cover" />
-                  <button onClick={() => removeImage(im.id)} aria-label="ลบรูปนี้" className="absolute top-1 right-1 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}><X size={12} /></button>
-                  <select value={im.platform} onChange={(e) => updateImagePlatform(im.id, e.target.value)} className="w-full font-mono text-2xs px-1 py-1 outline-none" style={{ background: C.bgDeep, color: C.text, border: 'none' }}>
-                    {(availablePlatforms.length ? availablePlatforms : Object.keys(PLATFORM_META)).map((p) => (
-                      <option key={p} value={p}>{PLATFORM_META[p] ? PLATFORM_META[p].label : p}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2 mb-3">
-              <button onClick={analyzeByPlatform} disabled={Object.values(platformLoading).some(Boolean)} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff', opacity: Object.values(platformLoading).some(Boolean) ? 0.6 : 1 }}>
-                <PieChartIcon size={12} /> วิเคราะห์แยกตามแพลตฟอร์ม
-              </button>
-              <button onClick={analyzeAllTogether} disabled={!!platformLoading.all} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ border: `1px solid ${C.violet}`, color: C.violet, opacity: platformLoading.all ? 0.6 : 1 }}>
-                {platformLoading.all ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์รวมทั้งหมด
-              </button>
-            </div>
-            {Object.keys(platformResults).length > 0 && (
-              <div className="space-y-3">
-                {Object.entries(platformResults).map(([key, text]) => (
-                  <div key={key} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
-                    <div className="font-mono text-2xs mb-1 flex items-center gap-1" style={{ color: C.emerald }}>
-                      {platformLoading[key] && <Loader2 size={11} className="animate-spin" />}
-                      {key === 'all' ? 'รวมทุกแพลตฟอร์ม' : (PLATFORM_META[key] ? PLATFORM_META[key].label : key)}
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+            {images.map((im) => {
+              const st = im.status;
+              const stColor = st === 'done' ? C.emerald : st === 'error' ? C.red : st === 'reading' ? C.blue : C.muted;
+              const stLabel = st === 'done' ? 'อ่านแล้ว' : st === 'error' ? 'ไม่สำเร็จ' : st === 'reading' ? 'กำลังอ่าน...' : 'รออ่าน';
+              return (
+                <div key={im.id} className="rounded-xl overflow-hidden relative" style={{ border: `1px solid ${stColor}55`, background: C.bgDeep }}>
+                  <img src={im.dataUrl} alt={im.name} className="w-full object-cover" style={{ height: 90 }} />
+                  <button onClick={() => removeImage(im.id)} className="absolute top-1 right-1 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,.65)', color: '#fff' }}><X size={11} /></button>
+                  <div className="p-1.5">
+                    <div className="flex items-center gap-1 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: stColor }} />
+                      <span className="font-mono truncate" style={{ fontSize: 9, color: stColor }}>{stLabel}</span>
+                      {im.result && im.result.confidence === 'low' && <span className="font-mono shrink-0" style={{ fontSize: 9, color: C.orange }}>· ไม่ชัด</span>}
                     </div>
-                    <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{text}</p>
+                    <select value={im.platform || 'other'} onChange={(e) => setImagePlatform(im.id, e.target.value)} className="w-full font-mono outline-none rounded" style={{ fontSize: 9, background: C.panel, color: C.text, border: `1px solid ${C.border}`, padding: '2px 4px' }}>
+                      {PLATFORM_TABS.filter((t) => t.key !== 'all').map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                    </select>
+                    {im.result && im.result.metrics && (
+                      <div className="font-mono mt-1 truncate" style={{ fontSize: 9, color: C.muted }}>
+                        วิว {fmtNum(im.result.metrics.views)} · ไลก์ {fmtNum(im.result.metrics.likes)}
+                      </div>
+                    )}
                   </div>
-                ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ---- แท็บแพลตฟอร์ม ---- */}
+      {saved.length > 0 && (
+        <>
+          <div className="flex gap-1.5 mb-4 flex-wrap">
+            {PLATFORM_TABS.map((t) => {
+              const n = t.key === 'all' ? saved.length : saved.filter((m) => m.platform === t.key).length;
+              if (t.key !== 'all' && n === 0) return null;
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ background: tab === t.key ? BRAND : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>
+                  {t.label} <span style={{ opacity: .7 }}>({n})</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ---- การ์ดตัวเลขรวม ---- */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+            {METRIC_FIELDS.slice(0, 4).map((f) => (
+              <StatCard key={f.key} label={f.label} value={fmtNum(totals[f.key])} sub={`จาก ${filtered.length} โพสต์`} color={f.color} />
+            ))}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+            {METRIC_FIELDS.slice(4, 7).map((f) => (
+              <StatCard key={f.key} label={f.label} value={fmtNum(totals[f.key])} color={f.color} />
+            ))}
+            <StatCard label="อัตรามีส่วนร่วม" value={avgER == null ? '—' : `${avgER}%`} sub={avgER == null ? '' : avgER >= 5 ? 'ดีมาก' : avgER >= 2 ? 'ปกติ' : 'ต่ำ ควรปรับ'} color={avgER == null ? C.muted : avgER >= 5 ? C.emerald : avgER >= 2 ? C.orange : C.red} Icon={Flame} />
+          </div>
+
+          {/* ---- แนวโน้ม ---- */}
+          {trend.length > 1 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มยอดวิว &amp; การมีส่วนร่วม</div>
+              <ResponsiveContainer width="100%" height={190}>
+                <LineChart data={trend}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+                  <YAxis yAxisId="l" tick={{ fill: C.muted, fontSize: 10 }} tickFormatter={fmtNum} />
+                  <YAxis yAxisId="r" orientation="right" tick={{ fill: C.muted, fontSize: 10 }} />
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line yAxisId="l" type="monotone" dataKey="views" name="ยอดวิว" stroke={C.blue} strokeWidth={2} dot={{ r: 2 }} />
+                  <Line yAxisId="r" type="monotone" dataKey="er" name="มีส่วนร่วม %" stroke={C.emerald} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* ---- เทียบแพลตฟอร์ม ---- */}
+          {platformCompare.length > 1 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เทียบข้ามแพลตฟอร์ม</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={platformCompare}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 10 }} />
+                  <YAxis tick={{ fill: C.muted, fontSize: 10 }} tickFormatter={fmtNum} />
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="วิวรวม" fill={C.blue} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="โพสต์" fill={C.violet} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* ---- คอนเทนต์ที่ดีที่สุด ---- */}
+          {topContent.length > 0 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>คอนเทนต์ที่ทำได้ดีที่สุด</div>
+              <div className="space-y-2">
+                {topContent.map((m, i) => {
+                  const er = engagementRate(m.metrics);
+                  return (
+                    <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                      <span className="font-display text-lg font-bold shrink-0" style={{ color: i === 0 ? C.orange : C.muted, width: 22 }}>{i + 1}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-body text-xs truncate" style={{ color: C.text }}>{m.contentTitle || m.fileName || '(ไม่มีชื่อ)'}</div>
+                        <div className="font-mono text-2xs" style={{ color: C.muted, fontSize: 10 }}>{m.platform} · {m.date}{m.periodLabel ? ` · ${m.periodLabel}` : ''}</div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-mono text-xs" style={{ color: C.blue }}>{fmtNum(m.metrics.views)}</div>
+                        {er != null && <div className="font-mono" style={{ fontSize: 10, color: er >= 5 ? C.emerald : C.muted }}>{er}%</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ---- วิเคราะห์เชิงลึก ---- */}
+          <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}44` }}>
+            <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} style={{ color: C.violet }} />
+                <span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>วิเคราะห์เชิงลึกด้วย AI</span>
+              </div>
+              <button onClick={runDeepAnalysis} disabled={deepLoading || filtered.length === 0} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff', opacity: (deepLoading || filtered.length === 0) ? 0.5 : 1 }}>
+                {deepLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์ {tab === 'all' ? 'ทั้งหมด' : PLATFORM_TABS.find((t) => t.key === tab)?.label}
+              </button>
+            </div>
+
+            {!deep && !deepLoading && <p className="font-body text-xs" style={{ color: C.muted }}>กดปุ่มเพื่อให้ AI วิเคราะห์จากตัวเลขจริงที่อ่านมา พร้อมบอกสิ่งที่ต้องลงมือทำ</p>}
+
+            {deep && (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 flex-wrap">
+                  <div className="shrink-0 text-center px-3 py-2 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${deep.healthScore >= 70 ? C.emerald : deep.healthScore >= 40 ? C.orange : C.red}` }}>
+                    <div className="font-display text-2xl font-bold leading-none" style={{ color: deep.healthScore >= 70 ? C.emerald : deep.healthScore >= 40 ? C.orange : C.red }}>{deep.healthScore ?? '—'}</div>
+                    <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>สุขภาพช่อง</div>
+                  </div>
+                  <p className="font-body text-sm flex-1 min-w-[180px]" style={{ color: C.text }}>{deep.headline}</p>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {deep.bestPlatform && (
+                    <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>ทำได้ดีที่สุด</div>
+                      <p className="font-body text-xs" style={{ color: C.text }}>{deep.bestPlatform}</p>
+                    </div>
+                  )}
+                  {deep.weakestPlatform && (
+                    <div className="p-2.5 rounded-xl" style={{ background: `${C.red}12`, border: `1px solid ${C.red}44` }}>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>ต้องแก้ด่วน</div>
+                      <p className="font-body text-xs" style={{ color: C.text }}>{deep.weakestPlatform}</p>
+                    </div>
+                  )}
+                </div>
+
+                {Array.isArray(deep.findings) && deep.findings.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.blue }}>สิ่งที่พบ</div>
+                    <div className="space-y-1.5">
+                      {deep.findings.map((f, i) => (
+                        <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${sevColor(f.severity)}`, border: `1px solid ${C.border}` }}>
+                          <div className="font-body text-xs mb-0.5" style={{ color: sevColor(f.severity) }}>{f.title}</div>
+                          <p className="font-body text-xs" style={{ color: C.text }}>{f.detail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {Array.isArray(deep.actions) && deep.actions.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.emerald }}>ลงมือทำต่อ</div>
+                    <div className="space-y-1.5">
+                      {deep.actions.map((a, i) => (
+                        <div key={i} className="p-2.5 rounded-xl flex items-start gap-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                          <span className="font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ fontSize: 9, background: a.impact === 'high' ? `${C.emerald}22` : 'transparent', color: a.impact === 'high' ? C.emerald : C.muted, border: `1px solid ${a.impact === 'high' ? C.emerald : C.border}` }}>
+                            {a.impact === 'high' ? 'สำคัญ' : a.impact === 'medium' ? 'ปานกลาง' : 'เสริม'}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-body text-xs" style={{ color: C.text }}>{a.do}</p>
+                            {a.why && <p className="font-body text-xs mt-0.5" style={{ color: C.muted }}>เพราะ: {a.why}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {deep.contentAdvice && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>แนวคอนเทนต์ที่ควรทำต่อ</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{deep.contentAdvice}</p>
+                  </div>
+                )}
+
+                {deep.warning && (
+                  <div className="p-2.5 rounded-xl flex items-start gap-2" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+                    <AlertTriangle size={13} style={{ color: C.orange }} className="shrink-0 mt-0.5" />
+                    <p className="font-body text-xs" style={{ color: C.text }}>{deep.warning}</p>
+                  </div>
+                )}
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
 
-      <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="flex items-center justify-between mb-3 gap-2">
-          <div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>สรุปแนวทางการทำงานจาก AI</div>
-          <button onClick={runAnalysis} disabled={loading} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg shrink-0" style={{ background: BRAND, color: '#fff', opacity: loading ? 0.6 : 1 }}>
-            {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์
-          </button>
+          {/* ---- ตารางข้อมูลดิบ ---- */}
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ข้อมูลที่อ่านมาทั้งหมด ({filtered.length})</div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {filtered.slice().reverse().map((m) => {
+                const er = engagementRate(m.metrics);
+                return (
+                  <div key={m.id} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="font-body text-xs truncate" style={{ color: C.text }}>{m.contentTitle || m.fileName}</div>
+                        <div className="font-mono" style={{ fontSize: 10, color: C.muted }}>{m.platform} · {m.date}{m.periodLabel ? ` · ${m.periodLabel}` : ''}</div>
+                      </div>
+                      <button onClick={() => deleteMetric(m.id)} style={{ color: C.muted }} className="shrink-0"><X size={12} /></button>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                      {METRIC_FIELDS.map((f) => (typeof m.metrics?.[f.key] === 'number' ? (
+                        <span key={f.key} className="font-mono" style={{ fontSize: 10, color: C.muted }}>
+                          {f.label} <span style={{ color: f.color }}>{f.key === 'avgWatchPercent' ? `${m.metrics[f.key]}%` : fmtNum(m.metrics[f.key])}</span>
+                        </span>
+                      ) : null))}
+                      {er != null && <span className="font-mono" style={{ fontSize: 10, color: C.muted }}>มีส่วนร่วม <span style={{ color: C.emerald }}>{er}%</span></span>}
+                    </div>
+                    {m.topInsight && <p className="font-body text-xs mt-1.5" style={{ color: C.muted }}>{m.topInsight}</p>}
+                    {m.notes && <p className="font-mono mt-1" style={{ fontSize: 10, color: C.orange }}>หมายเหตุ: {m.notes}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {saved.length === 0 && images.length === 0 && (
+        <div className="p-8 rounded-2xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <Gauge size={26} style={{ color: C.muted }} className="mx-auto mb-2" />
+          <p className="font-body text-sm mb-1" style={{ color: C.text }}>ยังไม่มีข้อมูลสถิติ</p>
+          <p className="font-body text-xs" style={{ color: C.muted }}>แนบภาพหน้าจอสถิติจากแพลตฟอร์มด้านบนเพื่อเริ่มเก็บข้อมูล</p>
         </div>
-        {analysis ? <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{analysis}</p> : <p className="font-body text-xs" style={{ color: C.muted }}>กด "วิเคราะห์" เพื่อให้ AI สรุปแนวโน้มและคำแนะนำ</p>}
-      </div>
+      )}
     </div>
   );
 }
@@ -3230,6 +3547,7 @@ export default function CompanyPortal() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [loadOk, setLoadOk] = useState(false);   // true เมื่อโหลดข้อมูลจากฐานข้อมูลสำเร็จจริง
   const [trash, setTrash] = useState([]);       // ถังขยะ เก็บของที่ลบไว้ 30 วัน
+  const [metrics, setMetrics] = useState([]);   // สถิติจริงที่อ่านมาจากภาพหน้าจอแพลตฟอร์ม
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -3326,7 +3644,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -3334,6 +3652,7 @@ export default function CompanyPortal() {
           api('/api/store?key=lastActiveDate'),
           api('/api/store?key=futureTasks'),
           api('/api/store?key=trash'),
+          api('/api/store?key=metrics'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -3342,6 +3661,7 @@ export default function CompanyPortal() {
         const dateData = dateRes.data;
         const futureData = futureRes.data;
         const trashData = trashRes.data;
+        const metricData = metricRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -3395,6 +3715,7 @@ export default function CompanyPortal() {
         // ล้างของในถังขยะที่เกิน 30 วันออกอัตโนมัติ
         const rawTrash = Array.isArray(trashData.value) ? trashData.value : [];
         setTrash(rawTrash.filter((t) => Date.now() - (t.at || 0) < 30 * 24 * 60 * 60 * 1000));
+        setMetrics(Array.isArray(metricData.value) ? metricData.value : []);
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -3431,6 +3752,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'trash', value: trash }).catch(() => {});
   }, [trash, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'metrics', value: metrics }).catch(() => {});
+  }, [metrics, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -3591,7 +3916,7 @@ export default function CompanyPortal() {
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
-            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
             {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
