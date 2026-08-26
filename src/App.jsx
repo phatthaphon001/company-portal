@@ -2445,13 +2445,28 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
   function resetActiveDay() {
     if (isFutureView) {
       setFutureTasks((prev) => ({ ...prev, [viewDate]: buildDefaultTasksForChannels(channels, viewDate) }));
-    } else if (!isPastView) {
+    } else if (isPastView) {
+      if (window.confirm('ล้างเนื้อหางานของวันย้อนหลังนี้ทั้งหมด (เริ่มทำใหม่) ยืนยันหรือไม่?')) {
+        setActiveTasksUpdater((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label, activeDate)));
+      }
+    } else {
       setTasks((prev) => prev.map((t) => emptyTask(t.id, t.channelId, t.platform, t.type, t.label, todayStr)));
     }
   }
 
   const totalDone = activeTasks.filter((t) => t.done).length;
-  const visibleChannels = isPastView ? channels.filter((c) => activeTasks.some((t) => t.channelId === c.id)) : channels;
+  const visibleChannels = channels;
+
+  // สร้างรายการงานของวันย้อนหลังที่มีแต่ยอดสรุป (ข้อมูลเก่าก่อนอัปเดตระบบ) ให้กลับมาแก้ไขได้
+  function rebuildPastDay() {
+    if (!isPastView) return;
+    const rebuilt = buildDefaultTasksForChannels(channels, activeDate);
+    if (rebuilt.length === 0) {
+      window.alert('ยังไม่มีช่อง/เพจในระบบ — เพิ่มช่องก่อนแล้วค่อยกดสร้างรายการงานอีกครั้ง');
+      return;
+    }
+    setActiveTasksUpdater(rebuilt);
+  }
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8 anim-fade grid lg:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start">
@@ -2470,27 +2485,39 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
                 <RefreshCw size={11} /> ใช้สไตล์จากวันก่อน
               </button>
             )}
-            {!isPastView && (
-              <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
-            )}
+            <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : isPastView ? 'ล้างงานของวันนี้' : 'เริ่มวันใหม่'}</button>
           </div>
         </div>
 
-        {!isPastView && (
-          showAdd ? (
-            <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
-          ) : (
-            <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
-          )
+        {showAdd ? (
+          <AddChannelForm onAdd={addChannel} onClose={() => setShowAdd(false)} />
+        ) : (
+          <button onClick={() => setShowAdd(true)} className="w-full mb-4 font-mono text-2xs px-3 py-2.5 flex items-center justify-center gap-2 rounded-xl" style={{ background: BRAND, color: '#fff' }}><Plus size={14} /> เพิ่มช่อง/เพจ</button>
+        )}
+
+        {/* วันเก่าที่เคยบันทึกไว้แค่ตัวเลขสรุป (ยังไม่มีรายการงานจริง) — สร้างรายการขึ้นมาให้เคลียร์ได้ */}
+        {isPastView && activeTasks.length === 0 && pastEntry && pastEntry.totalTasks > 0 && (
+          <div className="mb-4 p-4 rounded-2xl" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}55` }}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertTriangle size={14} style={{ color: C.orange }} className="shrink-0" />
+              <span className="font-body text-sm" style={{ color: C.text }}>วันนี้มีงานค้างอยู่ {pastEntry.totalTasks - pastEntry.doneTasks} จาก {pastEntry.totalTasks} งาน</span>
+            </div>
+            <p className="font-body text-xs leading-relaxed mb-3" style={{ color: C.muted }}>
+              แต่ระบบเก็บไว้แค่ยอดสรุป ยังไม่มีรายละเอียดงานรายชิ้น (เป็นข้อมูลที่บันทึกไว้ก่อนอัปเดตระบบ) กดปุ่มด้านล่างเพื่อสร้างรายการงานของวันนั้นขึ้นมาจากช่องที่มีอยู่ตอนนี้ แล้วเข้าไปทำ/ติ๊กเคลียร์ย้อนหลังได้เลย
+            </p>
+            <button onClick={rebuildPastDay} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: C.orange, color: '#fff' }}>
+              <RefreshCw size={12} /> สร้างรายการงานของวันนี้ขึ้นมา
+            </button>
+          </div>
         )}
 
         {visibleChannels.length === 0 ? (
           <p className="font-body text-sm text-center py-8" style={{ color: C.muted }}>
-            {isPastView ? 'ไม่มีข้อมูลงานที่บันทึกไว้สำหรับวันนี้' : 'ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น'}
+            {isPastView ? 'ไม่มีรายการงานสำหรับวันนี้ — เพิ่มช่อง/เพจ หรือกดปุ่มสร้างรายการงานด้านบนเพื่อเริ่มเคลียร์ย้อนหลัง' : 'ยังไม่มีช่อง — เพิ่มช่อง/เพจแรกของคุณ เช่น "ช่องวาฬ" แล้วบอกว่าวันนี้ต้องลงวิดีโอ/รูปกี่ชิ้น'}
           </p>
         ) : (
           visibleChannels.map((c) => (
-            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} onDeleteTask={removeTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} readOnly={isPastView} />
+            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} onDeleteTask={removeTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} readOnly={false} />
           ))
         )}
         <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่ · งานที่เตรียมล่วงหน้าจะขึ้นเป็นงานจริงอัตโนมัติเมื่อถึงวันนั้น · กด "← ก่อนหน้า" เพื่อย้อนกลับไปดู/แก้งานของวันก่อนๆ ได้</p>
