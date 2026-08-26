@@ -6,7 +6,7 @@ import {
   CheckSquare, Square, Plus, Trash2, Loader2, RefreshCw, ChevronDown, ChevronUp,
   Calendar, Mail, UserPlus, ArrowLeft, Image as ImageIcon, Video as VideoIcon,
   CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
-  X, Upload, PieChart as PieChartIcon,
+  X, Upload, PieChart as PieChartIcon, Download, Undo2, Redo2,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -208,6 +208,43 @@ function fileToBase64(file) {
   });
 }
 
+// ---------- session: จำการเข้าสู่ระบบไว้ 7 วัน (รีเฟรชหน้าแล้วไม่ต้องล็อกอินใหม่) ----------
+const SESSION_KEY = 'forge_session';
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+function saveSession(user) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user, at: Date.now() })); } catch (e) {}
+}
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (!d || !d.user || !d.at) return null;
+    if (Date.now() - d.at > SESSION_MAX_AGE_MS) { localStorage.removeItem(SESSION_KEY); return null; }
+    return d.user;
+  } catch (e) { return null; }
+}
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+}
+
+// คัดลอกข้อความลงคลิปบอร์ด คืนค่า Promise ที่ resolve เป็น true/false
+function copyText(text) {
+  if (!text) return Promise.resolve(false);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+  }
+  return Promise.resolve(false);
+}
+
+// รวมชื่อ + คำบรรยาย + แฮชแท็ก ของภาษาหนึ่งเป็นข้อความชุดเดียว พร้อมวางลงโพสต์
+function buildPostBundle(task, lang) {
+  const title = task[`title${lang}`] || (lang === 'Th' ? task.title : '') || '';
+  const caption = task[`caption${lang}`] || '';
+  const tags = task[`hashtags${lang}`] || '';
+  return [title, caption, tags].filter(Boolean).join('\n\n');
+}
+
 function emptyTask(id, channelId, platform, type, label, date) {
   return {
     id, channelId, platform, type, label, date, done: false,
@@ -338,7 +375,62 @@ function SidebarNavItem({ Icon, label, active, onClick }) {
   );
 }
 
-function Sidebar({ user, stage, setStage, logout, accounts, tasks }) {
+// รวมรายการ "วันที่ยังทำงานไม่ครบ" จากประวัติ เพื่อเตือนไว้ที่แถบซ้ายให้กดเข้าไปเคลียร์ได้
+function collectOverdueDays(history, limit = 6) {
+  return (history || [])
+    .filter((h) => h && h.totalTasks > 0 && h.doneTasks < h.totalTasks)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, limit)
+    .map((h) => ({ date: h.date, done: h.doneTasks, total: h.totalTasks, left: h.totalTasks - h.doneTasks }));
+}
+
+function shortDayLabel(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return `${d.getDate()} ${THAI_MONTHS[d.getMonth()]}`;
+}
+
+function OverdueSidebarPanel({ history, onOpenDay }) {
+  const overdue = collectOverdueDays(history);
+  const totalLeft = overdue.reduce((s, d) => s + d.left, 0);
+  if (overdue.length === 0) {
+    return (
+      <div className="px-2 pt-3 hidden sm:block">
+        <div className="px-2 py-2 rounded-xl flex items-center gap-2" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+          <CheckCircle2 size={13} style={{ color: C.emerald }} className="shrink-0" />
+          <span className="font-mono text-2xs" style={{ color: C.emerald }}>ไม่มีงานค้าง</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="px-2 pt-3">
+      {/* จอแคบ: แสดงแค่ไอคอน + ตัวเลข */}
+      <div className="sm:hidden flex justify-center">
+        <button onClick={() => onOpenDay(overdue[0].date)} className="relative p-2 rounded-xl" style={{ background: `${C.red}18` }} aria-label={`มีงานค้าง ${totalLeft} งาน`}>
+          <AlertTriangle size={15} style={{ color: C.red }} />
+          <span className="absolute -top-0.5 -right-0.5 font-mono rounded-full px-1" style={{ fontSize: 9, background: C.red, color: '#fff' }}>{totalLeft}</span>
+        </button>
+      </div>
+      <div className="hidden sm:block rounded-xl overflow-hidden" style={{ background: `${C.red}0E`, border: `1px solid ${C.red}44` }}>
+        <div className="px-2.5 py-1.5 flex items-center gap-1.5" style={{ borderBottom: `1px solid ${C.red}33` }}>
+          <AlertTriangle size={12} style={{ color: C.red }} className="shrink-0" />
+          <span className="font-mono text-2xs" style={{ color: C.red }}>งานค้าง {totalLeft} งาน</span>
+        </div>
+        <div className="p-1 space-y-0.5 max-h-44 overflow-y-auto">
+          {overdue.map((d) => (
+            <button key={d.date} onClick={() => onOpenDay(d.date)} className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2" style={{ color: C.text }} title={`เปิดไปเคลียร์งานของวันที่ ${d.date}`}>
+              <span className="font-body text-xs truncate">{shortDayLabel(d.date)}</span>
+              <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.red }}>เหลือ {d.left}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay }) {
   const account = (accounts || []).find((a) => a.email === user.email);
   const totalToday = tasks.length;
   const doneToday = tasks.filter((t) => t.done).length;
@@ -364,6 +456,7 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks }) {
         {navItems.map((n) => (
           <SidebarNavItem key={n.key} Icon={n.Icon} label={n.label} active={stage === n.key || (n.key === 'directory' && stage === 'department')} onClick={() => setStage(n.key)} />
         ))}
+        <OverdueSidebarPanel history={history} onOpenDay={onOpenDay} />
       </div>
       <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
         <button onClick={() => setStage('profile')} className="w-full flex items-center gap-2.5 mb-1.5 justify-center sm:justify-start">
@@ -1309,14 +1402,74 @@ const SHORTCUTS = [
   { keys: '5', action: 'ไปหน้าการวิเคราะห์' },
   { keys: '6', action: 'ไปหน้า Protocol' },
   { keys: '?', action: 'ไปหน้า Setting' },
+  { keys: 'G', action: 'กลับหน้างานประจำวันเร็วๆ' },
+  { keys: '⌘Z / Ctrl+Z', action: 'ย้อนกลับการแก้ไขล่าสุด (Undo)' },
+  { keys: '⌘⇧Z / Ctrl+Y', action: 'ทำซ้ำสิ่งที่ย้อนไป (Redo)' },
+  { keys: '⌘K / Ctrl+K', action: 'เปิดหน้า Setting' },
+  { keys: '←  /  →', action: 'ดูงานวันก่อนหน้า / วันถัดไป (ในหน้างานประจำวัน)' },
+  { keys: 'T', action: 'กลับมาที่งานของวันนี้' },
+  { keys: 'Esc', action: 'ออกจากช่องพิมพ์ที่กำลังกรอกอยู่' },
 ];
 
-function SettingsPage({ user, accounts }) {
+function SettingsPage({ user, accounts, backupData, onImportBackup }) {
+  const [importMsg, setImportMsg] = useState('');
+  const [importing, setImporting] = useState(false);
+
+  function exportBackup() {
+    const payload = { exportedAt: new Date().toISOString(), version: 1, ...backupData };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `forge-backup-${todayDateStr()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function handleImport(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    setImporting(true);
+    setImportMsg('');
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!data || typeof data !== 'object' || !Array.isArray(data.channels)) {
+        setImportMsg('ไฟล์นี้ไม่ใช่ไฟล์สำรองของ FORGE');
+      } else if (window.confirm('การกู้คืนจะเขียนทับข้อมูลปัจจุบันทั้งหมด (ช่อง งาน ประวัติ) ยืนยันหรือไม่?')) {
+        await onImportBackup(data);
+        setImportMsg('กู้คืนข้อมูลสำเร็จแล้ว');
+      }
+    } catch (err) {
+      setImportMsg('อ่านไฟล์ไม่สำเร็จ — ไฟล์อาจเสียหาย');
+    }
+    setImporting(false);
+    setTimeout(() => setImportMsg(''), 5000);
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><SettingsIcon size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>SETTINGS</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าที่ใช้งานได้จริงตอนนี้ — ส่วนธีมสี/ฟอนต์/ย้ายตำแหน่งปุ่มเองยังอยู่ระหว่างพัฒนา เพราะต้องปรับโครงสร้างสีทั้งระบบก่อนถึงจะปลอดภัยและไม่พังส่วนอื่น</p>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-3"><Download size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>สำรอง / กู้คืนข้อมูล</span></div>
+        <p className="font-body text-xs mb-3 leading-relaxed" style={{ color: C.muted }}>ข้อมูลทั้งหมด (ช่อง งานประจำวัน งานที่เตรียมล่วงหน้า ประวัติย้อนหลัง) เก็บอยู่บนฐานข้อมูลออนไลน์ที่เดียว แนะนำให้ดาวน์โหลดไฟล์สำรองเก็บไว้เป็นระยะ เผื่อข้อมูลมีปัญหาจะได้กู้คืนได้</p>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={exportBackup} className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg" style={{ background: BRAND, color: '#fff' }}>
+            <Download size={12} /> ดาวน์โหลดไฟล์สำรอง
+          </button>
+          <label className="font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg cursor-pointer" style={{ border: `1px solid ${C.orange}`, color: C.orange, opacity: importing ? 0.6 : 1 }}>
+            {importing ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} กู้คืนจากไฟล์สำรอง
+            <input type="file" accept="application/json,.json" onChange={handleImport} className="hidden" disabled={importing} />
+          </label>
+        </div>
+        {importMsg && <p className="font-mono text-2xs mt-2" style={{ color: importMsg.includes('สำเร็จ') ? C.emerald : C.red }}>{importMsg}</p>}
+      </div>
 
       <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
         <div className="flex items-center gap-2 mb-3"><KeyRound size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>คีย์ลัด</span></div>
@@ -1328,7 +1481,12 @@ function SettingsPage({ user, accounts }) {
             </div>
           ))}
         </div>
-        <p className="font-mono text-2xs mt-3" style={{ color: C.muted }}>* กดได้เมื่อไม่ได้พิมพ์อยู่ในช่องกรอกข้อความ</p>
+        <p className="font-mono text-2xs mt-3 leading-relaxed" style={{ color: C.muted }}>* คีย์ตัวเลข/ตัวอักษรใช้ได้เมื่อไม่ได้พิมพ์อยู่ในช่องกรอกข้อความ ส่วน Undo/Redo ใช้ได้ทุกที่ (ยกเว้นตอนพิมพ์ ระบบจะปล่อยให้ช่องข้อความจัดการเอง)</p>
+      </div>
+
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-2"><Lock size={14} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>การจำการเข้าสู่ระบบ</span></div>
+        <p className="font-body text-xs leading-relaxed" style={{ color: C.muted }}>ตอนนี้ระบบจำการเข้าสู่ระบบไว้ 7 วัน รีเฟรชหน้าแล้วไม่ต้องล็อกอินใหม่ · ถ้าใช้เครื่องร่วมกับคนอื่น ให้กด "ออกจากระบบ" ทุกครั้งหลังใช้เสร็จ เพราะการจำนี้ผูกกับเครื่องนั้นๆ</p>
       </div>
 
       <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -1479,6 +1637,7 @@ const CAPTION_LANGS = [
 function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, onDelete, loadingAction }) {
   const [expanded, setExpanded] = useState(false);
   const [capLang, setCapLang] = useState('Th');
+  const [copiedBundle, setCopiedBundle] = useState('');
   const Icon = task.type === 'video' ? VideoIcon : ImageIcon;
   const platMeta = PLATFORM_META[task.platform];
   const hasMeta = task.titleTh || task.title || task.captionTh;
@@ -1498,6 +1657,20 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
   function removeTemplateLink(idx) {
     const next = templateLinks.filter((_, i) => i !== idx);
     onUpdate(task.id, { templateLinks: next.length ? next : [''] });
+  }
+
+  // คัดลอกทั้งชุด (ชื่อ + คำบรรยาย + แฮชแท็ก) พร้อมวางลงโพสต์ได้เลย
+  function copyBundle(mode) {
+    const text = mode === 'all'
+      ? CAPTION_LANGS.map((l) => {
+          const body = buildPostBundle(task, l.key);
+          return body ? `[${l.label}]\n${body}` : '';
+        }).filter(Boolean).join('\n\n———\n\n')
+      : buildPostBundle(task, capLang);
+    copyText(text).then((ok) => {
+      setCopiedBundle(ok ? mode : '');
+      setTimeout(() => setCopiedBundle(''), 1800);
+    });
   }
 
   return (
@@ -1586,6 +1759,14 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
                   ) : (
                     <p className="font-mono text-2xs" style={{ color: C.muted }}>ยังไม่มีชื่อ/คำบรรยายภาษานี้</p>
                   )}
+                  <div className="flex flex-wrap gap-1.5 pt-1.5" style={{ borderTop: `1px solid ${C.border}` }}>
+                    <button onClick={() => copyBundle('one')} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ background: copiedBundle === 'one' ? C.emerald : 'transparent', color: copiedBundle === 'one' ? '#0A0A0F' : C.emerald, border: `1px solid ${C.emerald}` }}>
+                      {copiedBundle === 'one' ? <CheckCircle2 size={11} /> : <ClipboardCheck size={11} />} คัดลอกทั้งชุด ({CAPTION_LANGS.find((l) => l.key === capLang)?.label})
+                    </button>
+                    <button onClick={() => copyBundle('all')} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ background: copiedBundle === 'all' ? C.blue : 'transparent', color: copiedBundle === 'all' ? '#0A0A0F' : C.blue, border: `1px solid ${C.blue}` }}>
+                      {copiedBundle === 'all' ? <CheckCircle2 size={11} /> : <ClipboardCheck size={11} />} คัดลอกครบ 3 ภาษา
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1973,6 +2154,20 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialViewDate]);
 
+  // รับคีย์ลัดเลื่อนวัน (← → = วันก่อน/ถัดไป, T = กลับมาวันนี้)
+  useEffect(() => {
+    function onDayNav(e) {
+      const dir = e.detail && e.detail.dir;
+      if (dir === 0) { setViewDate(null); return; }
+      setViewDate((cur) => {
+        const next = shiftDateStr(cur || todayStr, dir);
+        return next === todayStr ? null : next;
+      });
+    }
+    window.addEventListener('forge-day-nav', onDayNav);
+    return () => window.removeEventListener('forge-day-nav', onDayNav);
+  }, [todayStr]);
+
   const isFutureView = !!viewDate && viewDate > todayStr;
   const isPastView = !!viewDate && viewDate < todayStr;
   const activeDate = viewDate || todayStr;
@@ -2005,6 +2200,33 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
   }
   function removeTask(id) {
     setActiveTasksUpdater((prev) => prev.filter((t) => t.id !== id));
+  }
+
+  // คัดลอกสไตล์/เทมเพลต/ความยาว จากวันก่อนหน้าล่าสุดที่มีข้อมูล มาใส่งานของวันที่กำลังดูอยู่
+  // (คัดลอกเฉพาะการตั้งค่าที่ใช้ซ้ำได้ ไม่ลอกโครงเรื่อง/พรอมต์/ลิงก์ เพราะต้องเป็นของใหม่ทุกวัน)
+  const prevDaySource = (() => {
+    const candidates = (history || [])
+      .filter((h) => h.date < activeDate && Array.isArray(h.tasks) && h.tasks.length > 0)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    if (candidates.length > 0) return { date: candidates[0].date, tasks: candidates[0].tasks };
+    if (activeDate > todayStr && tasks.length > 0) return { date: todayStr, tasks };
+    return null;
+  })();
+
+  function copySettingsFromPrevDay() {
+    if (!prevDaySource) return;
+    setActiveTasksUpdater((prev) => prev.map((t) => {
+      const match = prevDaySource.tasks.find((p) => p.channelId === t.channelId && p.label === t.label)
+        || prevDaySource.tasks.find((p) => p.channelId === t.channelId && p.type === t.type);
+      if (!match) return t;
+      const links = Array.isArray(match.templateLinks) ? match.templateLinks.filter(Boolean) : [];
+      return {
+        ...t,
+        styleTemplate: match.styleTemplate || t.styleTemplate,
+        durationSec: match.durationSec || t.durationSec,
+        templateLinks: links.length ? links : t.templateLinks,
+      };
+    }));
   }
 
   function setLoading(id, action) { setLoadingMap((prev) => ({ ...prev, [id]: action })); }
@@ -2178,11 +2400,18 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
 
         <div className="mt-4"><DayNavigator viewDate={viewDate} setViewDate={setViewDate} /></div>
 
-        <div className="flex items-center justify-between gap-3 mb-6">
-          <div className="flex-1 max-w-xs"><ProgressBar done={totalDone} total={activeTasks.length} color={C.blue} /></div>
-          {!isPastView && (
-            <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 shrink-0 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
-          )}
+        <div className="flex items-center justify-between gap-3 mb-6 flex-wrap">
+          <div className="flex-1 min-w-[140px] max-w-xs"><ProgressBar done={totalDone} total={activeTasks.length} color={C.blue} /></div>
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {!isPastView && prevDaySource && activeTasks.length > 0 && (
+              <button onClick={copySettingsFromPrevDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 rounded-lg" style={{ color: C.violet, border: `1px solid ${C.violet}` }} title={`คัดลอกสไตล์/เทมเพลต/ความยาว จากวันที่ ${prevDaySource.date}`}>
+                <RefreshCw size={11} /> ใช้สไตล์จากวันก่อน
+              </button>
+            )}
+            {!isPastView && (
+              <button onClick={resetActiveDay} className="font-mono text-2xs px-2 py-1.5 flex items-center gap-1 rounded-lg" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{isFutureView ? 'ล้างงานที่เตรียมไว้' : 'เริ่มวันใหม่'}</button>
+            )}
+          </div>
         </div>
 
         {!isPastView && (
@@ -2228,11 +2457,66 @@ export default function CompanyPortal() {
   const [lastActiveDate, setLastActiveDate] = useState(null);
   const [reminder, setReminder] = useState(null);
   const [pendingViewDate, setPendingViewDate] = useState(null); // เปิดจากหน้าปฏิทิน (ดับเบิลคลิกวันที่) แล้วพาไปหน้างานประจำวันของวันนั้น
+  const [toast, setToast] = useState('');
+  // ---------- Undo / Redo ----------
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const lastSnapRef = useRef(null);
+  const [undoInfo, setUndoInfo] = useState({ undo: 0, redo: 0 });
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(''), 2000);
+  }
+
+  // เก็บสแนปช็อตของข้อมูลงานไว้ย้อนกลับ — หน่วงไว้เล็กน้อยเพื่อรวมการพิมพ์รัวๆ ให้เป็นการแก้ครั้งเดียว
+  useEffect(() => {
+    if (!dataLoaded || !user) return;
+    const snap = JSON.stringify({ channels, tasks, futureTasks });
+    if (lastSnapRef.current === null) { lastSnapRef.current = snap; return; }
+    if (lastSnapRef.current === snap) return;
+    const prev = lastSnapRef.current;
+    const timer = setTimeout(() => {
+      undoStackRef.current = [...undoStackRef.current.slice(-39), prev];
+      redoStackRef.current = [];
+      lastSnapRef.current = snap;
+      setUndoInfo({ undo: undoStackRef.current.length, redo: 0 });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [channels, tasks, futureTasks, dataLoaded, user]);
+
+  function applySnapshot(raw) {
+    const data = JSON.parse(raw);
+    lastSnapRef.current = raw;
+    setChannels(data.channels || []);
+    setTasks(data.tasks || []);
+    setFutureTasks(data.futureTasks || {});
+  }
+  function undo() {
+    if (undoStackRef.current.length === 0) { showToast('ไม่มีอะไรให้ย้อนกลับแล้ว'); return; }
+    const prev = undoStackRef.current[undoStackRef.current.length - 1];
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current.slice(-39), JSON.stringify({ channels, tasks, futureTasks })];
+    applySnapshot(prev);
+    setUndoInfo({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
+    showToast('ย้อนกลับแล้ว');
+  }
+  function redo() {
+    if (redoStackRef.current.length === 0) { showToast('ไม่มีอะไรให้ทำซ้ำ'); return; }
+    const next = redoStackRef.current[redoStackRef.current.length - 1];
+    redoStackRef.current = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = [...undoStackRef.current.slice(-39), JSON.stringify({ channels, tasks, futureTasks })];
+    applySnapshot(next);
+    setUndoInfo({ undo: undoStackRef.current.length, redo: redoStackRef.current.length });
+    showToast('ทำซ้ำแล้ว');
+  }
 
   function handleSignup(account) { setAccounts((prev) => [...prev, account]); }
   function handleLogin(account) {
     setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: account.lastLogin || Date.now() } : a)));
-    setUser({ name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt });
+    const nextUser = { name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt };
+    setUser(nextUser);
+    saveSession(nextUser); // จำการล็อกอินไว้ รีเฟรชหน้าแล้วไม่ต้องล็อกอินใหม่
     setStage('daily');
   }
   async function updateAccountClearance(email, clearance) {
@@ -2361,20 +2645,63 @@ export default function CompanyPortal() {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
-  function logout() { setUser(null); setStage('terminal'); setActiveDept(null); }
+  function logout() { clearSession(); setUser(null); setStage('terminal'); setActiveDept(null); }
+
+  // กู้คืนการล็อกอินเดิมตอนเปิดหน้าใหม่ (รีเฟรชแล้วไม่ต้องล็อกอินซ้ำ)
+  useEffect(() => {
+    const saved = loadSession();
+    if (saved && saved.email) {
+      setUser(saved);
+      setStage('daily');
+    }
+  }, []);
+
+  // เขียนทับข้อมูลทั้งหมดจากไฟล์สำรอง (ระบบบันทึกขึ้นฐานข้อมูลให้เองอัตโนมัติหลังจากนี้)
+  async function importBackup(data) {
+    setChannels(Array.isArray(data.channels) ? data.channels : []);
+    setTasks(Array.isArray(data.tasks) ? data.tasks : []);
+    setFutureTasks((data.futureTasks && typeof data.futureTasks === 'object') ? data.futureTasks : {});
+    setHistory(Array.isArray(data.history) ? data.history : []);
+  }
 
   // คีย์ลัดเปลี่ยนหน้า (ใช้ได้เมื่อไม่ได้พิมพ์อยู่ในช่องกรอกข้อความ)
   useEffect(() => {
     function handleKey(e) {
       if (!user || stage === 'terminal') return;
       const tag = (e.target.tagName || '').toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const typing = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
+      const mod = e.metaKey || e.ctrlKey;
+
+      // ---- คีย์ลัดที่ใช้ได้แม้กำลังพิมพ์อยู่ (ต้องกดร่วมกับ Cmd/Ctrl) ----
+      if (mod) {
+        const k = (e.key || '').toLowerCase();
+        if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+        if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); redo(); return; }
+        if (k === 's') { e.preventDefault(); showToast('ระบบบันทึกให้อัตโนมัติอยู่แล้ว ไม่ต้องกดบันทึก'); return; }
+        if (k === 'k') { e.preventDefault(); setStage('settings'); return; }
+        return;
+      }
+
+      if (typing) {
+        if (e.key === 'Escape') e.target.blur(); // กด Esc เพื่อออกจากช่องพิมพ์
+        return;
+      }
+
+      // ---- คีย์ลัดตัวเลข: สลับหน้า ----
       const map = { '1': 'daily', '2': 'calendar', '3': 'directory', '4': 'platforms', '5': 'analytics', '6': 'security', '?': 'settings' };
-      if (map[e.key]) setStage(map[e.key]);
+      if (map[e.key]) { setStage(map[e.key]); return; }
+      if (e.key === 'g' || e.key === 'G') { setStage('daily'); return; } // g = กลับหน้างานประจำวัน
+
+      // ---- เลื่อนวัน (ใช้ได้เฉพาะหน้างานประจำวัน) ----
+      if (stage === 'daily') {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); window.dispatchEvent(new CustomEvent('forge-day-nav', { detail: { dir: -1 } })); return; }
+        if (e.key === 'ArrowRight') { e.preventDefault(); window.dispatchEvent(new CustomEvent('forge-day-nav', { detail: { dir: 1 } })); return; }
+        if (e.key === 't' || e.key === 'T') { window.dispatchEvent(new CustomEvent('forge-day-nav', { detail: { dir: 0 } })); return; }
+      }
     }
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [user, stage]);
+  }, [user, stage, channels, tasks, futureTasks]);
 
   if (!dataLoaded) {
     return (
@@ -2403,7 +2730,7 @@ export default function CompanyPortal() {
 
       {stage !== 'terminal' && user && (
         <div className="flex">
-          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} />
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
@@ -2412,10 +2739,27 @@ export default function CompanyPortal() {
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} />}
-            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} />}
+            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
           </div>
+
+          {/* แถบย้อนกลับ/ทำซ้ำ ลอยมุมขวาล่าง (⌘Z / ⌘⇧Z) */}
+          <div className="fixed bottom-4 right-4 flex items-center gap-1.5 px-1.5 py-1.5 rounded-xl z-40" style={{ background: C.panel, border: `1px solid ${C.border}`, boxShadow: '0 8px 24px -12px rgba(0,0,0,0.8)' }}>
+            <button onClick={undo} disabled={undoInfo.undo === 0} title="ย้อนกลับ (⌘Z / Ctrl+Z)" aria-label="ย้อนกลับ" className="p-1.5 rounded-lg" style={{ color: undoInfo.undo === 0 ? C.border : C.text }}>
+              <Undo2 size={15} />
+            </button>
+            <button onClick={redo} disabled={undoInfo.redo === 0} title="ทำซ้ำ (⌘⇧Z / Ctrl+Y)" aria-label="ทำซ้ำ" className="p-1.5 rounded-lg" style={{ color: undoInfo.redo === 0 ? C.border : C.text }}>
+              <Redo2 size={15} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ข้อความแจ้งสั้นๆ กลางล่างจอ */}
+      {toast && (
+        <div className="fixed bottom-20 left-1/2 z-50 anim-fade" style={{ transform: 'translateX(-50%)' }}>
+          <div className="px-3.5 py-2 rounded-xl font-body text-xs whitespace-nowrap" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, boxShadow: '0 8px 24px -12px rgba(0,0,0,0.8)' }}>{toast}</div>
         </div>
       )}
     </div>
