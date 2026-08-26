@@ -187,15 +187,32 @@ function daysAgoLabel(ts) {
   return `${days} วันที่แล้ว`;
 }
 
-async function callClaude(system, content, images) {
-  const response = await fetch('/api/claude', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ system, content, images }),
+// ---------- คิวเรียก AI: ยิงทีละคำขอ และเว้นช่วงกันชนลิมิต 5 ครั้ง/นาที ของแพ็กฟรี Gemini ----------
+const AI_MIN_GAP_MS = 13000; // เว้นห่างอย่างน้อย ~13 วิ ต่อคำขอ (ราว 4-5 ครั้ง/นาที)
+let aiChain = Promise.resolve();
+let aiLastCallAt = 0;
+
+function callClaude(system, content, images) {
+  // ต่อคิวไว้ท้ายแถว งานถัดไปจะเริ่มก็ต่อเมื่องานก่อนหน้าเสร็จและเว้นระยะครบแล้ว
+  const run = aiChain.then(async () => {
+    const since = Date.now() - aiLastCallAt;
+    if (aiLastCallAt && since < AI_MIN_GAP_MS) {
+      await new Promise((r) => setTimeout(r, AI_MIN_GAP_MS - since));
+    }
+    aiLastCallAt = Date.now();
+    const response = await fetch('/api/claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ system, content, images }),
+    });
+    const data = await response.json();
+    aiLastCallAt = Date.now();
+    if (!response.ok || data?.error) throw new Error(data.error || 'เกิดข้อผิดพลาด');
+    return data.text || '(ไม่มีคำตอบ)';
   });
-  const data = await response.json();
-  if (!response.ok || data?.error) throw new Error(data.error || 'เกิดข้อผิดพลาด');
-  return data.text || '(ไม่มีคำตอบ)';
+  // กันไม่ให้คิวขาดเมื่อมีคำขอใดล้มเหลว
+  aiChain = run.catch(() => {});
+  return run;
 }
 
 // อ่านไฟล์รูปเป็น base64 (ไม่รวม prefix "data:image/...;base64,") สำหรับส่งให้ AI วิเคราะห์
@@ -1533,7 +1550,50 @@ function VerdictBox({ verdict }) {
   );
 }
 
-function PromptBox({ label, color, value, copied, made, onCopiedChange, onMadeChange }) {
+// ---------- ปุ่มส่ง Prompt ไปเครื่องมือ AI ภายนอก ----------
+// คัดลอก prompt ให้อัตโนมัติ แล้วเปิดแท็บเครื่องมือที่เลือก เหลือแค่วาง (⌘V / Ctrl+V) แล้ว Enter
+// หมายเหตุ: ChatGPT รองรับการส่งข้อความไปในลิงก์ได้เลย (?q=) ส่วน Meta AI กับ Google Flow ต้องวางเอง
+const AI_TOOLS = {
+  meta: { label: 'Meta AI', url: () => 'https://www.meta.ai/', color: '#4A9DFF', prefill: false },
+  chatgpt: { label: 'ChatGPT', url: (text) => `https://chatgpt.com/?q=${encodeURIComponent(text.slice(0, 3000))}`, color: '#10A37F', prefill: true },
+  flow: { label: 'Google Flow', url: () => 'https://labs.google/fx/tools/flow', color: '#F5A623', prefill: false },
+};
+
+function SendToTools({ text, tools, onSent }) {
+  const [msg, setMsg] = useState('');
+  if (!text) return null;
+
+  function send(key) {
+    const tool = AI_TOOLS[key];
+    // เปิดแท็บทันทีตอนกดปุ่ม (ถ้ารอ clipboard ก่อน เบราว์เซอร์จะบล็อกป๊อปอัป)
+    const win = window.open(tool.url(text), '_blank', 'noopener,noreferrer');
+    if (!win) setMsg('เบราว์เซอร์บล็อกการเปิดแท็บ — อนุญาตป๊อปอัปของเว็บนี้ก่อน');
+    copyText(text).then((ok) => {
+      if (onSent) onSent();
+      if (win) setMsg(ok ? (tool.prefill ? `เปิด ${tool.label} แล้ว (ใส่ prompt ให้ในช่องแล้ว)` : `คัดลอกแล้ว — วางใน ${tool.label} ได้เลย (⌘V)`) : `เปิด ${tool.label} แล้ว แต่คัดลอกไม่สำเร็จ`);
+      setTimeout(() => setMsg(''), 3500);
+    });
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="font-mono text-2xs" style={{ color: C.muted }}>ส่งไปสร้างที่:</span>
+        {tools.map((key) => {
+          const tool = AI_TOOLS[key];
+          return (
+            <button key={key} onClick={() => send(key)} className="font-mono text-2xs px-2 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${tool.color}`, color: tool.color }}>
+              <Share2 size={10} /> {tool.label}
+            </button>
+          );
+        })}
+      </div>
+      {msg && <p className="font-mono text-2xs mt-1" style={{ color: C.emerald }}>{msg}</p>}
+    </div>
+  );
+}
+
+function PromptBox({ label, color, value, copied, made, onCopiedChange, onMadeChange, tools }) {
   const [copyMsg, setCopyMsg] = useState('');
   if (!value) return null;
   function copyText() {
@@ -1550,7 +1610,8 @@ function PromptBox({ label, color, value, copied, made, onCopiedChange, onMadeCh
         <button onClick={copyText} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ border: `1px solid ${color}`, color }}>{copyMsg || 'คัดลอก'}</button>
       </div>
       <p className="font-body text-xs whitespace-pre-wrap mb-2" style={{ color: C.text }}>{value}</p>
-      <div className="flex items-center gap-4">
+      <SendToTools text={value} tools={tools || ['meta', 'chatgpt']} onSent={() => onCopiedChange(true)} />
+      <div className="flex items-center gap-4 mt-2">
         <label className="flex items-center gap-1.5 font-mono text-2xs cursor-pointer" style={{ color: copied ? C.emerald : C.muted }}>
           <input type="checkbox" checked={copied} onChange={(e) => onCopiedChange(e.target.checked)} /> คัดลอกแล้ว
         </label>
@@ -1582,7 +1643,7 @@ function VideoPromptBox({ value, copied, made, onCopiedChange, onMadeChange }) {
   const scenes = parseScenes(value);
 
   if (!scenes) {
-    return <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={value} copied={copied} made={made} onCopiedChange={onCopiedChange} onMadeChange={onMadeChange} />;
+    return <PromptBox label="Prompt วิดีโอ" color={C.cyan} value={value} copied={copied} made={made} onCopiedChange={onCopiedChange} onMadeChange={onMadeChange} tools={['flow', 'meta', 'chatgpt']} />;
   }
 
   function copyWhole() {
@@ -1613,6 +1674,7 @@ function VideoPromptBox({ value, copied, made, onCopiedChange, onMadeChange }) {
               <button onClick={() => copyScene(i, s.text)} className="font-mono text-2xs px-1.5 py-0.5 rounded" style={{ border: `1px solid ${C.border}`, color: C.muted }}>{sceneCopyMsg[i] || 'คัดลอก'}</button>
             </div>
             <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{s.text}</p>
+            <SendToTools text={s.text} tools={['flow', 'meta']} />
           </div>
         ))}
       </div>
