@@ -2,6 +2,8 @@ import {
   redisReady, redisGet, redisSet,
   hashPassword, verifyPassword,
   issueToken, requireUser, sanitize, rateLimit,
+  isBanned, addBan, removeBan, listBans, recordSuspicious, clientIp,
+  logActivity, getActivityLog, autoBackup, listBackups, getBackup,
 } from './_lib.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -48,6 +50,15 @@ export default async function handler(req, res) {
   }
 
   const { action } = req.body || {};
+  const ip = clientIp(req);
+
+  // ---------- ด่านแรก: ถ้า IP นี้ถูกแบนไว้ ปฏิเสธทุกคำสั่งทันที ----------
+  try {
+    const ban = await isBanned(ip);
+    if (ban) {
+      return res.status(403).json({ error: 'การเข้าถึงจากอุปกรณ์นี้ถูกระงับ กรุณาติดต่อผู้ดูแลระบบ', banned: true });
+    }
+  } catch (e) {}
 
   try {
     // ---------- ไม่ต้องล็อกอินก่อน ----------
@@ -56,7 +67,6 @@ export default async function handler(req, res) {
       if (!name || !username || !email || !password) return res.status(400).json({ error: 'กรอกข้อมูลให้ครบ' });
       if (String(password).length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
 
-      const ip = req.headers['x-forwarded-for'] || 'unknown';
       const rl = await rateLimit(`signup_${ip}`, 5, 60 * 60 * 1000);
       if (!rl.allowed) return res.status(429).json({ error: `สมัครถี่เกินไป ลองใหม่ใน ${rl.retrySec} วินาที` });
 
@@ -80,7 +90,6 @@ export default async function handler(req, res) {
 
     if (action === 'login') {
       const { identifier, password } = req.body;
-      const ip = req.headers['x-forwarded-for'] || 'unknown';
       // กันเดารหัสผ่านรัวๆ
       const rl = await rateLimit(`login_${ip}_${identifier || ''}`, 10, 15 * 60 * 1000);
       if (!rl.allowed) return res.status(429).json({ error: `พยายามเข้าสู่ระบบถี่เกินไป ลองใหม่ใน ${rl.retrySec} วินาที` });
@@ -88,6 +97,8 @@ export default async function handler(req, res) {
       const accounts = await getAccounts();
       const idx = accounts.findIndex((a) => a.email === identifier || a.username === identifier);
       if (idx === -1 || !checkPassword(accounts[idx], password)) {
+        const sus = await recordSuspicious(ip, 'login_failed');
+        if (sus.banned) return res.status(403).json({ error: 'พยายามเข้าสู่ระบบผิดหลายครั้งเกินไป อุปกรณ์นี้ถูกระงับชั่วคราว 24 ชม.', banned: true });
         return res.status(400).json({ error: 'อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง' });
       }
 
@@ -106,6 +117,7 @@ export default async function handler(req, res) {
       if (requireOtp) {
         return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp: true });
       }
+      await logActivity({ type: 'login', email: accounts[idx].email, ip });
       return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp: false, token: issueToken(accounts[idx].email) });
     }
 
@@ -124,7 +136,7 @@ export default async function handler(req, res) {
         email = parts.join(':');
         const expected = crypto.default.createHmac('sha256', process.env.OTP_SECRET).update(`${email}:${storedCode}:${expiresAt}`).digest('hex');
         const a = Buffer.from(signature); const b = Buffer.from(expected);
-        if (a.length !== b.length || !crypto.default.timingSafeEqual(a, b)) return res.status(400).json({ error: 'โทเค็นไม่ถูกต้อง' });
+        if (a.length !== b.length || !crypto.default.timingSafeEqual(a, b)) { await recordSuspicious(ip, 'otp_token_tampered'); return res.status(400).json({ error: 'โทเค็นไม่ถูกต้อง' }); }
         if (Date.now() > Number(expiresAt)) return res.status(400).json({ error: 'รหัสหมดอายุแล้ว กรุณาขอรหัสใหม่' });
         if (String(code) !== String(storedCode)) return res.status(400).json({ error: 'รหัสไม่ถูกต้อง' });
       } catch (e) {
@@ -226,6 +238,41 @@ export default async function handler(req, res) {
       const kept = accounts.filter((a) => a.isOwner || (Date.now() - (a.lastLogin || a.createdAt || Date.now())) <= THIRTY_DAYS_MS);
       if (kept.length !== accounts.length) await saveAccounts(kept);
       return res.status(200).json({ accounts: kept.map(sanitize) });
+    }
+
+    // ---------- ผู้ดูแลระบบ: ความปลอดภัย / สำรองข้อมูล / บันทึกกิจกรรม ----------
+    if (action === 'listBans') {
+      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+      return res.status(200).json({ bans: await listBans() });
+    }
+    if (action === 'addBan') {
+      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+      const { target, reason, days } = req.body;
+      if (!target) return res.status(400).json({ error: 'ต้องระบุ IP หรืออีเมลที่จะแบน' });
+      await addBan(String(target).trim(), reason || 'แบนโดยผู้ดูแลระบบ', me.email, days ? Date.now() + Number(days) * 86400000 : null);
+      await logActivity({ type: 'ban_added', target, by: me.email });
+      return res.status(200).json({ bans: await listBans() });
+    }
+    if (action === 'removeBan') {
+      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+      await removeBan(String(req.body.target || '').trim());
+      await logActivity({ type: 'ban_removed', target: req.body.target, by: me.email });
+      return res.status(200).json({ bans: await listBans() });
+    }
+    if (action === 'activityLog') {
+      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+      return res.status(200).json({ log: (await getActivityLog()).slice(-100).reverse() });
+    }
+    if (action === 'runBackup') {
+      const result = await autoBackup(req.body.date || new Date().toISOString().slice(0, 10));
+      return res.status(200).json({ result, backups: await listBackups() });
+    }
+    if (action === 'listBackups') {
+      return res.status(200).json({ backups: await listBackups() });
+    }
+    if (action === 'getBackup') {
+      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+      return res.status(200).json({ backup: await getBackup(req.body.date) });
     }
 
     return res.status(400).json({ error: 'ไม่รู้จัก action นี้' });
