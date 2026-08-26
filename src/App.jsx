@@ -285,8 +285,56 @@ function emptyTask(id, channelId, platform, type, label, date) {
     titleTh: '', titleEn: '', titleZh: '', captionTh: '', captionEn: '', captionZh: '',
     hashtagsTh: '', hashtagsEn: '', hashtagsZh: '',
     link: '', qc: null, lastError: '', referenceLink: '',
+    geminiReview: '',        // ผลวิเคราะห์ที่วางกลับมาจาก Gemini
+    reviewScore: null,       // คะแนน 1-10 ที่ระบบสรุปได้จากผลวิเคราะห์
+    reviewSummary: '',       // สรุปสั้นๆ + สิ่งที่ควรแก้ครั้งหน้า
+    reviewAt: null,          // เวลาที่วิเคราะห์
     templateLinks: [''], // ลิงก์วิดีโอ/รูปต้นแบบให้ AI ดูสไตล์ (เพิ่มได้หลายลิงก์)
   };
+}
+
+// คำสั่งมาตรฐานสำหรับให้ Gemini ตรวจคลิป — คัดลอกไปวางพร้อมแนบไฟล์วิดีโอ
+function buildGeminiReviewPrompt(task, channelName) {
+  const scenes = (task.videoPrompt || '').trim();
+  return `คุณคือผู้ตรวจคุณภาพคอนเทนต์วิดีโอมืออาชีพ ผมจะแนบไฟล์วิดีโอมาให้ กรุณาดูคลิปทั้งคลิปอย่างละเอียดแล้วตรวจตามหัวข้อด้านล่าง
+
+## ข้อมูลงานชิ้นนี้
+- ช่อง: ${channelName || '-'}
+- ประเภท: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'} (${task.label})
+- ความยาวที่ตั้งใจ: ${task.durationSec || '-'} วินาที
+- โครงเรื่องที่วางไว้: ${task.outline || '-'}
+- สไตล์ที่ต้องการ: ${task.styleTemplate || '-'}
+- Prompt ที่ใช้สร้าง: ${scenes || '-'}
+
+## กรุณาตรวจและตอบตามรูปแบบนี้เป๊ะๆ
+
+คะแนนรวม: [ให้คะแนน 1-10]
+
+ตรงกับที่วางไว้ไหม:
+[คลิปตรงกับโครงเรื่องและ Prompt ข้างบนหรือไม่ ตรงกี่ % ตรงไหนหลุด]
+
+จุดที่ดี:
+- [ข้อดีที่ควรทำต่อ อย่างน้อย 2 ข้อ]
+
+จุดที่ต้องแก้:
+- [ระบุปัญหาพร้อมบอกวินาทีที่เกิด เช่น "วินาทีที่ 3-5 ภาพเบลอ"]
+- [เรียงจากปัญหาที่ร้ายแรงที่สุดก่อน]
+
+ตรวจทางเทคนิค:
+- ความคมชัด/ความละเอียด: [ประเมิน]
+- แสงและสี: [ประเมิน]
+- ความต่อเนื่องระหว่างฉาก: [ประเมิน]
+- สัดส่วนภาพ 9:16 ถูกต้องไหม: [ใช่/ไม่ใช่]
+- ความสมจริงของตัวละคร/สัตว์ (มีจุดที่ AI สร้างผิดเพี้ยนไหม): [ประเมิน]
+
+แรงดึงดูด 3 วินาทีแรก:
+[คลิปนี้จะหยุดนิ้วคนเลื่อนฟีดได้ไหม เพราะอะไร]
+
+สิ่งที่ต้องแก้ใน Prompt ครั้งหน้า:
+- [บอกชัดว่าควรเพิ่มหรือตัดคำไหนออกจาก Prompt เพื่อให้คลิปหน้าดีกว่านี้]
+
+สรุปสั้น 1 บรรทัด:
+[สรุปว่าผ่านหรือควรทำใหม่ พร้อมเหตุผลสั้นๆ]`;
 }
 
 // ป้ายชื่องาน (Thai) มาพร้อมเลขลำดับอยู่แล้ว เช่น "วิดีโอ 3" / "โพสต์ 2" — แปลงเป็นอังกฤษกำกับไว้ด้วย
@@ -419,7 +467,7 @@ function shortDayLabel(dateStr) {
   return `${d.getDate()} ${THAI_MONTHS[d.getMonth()]}`;
 }
 
-function OverdueSidebarPanel({ history, onOpenDay }) {
+function OverdueSidebarPanel({ history, onOpenDay, onDismissDay }) {
   const overdue = collectOverdueDays(history);
   const totalLeft = overdue.reduce((s, d) => s + d.left, 0);
   if (overdue.length === 0) {
@@ -448,10 +496,21 @@ function OverdueSidebarPanel({ history, onOpenDay }) {
         </div>
         <div className="p-1 space-y-0.5 max-h-44 overflow-y-auto">
           {overdue.map((d) => (
-            <button key={d.date} onClick={() => onOpenDay(d.date)} className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2" style={{ color: C.text }} title={`เปิดไปเคลียร์งานของวันที่ ${d.date}`}>
-              <span className="font-body text-xs truncate">{shortDayLabel(d.date)}</span>
-              <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.red }}>เหลือ {d.left}</span>
-            </button>
+            <div key={d.date} className="w-full px-2 py-1.5 rounded-lg flex items-center justify-between gap-1.5" style={{ color: C.text }}>
+              <button onClick={() => onOpenDay(d.date)} className="flex-1 min-w-0 text-left flex items-center justify-between gap-2" title={`เปิดไปเคลียร์งานของวันที่ ${d.date}`}>
+                <span className="font-body text-xs truncate">{shortDayLabel(d.date)}</span>
+                <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.red }}>เหลือ {d.left}</span>
+              </button>
+              <button
+                onClick={() => { if (window.confirm(`ยกเลิกงานค้างของวันที่ ${shortDayLabel(d.date)} ทั้ง ${d.left} งาน?\n\nงานที่ทำเสร็จแล้วจะยังอยู่ครบ ลบเฉพาะงานที่ยังไม่ได้ทำ`)) onDismissDay(d.date); }}
+                title="ไม่ทำงานของวันนี้แล้ว — ลบออกจากรายการค้าง"
+                aria-label="ยกเลิกงานค้างของวันนี้"
+                className="shrink-0 p-1 rounded-md"
+                style={{ color: C.muted }}
+              >
+                <X size={12} />
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -459,7 +518,7 @@ function OverdueSidebarPanel({ history, onOpenDay }) {
   );
 }
 
-function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay }) {
+function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay }) {
   const account = (accounts || []).find((a) => a.email === user.email);
   const totalToday = tasks.length;
   const doneToday = tasks.filter((t) => t.done).length;
@@ -485,7 +544,7 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
         {navItems.map((n) => (
           <SidebarNavItem key={n.key} Icon={n.Icon} label={n.label} active={stage === n.key || (n.key === 'directory' && stage === 'department')} onClick={() => setStage(n.key)} />
         ))}
-        <OverdueSidebarPanel history={history} onOpenDay={onOpenDay} />
+        <OverdueSidebarPanel history={history} onOpenDay={onOpenDay} onDismissDay={onDismissDay} />
       </div>
       <div className="p-3" style={{ borderTop: `1px solid ${C.border}` }}>
         <button onClick={() => setStage('profile')} className="w-full flex items-center gap-2.5 mb-1.5 justify-center sm:justify-start">
@@ -1687,7 +1746,7 @@ const CAPTION_LANGS = [
   { key: 'Zh', label: '中文' },
 ];
 
-function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, onDelete, loadingAction }) {
+function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onAnalyzeReview, channelName, onReset, onDelete, loadingAction }) {
   const [expanded, setExpanded] = useState(false);
   const [capLang, setCapLang] = useState('Th');
   const [copiedBundle, setCopiedBundle] = useState('');
@@ -1824,16 +1883,10 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
               )}
 
               <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
-                <label className="font-mono text-2xs block mb-1" style={{ color: C.violet }}>ส่งงาน QC</label>
-                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว" className="w-full px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.violet }}>ตรวจงาน (QC)</label>
+                <input value={task.link} onChange={(e) => onUpdate(task.id, { link: e.target.value })} placeholder="วางลิงก์คลิป/โพสต์ที่ทำเสร็จแล้ว (ไว้อ้างอิง)" className="w-full px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
                 {task.link.trim() && <VideoPreviewBox link={task.link.trim()} compact />}
-                {!task.qc ? (
-                  <button onClick={() => onQC(task)} disabled={busy || !task.link.trim()} className="mt-1.5 font-mono text-2xs flex items-center gap-1" style={{ color: task.link.trim() ? C.violet : C.muted, opacity: busy ? 0.6 : 1 }}>
-                    {loadingAction === 'qc' ? <Loader2 size={11} className="animate-spin" /> : <ClipboardCheck size={11} />} ส่งให้ QC ตรวจสอบ
-                  </button>
-                ) : (
-                  <VerdictBox verdict={task.qc} />
-                )}
+                <QCReviewBox task={task} channelName={channelName} onUpdate={onUpdate} onAnalyze={onAnalyzeReview} loadingAction={loadingAction} />
               </div>
             </div>
           )}
@@ -1841,6 +1894,86 @@ function DailyTaskCard({ task, onToggle, onUpdate, onGenOutline, onGenPrompts, o
       </div>
     </div>
   );
+}
+
+// ---------- กล่องตรวจงานด้วย Gemini (3 ขั้นตอน) ----------
+// 1) คัดลอกคำสั่งตรวจ + เปิด Gemini แล้วแนบไฟล์คลิปเอง (Gemini ดูวิดีโอได้จริง)
+// 2) วางผลวิเคราะห์ที่ได้กลับมาในช่องด้านล่าง
+// 3) ให้ระบบสรุปคะแนน + สิ่งที่ต้องแก้ครั้งหน้า แล้วเก็บสถิติไว้ดูรายวัน/รายเดือน
+function QCReviewBox({ task, channelName, onUpdate, onAnalyze, loadingAction }) {
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(!!task.geminiReview);
+  const prompt = buildGeminiReviewPrompt(task, channelName);
+  const busy = loadingAction === 'review';
+
+  function sendToGemini() {
+    const win = window.open('https://gemini.google.com/app', '_blank', 'noopener,noreferrer');
+    copyText(prompt).then((ok) => {
+      setCopied(ok);
+      setOpen(true);
+      setTimeout(() => setCopied(false), 4000);
+    });
+    if (!win) window.alert('เบราว์เซอร์บล็อกการเปิดแท็บ — อนุญาตป๊อปอัปของเว็บนี้ก่อน');
+  }
+
+  const scoreColor = task.reviewScore == null ? C.muted : task.reviewScore >= 8 ? C.emerald : task.reviewScore >= 5 ? C.orange : C.red;
+
+  return (
+    <div className="mt-2">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <button onClick={sendToGemini} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff' }}>
+          <Share2 size={11} /> คัดลอกคำสั่งตรวจ + เปิด Gemini
+        </button>
+        {task.geminiReview && (
+          <button onClick={() => setOpen((o) => !o)} className="font-mono text-2xs px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+            {open ? 'ย่อ' : 'ดูผลตรวจ'}
+          </button>
+        )}
+        {task.reviewScore != null && (
+          <span className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${scoreColor}`, color: scoreColor }}>
+            คะแนน {task.reviewScore}/10
+          </span>
+        )}
+      </div>
+      {copied && <p className="font-mono text-2xs mt-1" style={{ color: C.emerald }}>คัดลอกคำสั่งแล้ว — ใน Gemini ให้กดปุ่ม + แนบไฟล์คลิป แล้ววางคำสั่ง (⌘V) ส่งพร้อมกัน</p>}
+
+      {open && (
+        <div className="mt-2">
+          <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วางผลวิเคราะห์จาก Gemini ที่นี่</label>
+          <textarea
+            value={task.geminiReview}
+            onChange={(e) => onUpdate(task.id, { geminiReview: e.target.value })}
+            rows={5}
+            placeholder="คัดลอกคำตอบทั้งหมดจาก Gemini มาวางตรงนี้..."
+            className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y"
+            style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}
+          />
+          <button
+            onClick={() => onAnalyze(task)}
+            disabled={busy || !task.geminiReview.trim()}
+            className="mt-1.5 font-mono text-2xs px-3 py-1.5 flex items-center gap-1 rounded-lg"
+            style={{ background: BRAND, color: '#fff', opacity: (busy || !task.geminiReview.trim()) ? 0.5 : 1 }}
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ระบบสรุป + เก็บสถิติ
+          </button>
+
+          {task.reviewSummary && (
+            <div className="mt-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${scoreColor}55` }}>
+              <div className="font-mono text-2xs mb-1" style={{ color: scoreColor }}>สรุปผลตรวจ · คะแนน {task.reviewScore}/10</div>
+              <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{task.reviewSummary}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// เติม https:// ให้ลิงก์ที่ผู้ใช้พิมพ์มาแบบไม่มี เพื่อให้กดเปิดได้จริง
+function normalizeUrl(link) {
+  const t = String(link || '').trim();
+  if (!t) return '#';
+  return /^https?:\/\//i.test(t) ? t : `https://${t}`;
 }
 
 function getYoutubeEmbedUrl(link) {
@@ -1927,7 +2060,7 @@ function channelStatusLabel(done, total) {
   return { text: `ทำอยู่ ${done}/${total}`, color: C.orange };
 }
 
-function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onReset, onDeleteTask, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning, readOnly }) {
+function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, onGenPrompts, onGenMeta, onQC, onAnalyzeReview, onReset, onDeleteTask, loadingMap, onRemove, onAddPlatform, onRemovePlatform, onGenerateAll, generatingAll, onQCAll, qcAllRunning, readOnly }) {
   const [open, setOpen] = useState(false);
   const [showAddPlatform, setShowAddPlatform] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState(null);
@@ -2003,7 +2136,7 @@ function DailyChannelBlock({ channel, tasks, onToggle, onUpdate, onGenOutline, o
                 })}
               </div>
               {activeTask && (
-                <DailyTaskCard key={activeTask.id} task={activeTask} onToggle={onToggle} onUpdate={onUpdate} onGenOutline={onGenOutline} onGenPrompts={onGenPrompts} onGenMeta={onGenMeta} onQC={onQC} onReset={onReset} onDelete={onDeleteTask} loadingAction={loadingMap[activeTask.id]} />
+                <DailyTaskCard key={activeTask.id} task={activeTask} onToggle={onToggle} onUpdate={onUpdate} onGenOutline={onGenOutline} onGenPrompts={onGenPrompts} onGenMeta={onGenMeta} onQC={onQC} onAnalyzeReview={onAnalyzeReview} channelName={channel.name} onReset={onReset} onDelete={onDeleteTask} loadingAction={loadingMap[activeTask.id]} />
               )}
             </>
           )}
@@ -2147,6 +2280,11 @@ function PlatformCheckPanel({ channels, onUpdateCheckLink }) {
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.channelColor }} />
                 <span className="font-body text-xs truncate" style={{ color: C.text }}>{r.channelName}</span>
+                {r.checkLink && r.checkLink.trim() && (
+                  <a href={normalizeUrl(r.checkLink)} target="_blank" rel="noopener noreferrer" title="เปิดหน้าเพจนี้" className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1" style={{ color: meta.color, border: `1px solid ${meta.color}` }}>
+                    <Share2 size={9} /> เปิดเพจ
+                  </a>
+                )}
                 <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1 ml-auto" style={{ color: meta.color, border: `1px solid ${meta.color}` }}><PlatformIcon size={10} />{meta.label}</span>
               </div>
               <input value={r.checkLink} onChange={(e) => onUpdateCheckLink(r.channelId, r.platform, e.target.value)} placeholder="ลิงก์เช็คงาน (เพจ/โปรไฟล์)" className="w-full px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
@@ -2433,6 +2571,30 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     for (const t of chTasks) { await runQC(t); }
     setQcAllId(null);
   }
+  async function analyzeReview(task) {
+    if (!task.geminiReview || !task.geminiReview.trim()) return;
+    setLoading(task.id, 'review');
+    const channel = channels.find((c) => c.id === task.channelId);
+    const sys = 'คุณคือหัวหน้าฝ่ายผลิตคอนเทนต์ ผมจะให้ผลตรวจคลิปที่ได้จาก AI อีกตัวมา ให้คุณสรุปเป็นภาษาไทยแบบสั้น กระชับ ใช้งานได้จริง ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"score": ตัวเลข 1-10, "summary": "สรุป 2-4 บรรทัด บอกว่าผ่านหรือควรทำใหม่ และสิ่งที่ต้องแก้ครั้งหน้าเป็นข้อๆ", "promptFix": "ข้อความสั้นๆ บอกว่าควรเพิ่ม/ตัดอะไรใน Prompt ครั้งหน้า"}';
+    try {
+      const text = await callClaude(sys, `ช่อง: ${channel ? channel.name : '-'}\nงาน: ${task.label}\nโครงเรื่องที่วางไว้: ${task.outline || '-'}\n\nผลตรวจจาก Gemini:\n${task.geminiReview}`);
+      const json = parseJsonLoose(text);
+      const rawScore = Number(json.score);
+      const score = Number.isFinite(rawScore) ? Math.max(1, Math.min(10, Math.round(rawScore))) : null;
+      const summary = [json.summary || '', json.promptFix ? `\nแก้ Prompt ครั้งหน้า: ${json.promptFix}` : ''].join('').trim();
+      updateTaskField(task.id, {
+        reviewScore: score,
+        reviewSummary: summary || 'สรุปผลไม่สำเร็จ ลองใหม่อีกครั้ง',
+        reviewAt: Date.now(),
+        qc: score != null ? { passed: score >= 7, text: summary } : task.qc,
+      });
+    } catch (e) {
+      updateTaskField(task.id, { reviewSummary: `สรุปผลไม่สำเร็จ: ${e.message || 'ไม่ทราบสาเหตุ'}` });
+    } finally {
+      clearLoading(task.id);
+    }
+  }
+
   function resetActiveDay() {
     if (isFutureView) {
       setFutureTasks((prev) => ({ ...prev, [viewDate]: buildDefaultTasksForChannels(channels, viewDate) }));
@@ -2508,7 +2670,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
           </p>
         ) : (
           visibleChannels.map((c) => (
-            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onReset={resetTask} onDeleteTask={removeTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} readOnly={false} />
+            <DailyChannelBlock key={c.id} channel={c} tasks={activeTasks.filter((t) => t.channelId === c.id)} onToggle={toggleTask} onUpdate={updateTaskField} onGenOutline={genOutline} onGenPrompts={genPrompts} onGenMeta={genMeta} onQC={runQC} onAnalyzeReview={analyzeReview} onReset={resetTask} onDeleteTask={removeTask} loadingMap={loadingMap} onRemove={removeChannel} onAddPlatform={addPlatform} onRemovePlatform={removePlatform} onGenerateAll={generateAll} generatingAll={generatingAllId === c.id} onQCAll={qcAll} qcAllRunning={qcAllId === c.id} readOnly={false} />
           ))
         )}
         <p className="font-mono text-2xs mt-6 leading-relaxed text-center" style={{ color: C.muted }}>* ข้อมูลบันทึกไว้ในฐานข้อมูลแล้ว ไม่หายเมื่อรีเฟรชหรือกลับมาใหม่ · งานที่เตรียมล่วงหน้าจะขึ้นเป็นงานจริงอัตโนมัติเมื่อถึงวันนั้น · กด "← ก่อนหน้า" เพื่อย้อนกลับไปดู/แก้งานของวันก่อนๆ ได้</p>
@@ -2730,6 +2892,15 @@ export default function CompanyPortal() {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
+  // "ไม่ทำแล้ว" — ลบเฉพาะงานที่ยังไม่เสร็จของวันนั้นออก งานที่ทำเสร็จแล้วยังอยู่ครบ
+  function dismissOverdueDay(dateStr) {
+    setHistory((prev) => prev.map((h) => {
+      if (h.date !== dateStr) return h;
+      const kept = Array.isArray(h.tasks) ? h.tasks.filter((t) => t.done) : [];
+      return { ...h, tasks: kept, missed: [], totalTasks: kept.length, doneTasks: kept.length, dismissed: true };
+    }));
+  }
+
   function logout() {
     clearSession();
     setUser(null); setStage('terminal'); setActiveDept(null);
@@ -2843,7 +3014,7 @@ export default function CompanyPortal() {
 
       {stage !== 'terminal' && user && (
         <div className="flex">
-          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
