@@ -97,8 +97,9 @@ export async function requireUser(req) {
 
 // เอาข้อมูลลับออกก่อนส่งกลับหน้าเว็บ
 export function sanitize(a) {
-  const { password, passwordHash, passwordSalt, ...rest } = a;
-  return rest;
+  // ห้ามส่งรหัสผ่านหรือคีย์ API ออกไปฝั่งหน้าเว็บเด็ดขาด
+  const { password, passwordHash, passwordSalt, geminiKey, ...rest } = a;
+  return { ...rest, hasGeminiKey: !!(geminiKey && String(geminiKey).trim()) };
 }
 
 // ---------- จำกัดจำนวนครั้ง (กันยิงถี่) ----------
@@ -220,4 +221,178 @@ export function clientIp(req) {
   const fwd = req.headers['x-forwarded-for'];
   if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim();
   return req.headers['x-real-ip'] || 'unknown';
+}
+
+// ---------- ระบบโทเค็นการใช้งาน (usage credits) ----------
+export const PLANS = {
+  trial:   { name: 'ทดลองใช้ฟรี', tokens: 300,   days: 7,   price: 0 },
+  starter: { name: 'Starter',     tokens: 1500,  days: 30,  price: 290 },
+  pro:     { name: 'Pro',         tokens: 5000,  days: 30,  price: 790 },
+  studio:  { name: 'Studio',      tokens: 15000, days: 30,  price: 1990 },
+  owner:   { name: 'เจ้าของระบบ',  tokens: -1,    days: 3650, price: 0 }, // -1 = ไม่จำกัด
+};
+
+// ราคาโทเค็นต่อการกระทำ — สะท้อนต้นทุนจริงคร่าวๆ
+export const TOKEN_COST = {
+  outline: 1, prompts: 2, meta: 2, review: 2,
+  metricRead: 3, deepAnalysis: 5, plan: 6, rival: 8, productFit: 4,
+  other: 1,
+};
+
+const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function planOf(account) {
+  if (!account) return PLANS.trial;
+  if (account.isOwner) return PLANS.owner;
+  return PLANS[account.plan] || PLANS.trial;
+}
+
+// คืนสถานะโทเค็นปัจจุบัน พร้อมรีเซ็ตรอบใหม่อัตโนมัติเมื่อครบกำหนด
+export function tokenState(account) {
+  const plan = planOf(account);
+  const now = Date.now();
+  const cycleStart = account.cycleStart || account.createdAt || now;
+  const cycleLen = (plan.days || 30) * 24 * 60 * 60 * 1000;
+  const expired = now - cycleStart > cycleLen;
+  const used = expired ? 0 : (account.tokensUsed || 0);
+  const quota = plan.tokens === -1 ? Infinity : (plan.tokens + (account.bonusTokens || 0));
+  return {
+    plan, planKey: account.isOwner ? 'owner' : (account.plan || 'trial'),
+    unlimited: plan.tokens === -1,
+    quota, used, left: plan.tokens === -1 ? Infinity : Math.max(0, quota - used),
+    cycleStart: expired ? now : cycleStart,
+    cycleEnd: (expired ? now : cycleStart) + cycleLen,
+    expiredCycle: expired,
+    daysLeft: Math.max(0, Math.ceil(((expired ? now : cycleStart) + cycleLen - now) / 86400000)),
+  };
+}
+
+// หักโทเค็น — คืน { ok, left } ถ้าไม่พอจะคืน ok:false
+export async function spendTokens(email, action, amount) {
+  const cost = amount != null ? amount : (TOKEN_COST[action] || 1);
+  const accounts = (await redisGet('accounts')) || [];
+  const idx = accounts.findIndex((a) => a.email === email);
+  if (idx === -1) return { ok: false, error: 'ไม่พบบัญชี' };
+  const st = tokenState(accounts[idx]);
+  if (st.unlimited) {
+    accounts[idx].tokensUsed = (st.expiredCycle ? 0 : (accounts[idx].tokensUsed || 0)) + cost;
+    accounts[idx].cycleStart = st.cycleStart;
+    accounts[idx].lastUsedAt = Date.now();
+    await redisSet('accounts', accounts);
+    return { ok: true, left: Infinity, unlimited: true, spent: cost };
+  }
+  if (st.left < cost) return { ok: false, error: 'โทเค็นไม่พอ', left: st.left, needed: cost };
+  accounts[idx].tokensUsed = st.used + cost;
+  accounts[idx].cycleStart = st.cycleStart;
+  accounts[idx].lastUsedAt = Date.now();
+  await redisSet('accounts', accounts);
+  await bumpUsageStat(email, action, cost);
+  return { ok: true, left: st.left - cost, spent: cost };
+}
+
+// สถิติการใช้งานรายคน รายวัน (ให้เจ้าของระบบดูได้)
+export async function bumpUsageStat(email, action, cost) {
+  try {
+    const day = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+    const stats = (await redisGet('usage_stats')) || {};
+    if (!stats[day]) stats[day] = {};
+    if (!stats[day][email]) stats[day][email] = { total: 0, actions: {} };
+    stats[day][email].total += cost;
+    stats[day][email].actions[action] = (stats[day][email].actions[action] || 0) + cost;
+    // เก็บ 90 วันล่าสุด
+    const days = Object.keys(stats).sort();
+    if (days.length > 90) days.slice(0, days.length - 90).forEach((d) => delete stats[d]);
+    await redisSet('usage_stats', stats);
+  } catch (e) {}
+}
+
+export async function getUsageStats() {
+  return (await redisGet('usage_stats')) || {};
+}
+
+// ---------- คิวเรียก AI ฝั่งเซิร์ฟเวอร์ ----------
+// กันผู้ใช้หลายคนยิงพร้อมกันจนชนลิมิตของคีย์กลาง
+export async function reserveAiSlot(maxPerMin) {
+  const limit = maxPerMin || 4;
+  const now = Date.now();
+  const hits = ((await redisGet('ai_slots')) || []).filter((t) => now - t < 60000);
+  if (hits.length >= limit) {
+    const waitMs = 60000 - (now - hits[0]);
+    return { ok: false, waitSec: Math.ceil(waitMs / 1000) };
+  }
+  hits.push(now);
+  await redisSet('ai_slots', hits);
+  return { ok: true };
+}
+
+// ---------- กันสมัครใหม่วนซ้ำ ----------
+const DISPOSABLE = ['10minutemail','tempmail','guerrillamail','mailinator','yopmail','throwawaymail','trashmail','sharklasers','maildrop','getnada','temp-mail','fakeinbox','dispostable'];
+
+export function isDisposableEmail(email) {
+  const d = String(email || '').split('@')[1] || '';
+  return DISPOSABLE.some((x) => d.toLowerCase().includes(x));
+}
+
+// จำ "ลายนิ้วมือ" ของคนที่เคยสมัครแล้ว — สมัครซ้ำจากเครื่อง/IP เดิมจะโดนปฏิเสธ
+export async function checkSignupAbuse(ip, fingerprint) {
+  const list = (await redisGet('signup_marks') || []);
+  const now = Date.now();
+  const recent = list.filter((m) => now - m.at < 180 * 24 * 3600 * 1000);
+  const byIp = recent.filter((m) => m.ip === ip).length;
+  const byFp = fingerprint ? recent.filter((m) => m.fp === fingerprint).length : 0;
+  if (byFp >= 1) return { blocked: true, reason: 'อุปกรณ์นี้เคยสมัครบัญชีทดลองใช้ไปแล้ว' };
+  if (byIp >= 3) return { blocked: true, reason: 'เครือข่ายนี้สมัครบัญชีครบจำนวนที่กำหนดแล้ว' };
+  return { blocked: false };
+}
+
+export async function markSignup(ip, fingerprint, email) {
+  const list = (await redisGet('signup_marks') || []);
+  list.push({ ip, fp: fingerprint || null, email, at: Date.now() });
+  await redisSet('signup_marks', list.slice(-500));
+}
+
+// ---------- ระบบล็อกเว็บ (Gatekeeper) ----------
+// โหมด: open = ใครก็สมัคร/เข้าได้, invite = เฉพาะคนที่อยู่ในรายชื่อ, closed = ปิดทั้งเว็บ (เจ้าของยังเข้าได้)
+export async function getGate() {
+  const g = (await redisGet('gate')) || {};
+  return {
+    mode: g.mode || 'invite',
+    allowList: Array.isArray(g.allowList) ? g.allowList : [],
+    inviteCodes: Array.isArray(g.inviteCodes) ? g.inviteCodes : [],
+    closedMessage: g.closedMessage || 'ระบบปิดปรับปรุงชั่วคราว กรุณากลับมาใหม่ภายหลัง',
+    maxAccounts: typeof g.maxAccounts === 'number' ? g.maxAccounts : 10,
+  };
+}
+
+export async function saveGate(gate) {
+  await redisSet('gate', gate);
+}
+
+// ตรวจว่าอีเมลนี้ได้รับอนุญาตให้สมัคร/เข้าใช้หรือไม่
+export async function gateCheck(email, account, inviteCode) {
+  const gate = await getGate();
+  if (account && account.isOwner) return { allowed: true, gate };   // เจ้าของเข้าได้เสมอ
+  if (gate.mode === 'open') return { allowed: true, gate };
+  if (gate.mode === 'closed') return { allowed: false, reason: gate.closedMessage, gate };
+  // invite mode
+  const em = String(email || '').toLowerCase();
+  if (gate.allowList.some((e) => String(e).toLowerCase() === em)) return { allowed: true, gate };
+  if (inviteCode) {
+    const hit = gate.inviteCodes.find((c) => c.code === String(inviteCode).trim().toUpperCase() && !c.usedBy);
+    if (hit) return { allowed: true, gate, viaCode: hit.code };
+  }
+  return { allowed: false, reason: 'เว็บไซต์นี้เปิดให้เฉพาะผู้ที่ได้รับเชิญ — กรุณากรอกรหัสเชิญ หรือติดต่อผู้ดูแลระบบ', gate, needCode: true };
+}
+
+export async function consumeInviteCode(code, email) {
+  const gate = await getGate();
+  const next = gate.inviteCodes.map((c) => (c.code === String(code).toUpperCase() ? { ...c, usedBy: email, usedAt: Date.now() } : c));
+  await saveGate({ ...gate, inviteCodes: next });
+}
+
+export function makeInviteCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return `${out.slice(0, 4)}-${out.slice(4)}`;
 }
