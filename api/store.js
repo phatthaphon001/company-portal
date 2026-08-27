@@ -1,6 +1,6 @@
 import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, logActivity, autoBackup } from './_lib.js';
 
-const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans'];
+const ALLOWED_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads'];
 
 export default async function handler(req, res) {
   if (!redisReady()) {
