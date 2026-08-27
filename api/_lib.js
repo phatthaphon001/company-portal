@@ -417,3 +417,76 @@ export async function updateTicket(id, patch) {
   await redisSet('tickets', next);
   return next;
 }
+
+// ---------- ระบบเปิด/ปิดฟีเจอร์รายตัว (เจ้าของระบบคุมได้) ----------
+export const FEATURE_DEFS = {
+  pages: {
+    calendar:  { label: 'ปฏิทิน', def: true },
+    directory: { label: 'Directory (แผนก)', def: false },
+    platforms: { label: 'เชื่อมต่อแพลตฟอร์ม', def: false },
+    analytics: { label: 'ศูนย์วิเคราะห์', def: true },
+    kpi:       { label: 'KPI / รายเดือน', def: true },
+    security:  { label: 'Protocol (ความปลอดภัย)', def: false },
+  },
+  analyticsTabs: {
+    stats:   { label: 'สถิติผลงาน', def: true },
+    plan:    { label: 'แผน & กลยุทธ์', def: true },
+    ads:     { label: 'ยิงแอด & ROAS', def: true },
+    rival:   { label: 'ถอดสูตรคู่แข่ง', def: true },
+    product: { label: 'วิเคราะห์สินค้า', def: true },
+  },
+  departments: {
+    content:   { label: 'ฝ่ายคอนเทนต์', def: true },
+    rnd:       { label: 'ฝ่ายวิจัย/วิเคราะห์', def: false },
+    marketing: { label: 'ฝ่ายการตลาด', def: true },
+    sales:     { label: 'ฝ่ายขาย', def: true },
+    qc:        { label: 'ฝ่าย QC', def: false },
+    hr:        { label: 'ฝ่ายบุคคล', def: false },
+    finance:   { label: 'ฝ่ายการเงิน', def: false },
+  },
+};
+
+function defaultFeatures() {
+  const out = {};
+  for (const group of Object.keys(FEATURE_DEFS)) {
+    out[group] = {};
+    for (const [k, v] of Object.entries(FEATURE_DEFS[group])) out[group][k] = v.def;
+  }
+  return out;
+}
+
+export async function getFeatures() {
+  const saved = (await redisGet('features')) || {};
+  const base = defaultFeatures();
+  for (const group of Object.keys(base)) {
+    if (saved[group]) base[group] = { ...base[group], ...saved[group] };
+  }
+  return base;
+}
+
+export async function saveFeatures(next) {
+  await redisSet('features', next);
+}
+
+// ---------- ติดตามสถานะผู้ใช้แบบเรียลไทม์ ----------
+export async function touchPresence(email, page, note) {
+  try {
+    const p = (await redisGet('presence')) || {};
+    p[email] = { at: Date.now(), page: page || null, note: note || null };
+    // ล้างคนที่หายไปเกิน 1 วัน
+    const cutoff = Date.now() - 24 * 3600 * 1000;
+    for (const k of Object.keys(p)) if (p[k].at < cutoff) delete p[k];
+    await redisSet('presence', p);
+  } catch (e) {}
+}
+export async function getPresence() { return (await redisGet('presence')) || {}; }
+
+// บันทึกสิ่งที่ผู้ใช้ทำ (feed แบบละเอียด ให้เจ้าของดูย้อนหลังได้)
+export async function pushFeed(entry) {
+  try {
+    const f = (await redisGet('activity_feed')) || [];
+    f.push({ ...entry, at: Date.now() });
+    await redisSet('activity_feed', f.slice(-500));
+  } catch (e) {}
+}
+export async function getFeed() { return (await redisGet('activity_feed')) || []; }
