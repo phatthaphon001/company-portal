@@ -225,11 +225,34 @@ function callClaude(system, content, images, action) {
   return run;
 }
 
-// อ่านไฟล์รูปเป็น base64 (ไม่รวม prefix "data:image/...;base64,") สำหรับส่งให้ AI วิเคราะห์
+// อ่านไฟล์รูปเป็น base64 พร้อมย่อขนาดก่อนส่ง
+// รูปจากมือถือมักใหญ่ 4-8MB ถ้าส่งดิบๆ หลายใบพร้อมกันคำขอจะล้มเหลว
+const MAX_IMG_SIDE = 1400;
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, MAX_IMG_SIDE / Math.max(img.width, img.height));
+          if (scale >= 1 && dataUrl.length < 1_400_000) {
+            resolve(dataUrl.split(',')[1] || '');
+            return;
+          }
+          const cv = document.createElement('canvas');
+          cv.width = Math.round(img.width * scale);
+          cv.height = Math.round(img.height * scale);
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL('image/jpeg', 0.82).split(',')[1] || '');
+        } catch (e) {
+          resolve(dataUrl.split(',')[1] || '');
+        }
+      };
+      img.onerror = () => resolve(dataUrl.split(',')[1] || '');
+      img.src = dataUrl;
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
@@ -2241,7 +2264,7 @@ function CompetitorIntel({ rivals, setRivals, channels, showToast }) {
         `ยอดของคลิปเขา: ${rivalStats.trim() || 'ไม่ระบุ'}\n\n` +
         `ช่องของผมที่จะเอาไปทำ: ${ch ? ch.name : 'ไม่ระบุ'}\n` +
         `แนวคอนเทนต์ช่องผม: คอนเทนต์ AI เสมือนจริง`,
-        images.map((im) => ({ mimeType: im.mimeType, data: im.base64 })));
+        images.map((im) => ({ mimeType: im.mimeType, data: im.base64 })), 'rival');
       const json = parseJsonLoose(text);
       const entry = {
         id: `${Date.now()}`, at: Date.now(), date: todayDateStr(),
@@ -2489,7 +2512,7 @@ function ProductFitPanel({ channels, showToast }) {
     try {
       const text = await callClaude(PRODUCT_FIT_SYS,
         `สินค้า: ${name.trim()}\nราคา: ${price.trim() || 'ไม่ระบุ'}\nค่าคอม: ${commission.trim() || 'ไม่ระบุ'}\nรายละเอียด: ${detail.trim() || 'ดูจากรูป'}\n\nช่องที่จะเอาไปขาย: ${ch ? ch.name : 'ไม่ระบุ'}\nแพลตฟอร์ม: ${platform}\nแนวช่อง: คอนเทนต์ AI เสมือนจริง`,
-        img ? [{ mimeType: img.mimeType, data: img.base64 }] : undefined);
+        img ? [{ mimeType: img.mimeType, data: img.base64 }] : undefined, 'productFit');
       setRes(parseJsonLoose(text));
     } catch (e) { setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`); }
     setBusy(false);
@@ -2624,7 +2647,7 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
         `CEO สั่งแก้ดังนี้: ${ceoNote.trim()}\n\n` +
         (myPlan.trim() ? `แผนที่ CEO ร่างไว้เอง (ให้นำมาผสาน): ${myPlan.trim()}\n\n` : '') +
         `ช่วงเวลา: ${active.horizonLabel}\nเป้าหมายเดิม: ${active.goal}\n\nข้อมูลฐาน:\n${baselineSummary()}\n\n` +
-        `กรุณาปรับแผนใหม่ตามที่ CEO สั่ง แต่ยังต้องอิงข้อมูลจริง ถ้าสิ่งที่ CEO สั่งเสี่ยงหรือไม่สมเหตุสมผล ให้เตือนไว้ใน risks`);
+        `กรุณาปรับแผนใหม่ตามที่ CEO สั่ง แต่ยังต้องอิงข้อมูลจริง ถ้าสิ่งที่ CEO สั่งเสี่ยงหรือไม่สมเหตุสมผล ให้เตือนไว้ใน risks`, undefined, 'plan');
       const json = parseJsonLoose(text);
       setPlans((Array.isArray(plans) ? plans : []).map((p) => (p.id === active.id
         ? { ...p, data: json, revisions: [...(p.revisions || []), { at: Date.now(), note: ceoNote.trim(), prev: active.data }].slice(-10) }
@@ -2656,7 +2679,7 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
     setCreating(true); setErr('');
     const h = HORIZONS.find((x) => x.key === horizon);
     try {
-      const text = await callClaude(PLAN_SYS, `ช่วงเวลาของแผน: ${h.label} (${h.days} วัน)\nเป้าหมายที่ผมต้องการ: ${goal.trim()}\n${myPlan.trim() ? `\nแผนที่ CEO ร่างไว้เอง (ให้นำมาผสาน): ${myPlan.trim()}\n` : ''}\nข้อมูลฐานปัจจุบัน:\n${baselineSummary()}`);
+      const text = await callClaude(PLAN_SYS, `ช่วงเวลาของแผน: ${h.label} (${h.days} วัน)\nเป้าหมายที่ผมต้องการ: ${goal.trim()}\n${myPlan.trim() ? `\nแผนที่ CEO ร่างไว้เอง (ให้นำมาผสาน): ${myPlan.trim()}\n` : ''}\nข้อมูลฐานปัจจุบัน:\n${baselineSummary()}`, undefined, 'plan');
       const json = parseJsonLoose(text);
       const start = todayDateStr();
       const end = shiftDateStr(start, h.days);
@@ -2689,7 +2712,7 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
     const act = actualsFor(plan);
     const daysPassed = Math.max(1, Math.round((Date.now() - new Date(plan.startDate + 'T00:00:00')) / 86400000));
     try {
-      const text = await callClaude(PLAN_REVIEW_SYS, `แผน: ${plan.data.planName} (${plan.horizonLabel})\nเป้าหมายที่ตั้งไว้: ${JSON.stringify(plan.data.targets)}\nผ่านมาแล้ว ${daysPassed} จาก ${plan.days} วัน\n\nผลจริงถึงตอนนี้: ${JSON.stringify(act)}\n\nเป้าหมายที่ผู้ใช้ต้องการ: ${plan.goal}`);
+      const text = await callClaude(PLAN_REVIEW_SYS, `แผน: ${plan.data.planName} (${plan.horizonLabel})\nเป้าหมายที่ตั้งไว้: ${JSON.stringify(plan.data.targets)}\nผ่านมาแล้ว ${daysPassed} จาก ${plan.days} วัน\n\nผลจริงถึงตอนนี้: ${JSON.stringify(act)}\n\nเป้าหมายที่ผู้ใช้ต้องการ: ${plan.goal}`, undefined, 'plan');
       const json = parseJsonLoose(text);
       setPlans((Array.isArray(plans) ? plans : []).map((p) => (p.id === plan.id ? { ...p, checkpoints: [...(p.checkpoints || []), { at: Date.now(), daysPassed, actual: act, review: json }].slice(-20) } : p)));
     } catch (e) {
@@ -3098,7 +3121,7 @@ function StatsPanel({ history, tasks, channels, metrics, setMetrics }) {
       const im = targets[i];
       setImages((prev) => prev.map((x) => (x.id === im.id ? { ...x, status: 'reading' } : x)));
       try {
-        const text = await callClaude(METRIC_EXTRACT_SYS, 'อ่านตัวเลขทั้งหมดจากภาพหน้าจอสถิตินี้', [{ mimeType: im.mimeType, data: im.base64 }]);
+        const text = await callClaude(METRIC_EXTRACT_SYS, 'อ่านตัวเลขทั้งหมดจากภาพหน้าจอสถิตินี้', [{ mimeType: im.mimeType, data: im.base64 }], 'metricRead');
         const json = parseJsonLoose(text);
         const entry = {
           id: im.id,
@@ -3133,7 +3156,7 @@ function StatsPanel({ history, tasks, channels, metrics, setMetrics }) {
       ...m.metrics, engagementRate: engagementRate(m.metrics),
     }));
     try {
-      const text = await callClaude(DEEP_ANALYSIS_SYS, `ข้อมูลสถิติจริงจากหน้า insights (${payload.length} รายการ):\n${JSON.stringify(payload, null, 1)}`);
+      const text = await callClaude(DEEP_ANALYSIS_SYS, `ข้อมูลสถิติจริงจากหน้า insights (${payload.length} รายการ):\n${JSON.stringify(payload, null, 1)}`, undefined, 'deepAnalysis');
       setDeep(parseJsonLoose(text));
     } catch (e) {
       setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`);
@@ -3510,6 +3533,83 @@ const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ---------- ถังขยะ: เก็บของที่ลบไว้ 30 วัน กู้คืนได้ ----------
 // ---------- ตั้งค่าคีย์ Gemini ส่วนตัว ----------
+// ---------- พาผู้ใช้ใหม่เริ่มต้น ----------
+function OnboardingCard({ user, tokens, channels, onGoSettings, onGoDaily, onDismiss }) {
+  const steps = [
+    { done: !!user.hasGeminiKey, label: 'ใส่คีย์ AI ของตัวเอง', desc: 'ฟรี ใช้เวลา 2 นาที — ได้ใช้ AI ไม่จำกัด ไม่เสียโทเค็น', action: onGoSettings, cta: 'ไปตั้งค่า' },
+    { done: channels.length > 0, label: 'สร้างช่อง/เพจแรก', desc: 'บอกว่าแต่ละวันต้องลงวิดีโอ/รูปกี่ชิ้น ระบบจะสร้างงานให้อัตโนมัติ', action: onGoDaily, cta: 'ไปสร้างช่อง' },
+    { done: channels.length > 0 && (tokens?.used || 0) > 0, label: 'ลองให้ AI คิดโครงเรื่องให้', desc: 'กดปุ่ม "ให้ AI คิดโครงเรื่องให้" ในงานชิ้นแรก', action: onGoDaily, cta: 'ไปลองใช้' },
+  ];
+  const doneCount = steps.filter((s) => s.done).length;
+  if (doneCount === steps.length) return null;
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.blue}55` }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Sparkles size={14} style={{ color: C.blue }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>เริ่มต้นใช้งาน ({doneCount}/{steps.length})</span>
+        </div>
+        <button onClick={onDismiss} style={{ color: C.muted }}><X size={13} /></button>
+      </div>
+      <div className="mb-3" style={{ width: '100%', height: 4, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: `${(doneCount / steps.length) * 100}%`, height: '100%', background: `linear-gradient(90deg, ${C.blue}, ${C.emerald})`, transition: 'width .3s' }} />
+      </div>
+      <div className="space-y-2">
+        {steps.map((st, i) => (
+          <div key={i} className="flex items-start gap-2.5 p-2.5 rounded-xl" style={{ background: st.done ? 'transparent' : C.bgDeep, border: `1px solid ${st.done ? C.border : C.blue}33`, opacity: st.done ? 0.55 : 1 }}>
+            {st.done ? <CheckCircle2 size={15} style={{ color: C.emerald }} className="shrink-0 mt-0.5" /> : <span className="font-mono shrink-0 rounded-full flex items-center justify-center mt-0.5" style={{ width: 15, height: 15, background: C.blue, color: '#fff', fontSize: 9 }}>{i + 1}</span>}
+            <div className="min-w-0 flex-1">
+              <div className="font-body text-xs" style={{ color: C.text, textDecoration: st.done ? 'line-through' : 'none' }}>{st.label}</div>
+              <p className="font-body text-xs" style={{ color: C.muted }}>{st.desc}</p>
+            </div>
+            {!st.done && <button onClick={st.action} className="font-mono text-2xs px-2.5 py-1 rounded-lg shrink-0" style={{ background: C.blue, color: '#fff' }}>{st.cta}</button>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- ขอโทเค็นเพิ่ม / ขอความช่วยเหลือ ----------
+function SupportPanel({ user, tokens, showToast }) {
+  const [msg, setMsg] = useState('');
+  const [kind, setKind] = useState('tokens');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    if (!msg.trim()) return;
+    setBusy(true);
+    const { ok } = await apiPost('/api/auth', { action: 'sendSupport', kind, message: msg.trim() });
+    setBusy(false);
+    if (ok) { setSent(true); setMsg(''); showToast('ส่งถึงผู้ดูแลระบบแล้ว'); setTimeout(() => setSent(false), 4000); }
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-2 mb-2.5">
+        <Mail size={14} style={{ color: C.cyan }} />
+        <span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>ติดต่อผู้ดูแลระบบ</span>
+      </div>
+      <div className="flex gap-1.5 mb-2 flex-wrap">
+        {[
+          { k: 'tokens', label: 'ขอโทเค็นเพิ่ม' },
+          { k: 'bug', label: 'แจ้งปัญหา' },
+          { k: 'feature', label: 'ขอฟีเจอร์' },
+        ].map((t) => (
+          <button key={t.k} onClick={() => setKind(t.k)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: kind === t.k ? C.cyan : 'transparent', color: kind === t.k ? '#032' : C.muted, border: `1px solid ${kind === t.k ? 'transparent' : C.border}` }}>{t.label}</button>
+        ))}
+      </div>
+      <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} placeholder={kind === 'tokens' ? 'บอกว่าต้องใช้ทำอะไร ต้องการเท่าไหร่' : kind === 'bug' ? 'อธิบายปัญหาที่เจอ อยู่หน้าไหน กดอะไรแล้วเกิดอะไร' : 'อยากได้ฟีเจอร์อะไรเพิ่ม'} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y mb-2" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+      <button onClick={send} disabled={busy || !msg.trim()} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.cyan, color: '#032', opacity: (busy || !msg.trim()) ? 0.5 : 1 }}>
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} ส่ง
+      </button>
+      {sent && <p className="font-mono text-2xs mt-1.5" style={{ color: C.emerald }}>ส่งแล้ว ผู้ดูแลจะเห็นในศูนย์ควบคุม</p>}
+    </div>
+  );
+}
+
 function GeminiKeyPanel({ user, tokens, onSaved, showToast }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -3619,6 +3719,64 @@ function TokenMeter({ tokens, compact }) {
   );
 }
 
+// ---------- ขอความช่วยเหลือ / ขอโทเค็นเพิ่ม ----------
+function HelpPanel({ tokens, showToast }) {
+  const [kind, setKind] = useState('help');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [mine, setMine] = useState([]);
+
+  async function load() {
+    const { ok, data } = await apiPost('/api/auth', { action: 'myTickets' });
+    if (ok) setMine(data.tickets || []);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function send() {
+    if (!msg.trim()) return;
+    setBusy(true);
+    const { ok, data } = await apiPost('/api/auth', { action: 'submitTicket', kind, message: msg.trim() });
+    setBusy(false);
+    if (ok) { setMsg(''); showToast('ส่งคำขอแล้ว — ผู้ดูแลระบบจะเห็นทันที'); load(); }
+    else showToast(data.error || 'ส่งไม่สำเร็จ');
+  }
+
+  const low = tokens && !tokens.unlimited && tokens.left <= tokens.quota * 0.2;
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${low ? C.orange : C.border}` }}>
+      <div className="flex items-center gap-2 mb-2.5">
+        <Mail size={14} style={{ color: low ? C.orange : C.blue }} />
+        <span className="font-mono text-2xs tracking-widest" style={{ color: low ? C.orange : C.blue }}>ติดต่อผู้ดูแลระบบ</span>
+      </div>
+      {low && <p className="font-body text-xs mb-2 p-2 rounded-lg" style={{ color: C.orange, background: `${C.orange}12` }}>โทเค็นใกล้หมดแล้ว — ขอเพิ่มได้ที่นี่ หรือใส่คีย์ Gemini ของคุณเองเพื่อใช้ไม่จำกัด</p>}
+      <div className="flex gap-1.5 mb-2">
+        {[{ k: 'help', l: 'ขอความช่วยเหลือ' }, { k: 'tokens', l: 'ขอโทเค็นเพิ่ม' }].map((o) => (
+          <button key={o.k} onClick={() => setKind(o.k)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: kind === o.k ? BRAND : 'transparent', color: kind === o.k ? '#fff' : C.muted, border: `1px solid ${kind === o.k ? 'transparent' : C.border}` }}>{o.l}</button>
+        ))}
+      </div>
+      <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={3} placeholder={kind === 'tokens' ? 'บอกเหตุผลที่ต้องใช้เพิ่ม เช่น ทำคลิป 20 ชิ้นวันนี้' : 'ติดปัญหาอะไร บอกมาได้เลย'} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y mb-2" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+      <button onClick={send} disabled={busy || !msg.trim()} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: BRAND, color: '#fff', opacity: (busy || !msg.trim()) ? 0.5 : 1 }}>
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Mail size={11} />} ส่งคำขอ
+      </button>
+      {mine.length > 0 && (
+        <div className="mt-3 space-y-1.5 max-h-48 overflow-y-auto">
+          {mine.map((t) => (
+            <div key={t.id} className="p-2.5 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="font-mono px-1.5 rounded" style={{ fontSize: 9, color: t.status === 'open' ? C.orange : C.emerald, border: `1px solid ${t.status === 'open' ? C.orange : C.emerald}` }}>{t.status === 'open' ? 'รอตอบ' : 'ตอบแล้ว'}</span>
+                <span className="font-mono" style={{ fontSize: 10, color: C.muted }}>{new Date(t.at).toLocaleString('th-TH')}</span>
+              </div>
+              <p className="font-body text-xs" style={{ color: C.text }}>{t.message}</p>
+              {t.reply && <p className="font-body text-xs mt-1 p-1.5 rounded" style={{ color: C.emerald, background: `${C.emerald}10` }}>ตอบกลับ: {t.reply}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- แผงเจ้าของระบบ: ผู้ใช้ / โทเค็น / งบการเงิน ----------
 function OwnerConsole({ user, showToast }) {
   const [tab, setTab] = useState('users');
@@ -3630,6 +3788,8 @@ function OwnerConsole({ user, showToast }) {
   const [gate, setGate] = useState(null);
   const [allowEmail, setAllowEmail] = useState('');
   const [codeNote, setCodeNote] = useState('');
+  const [tickets, setTickets] = useState([]);
+  const [reply, setReply] = useState({});
 
   async function load() {
     const a = await apiPost('/api/auth', { action: 'adminUsers' });
@@ -3638,6 +3798,8 @@ function OwnerConsole({ user, showToast }) {
     if (b.ok) setStats(b.data.stats || {});
     const g = await apiPost('/api/auth', { action: 'getGate' });
     if (g.ok) setGate(g.data.gate);
+    const tk = await apiPost('/api/auth', { action: 'adminTickets' });
+    if (tk.ok) setTickets(tk.data.tickets || []);
   }
   useEffect(() => { if (user.isOwner) load(); }, [user.isOwner]);
   if (!user.isOwner) return null;
@@ -3672,6 +3834,13 @@ function OwnerConsole({ user, showToast }) {
   const profit = revenue - aiCost;
   const trendData = last30.map((d) => ({ d: d.slice(5), t: Object.values(stats[d] || {}).reduce((a, u) => a + u.total, 0) }));
 
+  const openTickets = tickets.filter((t) => t.status === 'open').length;
+
+  async function replyTicket(id) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'adminReplyTicket', id, reply: reply[id] || '', status: 'closed' });
+    if (ok) { setTickets(data.tickets || []); setReply((r) => ({ ...r, [id]: '' })); showToast('ตอบกลับแล้ว'); }
+  }
+
   async function setGateMode(mode) {
     const { ok, data } = await apiPost('/api/auth', { action: 'saveGate', mode });
     if (ok) { setGate(data.gate); showToast(mode === 'open' ? 'เปิดให้ทุกคนเข้าใช้แล้ว' : mode === 'closed' ? 'ปิดเว็บแล้ว (คุณยังเข้าได้)' : 'เปิดเฉพาะคนที่ได้รับเชิญ'); }
@@ -3699,6 +3868,7 @@ function OwnerConsole({ user, showToast }) {
   }
 
   const TABS = [
+    { key: 'tickets', label: `กล่องข้อความ${openTickets ? ` (${openTickets})` : ''}` },
     { key: 'gate', label: 'ล็อกเว็บ' },
     { key: 'users', label: `ผู้ใช้ (${users.length})` },
     { key: 'finance', label: 'งบการเงิน' },
@@ -3719,6 +3889,31 @@ function OwnerConsole({ user, showToast }) {
           <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: tab === t.key ? C.violet : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>{t.label}</button>
         ))}
       </div>
+
+      {tab === 'tickets' && (
+        tickets.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อความ</p> : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {tickets.map((t) => (
+              <div key={t.id} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${t.status === 'open' ? C.orange : C.border}` }}>
+                <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                  <span className="font-mono px-1.5 rounded" style={{ fontSize: 9, color: t.kind === 'tokens' ? C.violet : C.blue, border: `1px solid ${t.kind === 'tokens' ? C.violet : C.blue}` }}>{t.kind === 'tokens' ? 'ขอโทเค็น' : 'ขอความช่วยเหลือ'}</span>
+                  <span className="font-body text-xs" style={{ color: C.text }}>{t.name}</span>
+                  <span className="font-mono" style={{ fontSize: 10, color: C.muted }}>{t.email} · {new Date(t.at).toLocaleString('th-TH')}</span>
+                </div>
+                <p className="font-body text-xs mb-2" style={{ color: C.text }}>{t.message}</p>
+                {t.reply ? (
+                  <p className="font-body text-xs p-1.5 rounded" style={{ color: C.emerald, background: `${C.emerald}10` }}>คุณตอบ: {t.reply}</p>
+                ) : (
+                  <div className="flex gap-1.5 flex-wrap">
+                    <input value={reply[t.id] || ''} onChange={(e) => setReply((r) => ({ ...r, [t.id]: e.target.value }))} placeholder="ตอบกลับ..." className="flex-1 min-w-[140px] px-2 py-1.5 font-body text-xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                    <button onClick={() => replyTicket(t.id)} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ background: C.emerald, color: '#062' }}>ตอบ + ปิด</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )
+      )}
 
       {tab === 'gate' && (
         gate == null ? <p className="font-body text-xs" style={{ color: C.muted }}>กำลังโหลด...</p> : (
@@ -3972,7 +4167,7 @@ function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
 
     // AI ใช้งานได้ไหม
     try {
-      await callClaude('ตอบสั้นๆ ว่า OK', 'ping');
+      await callClaude('ตอบสั้นๆ ว่า OK', 'ping', undefined, 'other');
       add('เชื่อมต่อ AI (Gemini)', true, 'เรียกใช้งานได้ปกติ');
     } catch (e) {
       const rate = /ถี่เกินไป|quota|rate/i.test(e.message || '');
@@ -4069,6 +4264,7 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
       <OwnerConsole user={user} showToast={showToast} />
       <TokenMeter tokens={tokens} />
       <GeminiKeyPanel user={user} tokens={tokens} onSaved={refreshMe} showToast={showToast} />
+      <HelpPanel tokens={tokens} showToast={showToast} />
       <HealthCheckPanel channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />
       <TrashPanel trash={trash} onRestore={onRestoreTrash} onPurge={onPurgeTrash} onEmpty={onEmptyTrash} />
 
@@ -5065,7 +5261,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     const templateLinkList = (task.templateLinks || []).map((l) => l.trim()).filter(Boolean);
     const templateLine = templateLinkList.length ? `\nลิงก์วิดีโอ/โพสต์ต้นแบบอ้างอิง (ยึดแนวสไตล์ตามนี้): ${templateLinkList.join(' , ')}` : '';
     try {
-      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${templateLine}${avoidText}`);
+      const text = await callClaude(OUTLINE_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nประเภทงาน: ${task.type === 'video' ? 'วิดีโอ' : 'รูปภาพ'}${styleLine}${templateLine}${avoidText}`, undefined, 'outline');
       const outline = text.trim();
       updateTaskField(task.id, { outline });
       return outline;
@@ -5087,7 +5283,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     const durationLine = task.type === 'video' ? `\nความยาว: ${task.durationSec} วินาที\nจำนวนฉากที่ควรแบ่ง: ${sceneCount} ฉาก` : '';
     const styleLine = task.styleTemplate.trim() ? `\nเทมเพลต/สไตล์อ้างอิง: ${task.styleTemplate.trim()}` : '';
     try {
-      const text = await callClaude(sys, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}${durationLine}${styleLine}`);
+      const text = await callClaude(sys, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}${durationLine}${styleLine}`, undefined, 'prompts');
       const json = parseJsonLoose(text) || {};
       updateTaskField(task.id, {
         videoPrompt: json.videoPrompt || task.videoPrompt,
@@ -5112,7 +5308,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     updateTaskField(task.id, { lastError: '' });
     const channel = channels.find((c) => c.id === task.channelId);
     try {
-      const text = await callClaude(META_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}`);
+      const text = await callClaude(META_SYS, `ช่อง/เพจ: ${channel.name} (${PLATFORM_META[task.platform].label})\nโครงเรื่อง: ${outline}`, undefined, 'meta');
       const json = parseJsonLoose(text) || {};
       updateTaskField(task.id, {
         titleTh: json.titleTh || json.title || '', titleEn: json.titleEn || '', titleZh: json.titleZh || '',
@@ -5133,7 +5329,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
       ? `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์วิดีโอ: ${task.videoPrompt || '-'}\nพรอมต์หน้าปก: ${task.coverPrompt || '-'}\nชื่อคลิป: ${task.titleTh || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`
       : `โครงเรื่อง: ${task.outline || '-'}\nพรอมต์รูปภาพ: ${task.imagePrompt || '-'}\nชื่อโพสต์: ${task.titleTh || '-'}\nคำบรรยาย: ${task.captionTh || '-'}\nลิงก์ที่ส่ง: ${task.link}`;
     try {
-      const text = await callClaude(sys, summary);
+      const text = await callClaude(sys, summary, undefined, 'prompts');
       const passed = text.trim().startsWith('ผ่าน');
       updateTaskField(task.id, { qc: { passed, text } });
     } catch (e) {
@@ -5168,7 +5364,7 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     const channel = channels.find((c) => c.id === task.channelId);
     const sys = 'คุณคือหัวหน้าฝ่ายผลิตคอนเทนต์ ผมจะให้ผลตรวจคลิปที่ได้จาก AI อีกตัวมา ให้คุณสรุปเป็นภาษาไทยแบบสั้น กระชับ ใช้งานได้จริง ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"score": ตัวเลข 1-10, "summary": "สรุป 2-4 บรรทัด บอกว่าผ่านหรือควรทำใหม่ และสิ่งที่ต้องแก้ครั้งหน้าเป็นข้อๆ", "promptFix": "ข้อความสั้นๆ บอกว่าควรเพิ่ม/ตัดอะไรใน Prompt ครั้งหน้า"}';
     try {
-      const text = await callClaude(sys, `ช่อง: ${channel ? channel.name : '-'}\nงาน: ${task.label}\nโครงเรื่องที่วางไว้: ${task.outline || '-'}\n\nผลตรวจจาก Gemini:\n${task.geminiReview}`);
+      const text = await callClaude(sys, `ช่อง: ${channel ? channel.name : '-'}\nงาน: ${task.label}\nโครงเรื่องที่วางไว้: ${task.outline || '-'}\n\nผลตรวจจาก Gemini:\n${task.geminiReview}`, undefined, 'review');
       const json = parseJsonLoose(text);
       const rawScore = Number(json.score);
       const score = Number.isFinite(rawScore) ? Math.max(1, Math.min(10, Math.round(rawScore))) : null;
