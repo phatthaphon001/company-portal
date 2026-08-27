@@ -8,6 +8,8 @@ import {
   isDisposableEmail, checkSignupAbuse, markSignup,
   getGate, saveGate, gateCheck, consumeInviteCode, makeInviteCode,
   addTicket, listTickets, updateTicket,
+  getFeatures, saveFeatures, FEATURE_DEFS,
+  touchPresence, getPresence, pushFeed, getFeed,
 } from './_lib.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -108,6 +110,7 @@ export default async function handler(req, res) {
         tokensUsed: 0,
         bonusTokens: 0,
         cycleStart: Date.now(),
+        birthDate: String(req.body.birthDate || '').slice(0, 10) || null,
         signupIp: ip,
         signupFp: fp || null,
       };
@@ -149,7 +152,8 @@ export default async function handler(req, res) {
       await saveAccounts(accounts);
 
       const security = await getSecurity();
-      const requireOtp = !accounts[idx].otpExempt && (security.forceOtpAlways || loginCount > 6);
+      // ปิดยืนยันอีเมลทั้งระบบได้ (ใช้ตอนยังไม่ได้ยืนยันโดเมนกับผู้ให้บริการอีเมล)
+      const requireOtp = !security.otpDisabled && !accounts[idx].otpExempt && (security.forceOtpAlways || loginCount > 6);
 
       // ต้องยืนยัน OTP ก่อน จึงยังไม่ออกโทเค็นให้
       if (requireOtp) {
@@ -192,7 +196,10 @@ export default async function handler(req, res) {
     const { account: me, accounts } = session;
 
     if (action === 'me') {
-      return res.status(200).json({ account: sanitize(me), tokens: tokenState(me), plans: PLANS, tokenCost: TOKEN_COST });
+      return res.status(200).json({
+        account: sanitize(me), tokens: tokenState(me), plans: PLANS, tokenCost: TOKEN_COST,
+        features: await getFeatures(),
+      });
     }
 
     // ---- คีย์ Gemini ส่วนตัวของผู้ใช้ ----
@@ -232,7 +239,11 @@ export default async function handler(req, res) {
 
     if (action === 'updateSecurity') {
       if (me.clearance !== 3) return res.status(403).json({ error: 'เฉพาะระดับสูงสุดเท่านั้น' });
-      const security = { forceOtpAlways: !!req.body.forceOtpAlways };
+      const cur = await getSecurity();
+      const security = {
+        forceOtpAlways: req.body.forceOtpAlways != null ? !!req.body.forceOtpAlways : !!cur.forceOtpAlways,
+        otpDisabled: req.body.otpDisabled != null ? !!req.body.otpDisabled : !!cur.otpDisabled,
+      };
       await saveSecurity(security);
       return res.status(200).json({ security });
     }
@@ -328,6 +339,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ tickets: next.slice(-100).reverse() });
     }
 
+    // ---------- เจ้าของระบบ: เปิด/ปิดฟีเจอร์ ----------
+    if (action === 'getFeatures') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({ features: await getFeatures(), defs: FEATURE_DEFS });
+    }
+    if (action === 'saveFeatures') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const cur = await getFeatures();
+      const { group, key, value } = req.body;
+      if (!cur[group] || !(key in cur[group])) return res.status(400).json({ error: 'ฟีเจอร์ไม่ถูกต้อง' });
+      cur[group][key] = !!value;
+      await saveFeatures(cur);
+      await logActivity({ type: 'feature_toggle', group, key, value: !!value, by: me.email });
+      return res.status(200).json({ features: cur });
+    }
+
     // ---------- เจ้าของระบบ: ล็อกเว็บ ----------
     if (action === 'getGate') {
       if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
@@ -413,6 +440,39 @@ export default async function handler(req, res) {
       accounts[idx].cycleStart = Date.now();
       await saveAccounts(accounts);
       await logActivity({ type: 'set_plan', target: email, plan, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'adminSetOtpExempt') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { email, exempt } = req.body;
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      accounts[idx].otpExempt = !!exempt;
+      await saveAccounts(accounts);
+      await logActivity({ type: 'otp_exempt', target: email, exempt: !!exempt, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'presence') {
+      await touchPresence(me.email, req.body.page, req.body.note);
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'adminPresence') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({ presence: await getPresence(), feed: (await getFeed()).slice(-120).reverse() });
+    }
+    if (action === 'adminResetPassword') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { email, newPassword } = req.body;
+      if (!newPassword || String(newPassword).length < 8) return res.status(400).json({ error: 'รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัว' });
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      const { salt, hash } = hashPassword(newPassword);
+      accounts[idx].passwordSalt = salt;
+      accounts[idx].passwordHash = hash;
+      delete accounts[idx].password;
+      accounts[idx].sessionsValidFrom = Date.now();
+      await saveAccounts(accounts);
+      await logActivity({ type: 'password_reset_by_owner', target: email, by: me.email });
       return res.status(200).json({ ok: true });
     }
     if (action === 'adminSuspend') {
