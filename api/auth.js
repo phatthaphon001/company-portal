@@ -7,6 +7,7 @@ import {
   PLANS, TOKEN_COST, planOf, tokenState, getUsageStats,
   isDisposableEmail, checkSignupAbuse, markSignup,
   getGate, saveGate, gateCheck, consumeInviteCode, makeInviteCode,
+  addTicket, listTickets, updateTicket,
 } from './_lib.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -303,6 +304,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ accounts: kept.map(sanitize) });
     }
 
+    // ---------- คำขอความช่วยเหลือ / ขอโทเค็นเพิ่ม ----------
+    if (action === 'submitTicket') {
+      const { kind, message } = req.body;
+      if (!message || !String(message).trim()) return res.status(400).json({ error: 'กรุณาพิมพ์ข้อความ' });
+      const rl = await rateLimit(`ticket_${me.email}`, 5, 60 * 60 * 1000);
+      if (!rl.allowed) return res.status(429).json({ error: `ส่งคำขอถี่เกินไป ลองใหม่ใน ${Math.ceil(rl.retrySec / 60)} นาที` });
+      const t = await addTicket({ kind: kind === 'tokens' ? 'tokens' : 'help', email: me.email, name: me.name, message: String(message).slice(0, 1000) });
+      await logActivity({ type: 'ticket', email: me.email, kind });
+      return res.status(200).json({ ok: true, ticket: t });
+    }
+    if (action === 'myTickets') {
+      const all = await listTickets();
+      return res.status(200).json({ tickets: all.filter((t) => t.email === me.email).slice(-20).reverse() });
+    }
+    if (action === 'adminTickets') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({ tickets: (await listTickets()).slice(-100).reverse() });
+    }
+    if (action === 'adminReplyTicket') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const next = await updateTicket(req.body.id, { status: req.body.status || 'closed', reply: String(req.body.reply || '').slice(0, 1000), repliedAt: Date.now() });
+      return res.status(200).json({ tickets: next.slice(-100).reverse() });
+    }
+
     // ---------- เจ้าของระบบ: ล็อกเว็บ ----------
     if (action === 'getGate') {
       if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
@@ -431,15 +456,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ log: (await getActivityLog()).slice(-100).reverse() });
     }
     if (action === 'runBackup') {
-      const result = await autoBackup(req.body.date || new Date().toISOString().slice(0, 10));
-      return res.status(200).json({ result, backups: await listBackups() });
+      const result = await autoBackup(req.body.date || new Date().toISOString().slice(0, 10), me.email);
+      return res.status(200).json({ result, backups: await listBackups(me.email) });
     }
     if (action === 'listBackups') {
-      return res.status(200).json({ backups: await listBackups() });
+      return res.status(200).json({ backups: await listBackups(me.email) });
     }
     if (action === 'getBackup') {
       if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
-      return res.status(200).json({ backup: await getBackup(req.body.date) });
+      return res.status(200).json({ backup: await getBackup(req.body.date, me.email) });
     }
 
     return res.status(400).json({ error: 'ไม่รู้จัก action นี้' });
