@@ -4,6 +4,9 @@ import {
   issueToken, requireUser, sanitize, rateLimit,
   isBanned, addBan, removeBan, listBans, recordSuspicious, clientIp,
   logActivity, getActivityLog, autoBackup, listBackups, getBackup,
+  PLANS, TOKEN_COST, planOf, tokenState, getUsageStats,
+  isDisposableEmail, checkSignupAbuse, markSignup,
+  getGate, saveGate, gateCheck, consumeInviteCode, makeInviteCode,
 } from './_lib.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,6 +64,11 @@ export default async function handler(req, res) {
   } catch (e) {}
 
   try {
+    if (action === 'gateInfo') {
+      const g = await getGate();
+      return res.status(200).json({ mode: g.mode, closedMessage: g.closedMessage, needCode: g.mode === 'invite' });
+    }
+
     // ---------- ไม่ต้องล็อกอินก่อน ----------
     if (action === 'signup') {
       const { name, username, email, password } = req.body;
@@ -70,7 +78,20 @@ export default async function handler(req, res) {
       const rl = await rateLimit(`signup_${ip}`, 5, 60 * 60 * 1000);
       if (!rl.allowed) return res.status(429).json({ error: `สมัครถี่เกินไป ลองใหม่ใน ${rl.retrySec} วินาที` });
 
+      const gk = await gateCheck(email, null, req.body.inviteCode);
+      if (!gk.allowed) return res.status(403).json({ error: gk.reason, needCode: gk.needCode, gateBlocked: true });
+      const gateNow = gk.gate;
+      if (isDisposableEmail(email)) return res.status(400).json({ error: 'ไม่รองรับอีเมลชั่วคราว กรุณาใช้อีเมลจริง' });
+      const fp = String(req.body.fingerprint || '').slice(0, 120);
+      const abuse = await checkSignupAbuse(ip, fp);
+      if (abuse.blocked) {
+        await logActivity({ type: 'signup_blocked', ip, email, reason: abuse.reason });
+        return res.status(403).json({ error: abuse.reason });
+      }
       const accounts = await getAccounts();
+      if (accounts.length >= gateNow.maxAccounts && accounts.length > 0) {
+        return res.status(403).json({ error: `ระบบรับสมาชิกครบจำนวนที่กำหนดแล้ว (${gateNow.maxAccounts} บัญชี)`, gateBlocked: true });
+      }
       if (accounts.some((a) => a.email === email)) return res.status(400).json({ error: 'อีเมลนี้ถูกใช้แล้ว' });
       if (accounts.some((a) => a.username === username)) return res.status(400).json({ error: 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' });
 
@@ -82,9 +103,18 @@ export default async function handler(req, res) {
         isOwner: accounts.length === 0,
         createdAt: Date.now(),
         lastLogin: Date.now(),
+        plan: accounts.length === 0 ? 'owner' : 'trial',
+        tokensUsed: 0,
+        bonusTokens: 0,
+        cycleStart: Date.now(),
+        signupIp: ip,
+        signupFp: fp || null,
       };
       accounts.push(account);
       await saveAccounts(accounts);
+      await markSignup(ip, fp, email);
+      if (gk.viaCode) await consumeInviteCode(gk.viaCode, email);
+      await logActivity({ type: 'signup', email, ip, viaCode: gk.viaCode || null });
       return res.status(200).json({ account: sanitize(account), token: issueToken(email) });
     }
 
@@ -102,6 +132,13 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'อีเมล/ชื่อผู้ใช้ หรือรหัสผ่านไม่ถูกต้อง' });
       }
 
+      const lgk = await gateCheck(accounts[idx].email, accounts[idx], null);
+      if (!lgk.allowed) {
+        return res.status(403).json({ error: lgk.reason, gateBlocked: true });
+      }
+      if (accounts[idx].suspended) {
+        return res.status(403).json({ error: 'บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' });
+      }
       const today = bangkokDateStr();
       const isNewDay = accounts[idx].loginCountDate !== today;
       const loginCount = isNewDay ? 1 : (accounts[idx].loginCount || 0) + 1;
@@ -154,7 +191,33 @@ export default async function handler(req, res) {
     const { account: me, accounts } = session;
 
     if (action === 'me') {
-      return res.status(200).json({ account: sanitize(me) });
+      return res.status(200).json({ account: sanitize(me), tokens: tokenState(me), plans: PLANS, tokenCost: TOKEN_COST });
+    }
+
+    // ---- คีย์ Gemini ส่วนตัวของผู้ใช้ ----
+    if (action === 'saveGeminiKey') {
+      const key = String(req.body.key || '').trim();
+      const idx = accounts.findIndex((a) => a.email === me.email);
+      if (key) {
+        // ทดสอบว่าคีย์ใช้ได้จริงก่อนบันทึก
+        try {
+          const test = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+            body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }] }),
+          });
+          const td = await test.json();
+          if (!test.ok && !/quota|rate/i.test(td?.error?.message || '')) {
+            return res.status(400).json({ error: 'คีย์นี้ใช้ไม่ได้ — ตรวจสอบว่าคัดลอกมาครบถ้วนหรือไม่' });
+          }
+        } catch (e) {
+          return res.status(400).json({ error: 'ทดสอบคีย์ไม่สำเร็จ ลองใหม่อีกครั้ง' });
+        }
+      }
+      accounts[idx].geminiKey = key;
+      await saveAccounts(accounts);
+      await logActivity({ type: key ? 'key_added' : 'key_removed', email: me.email });
+      return res.status(200).json({ ok: true, hasKey: !!key });
     }
 
     if (action === 'listAccounts') {
@@ -238,6 +301,110 @@ export default async function handler(req, res) {
       const kept = accounts.filter((a) => a.isOwner || (Date.now() - (a.lastLogin || a.createdAt || Date.now())) <= THIRTY_DAYS_MS);
       if (kept.length !== accounts.length) await saveAccounts(kept);
       return res.status(200).json({ accounts: kept.map(sanitize) });
+    }
+
+    // ---------- เจ้าของระบบ: ล็อกเว็บ ----------
+    if (action === 'getGate') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({ gate: await getGate() });
+    }
+    if (action === 'saveGate') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const cur = await getGate();
+      const next = {
+        ...cur,
+        mode: ['open', 'invite', 'closed'].includes(req.body.mode) ? req.body.mode : cur.mode,
+        closedMessage: req.body.closedMessage != null ? String(req.body.closedMessage).slice(0, 300) : cur.closedMessage,
+        maxAccounts: req.body.maxAccounts != null ? Math.max(1, Number(req.body.maxAccounts)) : cur.maxAccounts,
+      };
+      await saveGate(next);
+      await logActivity({ type: 'gate_changed', mode: next.mode, by: me.email });
+      return res.status(200).json({ gate: next });
+    }
+    if (action === 'gateAllow') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const em = String(req.body.email || '').trim().toLowerCase();
+      if (!em) return res.status(400).json({ error: 'ต้องระบุอีเมล' });
+      const cur = await getGate();
+      if (!cur.allowList.includes(em)) cur.allowList.push(em);
+      await saveGate(cur);
+      await logActivity({ type: 'gate_allow', target: em, by: me.email });
+      return res.status(200).json({ gate: cur });
+    }
+    if (action === 'gateRevoke') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const em = String(req.body.email || '').trim().toLowerCase();
+      const cur = await getGate();
+      cur.allowList = cur.allowList.filter((e) => e !== em);
+      await saveGate(cur);
+      return res.status(200).json({ gate: cur });
+    }
+    if (action === 'gateNewCode') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const cur = await getGate();
+      const code = makeInviteCode();
+      cur.inviteCodes = [...cur.inviteCodes, { code, note: String(req.body.note || '').slice(0, 60), at: Date.now(), usedBy: null }].slice(-100);
+      await saveGate(cur);
+      return res.status(200).json({ gate: cur, code });
+    }
+    if (action === 'gateDeleteCode') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const cur = await getGate();
+      cur.inviteCodes = cur.inviteCodes.filter((c) => c.code !== req.body.code);
+      await saveGate(cur);
+      return res.status(200).json({ gate: cur });
+    }
+
+    // ---------- เจ้าของระบบ: จัดการผู้ใช้ / โทเค็น / งบการเงิน ----------
+    if (action === 'adminUsers') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({
+        users: accounts.map((a) => ({
+          ...sanitize(a),
+          hasKey: !!(a.geminiKey && a.geminiKey.trim()),
+          tokens: tokenState(a),
+        })),
+        plans: PLANS,
+      });
+    }
+    if (action === 'adminGrantTokens') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { email, amount } = req.body;
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      accounts[idx].bonusTokens = (accounts[idx].bonusTokens || 0) + Number(amount || 0);
+      await saveAccounts(accounts);
+      await logActivity({ type: 'grant_tokens', target: email, amount, by: me.email });
+      return res.status(200).json({ ok: true, tokens: tokenState(accounts[idx]) });
+    }
+    if (action === 'adminSetPlan') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { email, plan } = req.body;
+      if (!PLANS[plan]) return res.status(400).json({ error: 'แพ็กเกจไม่ถูกต้อง' });
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      accounts[idx].plan = plan;
+      accounts[idx].tokensUsed = 0;
+      accounts[idx].cycleStart = Date.now();
+      await saveAccounts(accounts);
+      await logActivity({ type: 'set_plan', target: email, plan, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'adminSuspend') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { email, suspended } = req.body;
+      const idx = accounts.findIndex((a) => a.email === email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      if (accounts[idx].isOwner) return res.status(400).json({ error: 'ระงับบัญชีเจ้าของระบบไม่ได้' });
+      accounts[idx].suspended = !!suspended;
+      accounts[idx].sessionsValidFrom = Date.now();
+      await saveAccounts(accounts);
+      await logActivity({ type: suspended ? 'suspend' : 'unsuspend', target: email, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'adminUsage') {
+      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      return res.status(200).json({ stats: await getUsageStats(), plans: PLANS });
     }
 
     // ---------- ผู้ดูแลระบบ: ความปลอดภัย / สำรองข้อมูล / บันทึกกิจกรรม ----------
