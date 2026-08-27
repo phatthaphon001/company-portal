@@ -879,11 +879,426 @@ function DeptCard({ dept, userClearance, denied, onOpen }) {
   );
 }
 
-function Directory({ user, denied, onOpen }) {
+// ============ เครื่องมือ AI ประจำแผนก ============
+// แต่ละแผนกมีเครื่องมือของตัวเอง ใช้งานได้จริง เก็บผลลัพธ์ไว้ดูย้อนหลังได้
+const DEPT_TOOLS = {
+  finance: [
+    {
+      key: 'bills', label: 'อ่านบิล + แยกหมวดค่าใช้จ่าย', Icon: FileText, color: '#34D399',
+      desc: 'แนบรูปบิล/ใบเสร็จได้สูงสุด 10 ใบพร้อมกัน — AI อ่านตัวเลข แยกหมวด รวมยอด และคำนวณ VAT/ภาษีหัก ณ ที่จ่ายให้',
+      images: 10, action: 'metricRead',
+      fields: [{ k: 'note', label: 'หมายเหตุ (ไม่บังคับ)', ph: 'เช่น ค่าใช้จ่ายเดือน ส.ค. ของทีมคอนเทนต์' }],
+      sys: `คุณคือนักบัญชีมืออาชีพ อ่านบิล/ใบเสร็จจากภาพที่แนบมาทุกใบ แล้วแยกรายละเอียดให้ครบ ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "title":"สรุปค่าใช้จ่าย",
+ "items":[{"no":ลำดับ,"vendor":"ร้าน/ผู้ขาย","date":"วันที่บนบิล หรือ null","category":"หมวด เช่น ค่าอาหาร/ค่าเดินทาง/ค่าไฟ/ค่าทางด่วน/อุปกรณ์/อื่นๆ","amount":ยอดรวมตัวเลข,"vat":จำนวนVATถ้ามีหรือ null,"note":"สิ่งที่อ่านไม่ชัด หรือ null"}],
+ "byCategory":[{"category":"หมวด","total":ยอดรวม,"percent":สัดส่วน%}],
+ "totals":{"subtotal":ยอดก่อนภาษี,"vat":VATรวม,"grandTotal":ยอดรวมสุทธิ,"count":จำนวนบิล},
+ "tax":{"vatNote":"อธิบายเรื่อง VAT 7% ที่เกี่ยวข้อง","withholdingSuggestion":"รายการไหนควรหักภาษี ณ ที่จ่ายกี่ % พร้อมยอดที่ต้องหัก","deductible":"รายการไหนใช้เป็นค่าใช้จ่ายทางภาษีได้"},
+ "flags":["บิลที่น่าสงสัย ซ้ำ หรืออ่านไม่ชัด"],
+ "advice":["คำแนะนำลดค่าใช้จ่าย อ้างตัวเลขจริง"]
+}
+กติกา: ตัวเลขห้ามมีจุลภาค/หน่วย · อ่านไม่ได้ให้ใส่ null อย่าเดา · ภาษีอิงกฎหมายไทย`,
+    },
+    {
+      key: 'cashflow', label: 'วางแผนกระแสเงินสด', Icon: TrendingUp, color: '#4A9DFF',
+      desc: 'กรอกรายรับรายจ่ายคร่าวๆ → AI ประเมินสภาพคล่อง จุดเสี่ยง และแนะนำการจัดสรรเงิน',
+      action: 'deepAnalysis',
+      fields: [
+        { k: 'income', label: 'รายรับต่อเดือน (บาท)', ph: '50000' },
+        { k: 'fixed', label: 'ค่าใช้จ่ายประจำ', ph: 'ค่าเช่า 8000, ค่าไฟ 2000, ค่าเน็ต 800' },
+        { k: 'variable', label: 'ค่าใช้จ่ายผันแปร', ph: 'ค่าโฆษณา ค่าจ้างฟรีแลนซ์' },
+        { k: 'goal', label: 'เป้าหมายทางการเงิน', ph: 'อยากเก็บเงินซื้ออุปกรณ์ 60000 ใน 6 เดือน' },
+      ],
+      sys: `คุณคือที่ปรึกษาการเงินธุรกิจขนาดเล็ก ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"แผนกระแสเงินสด","healthScore":0-100,"headline":"สรุป 1 ประโยค",
+"totals":{"income":ตัวเลข,"expense":ตัวเลข,"netPerMonth":ตัวเลข,"savingRate":เปอร์เซ็นต์},
+"runway":"ถ้ารายรับหยุด จะอยู่ได้กี่เดือน",
+"items":[{"no":1,"category":"หมวด","amount":ตัวเลข,"note":"ข้อสังเกต"}],
+"risks":[{"risk":"ความเสี่ยง","fix":"วิธีรับมือ"}],
+"plan":[{"step":"สิ่งที่ต้องทำ","when":"เมื่อไหร่","impact":"ผลที่คาด"}],
+"goalFeasibility":"เป้าหมายที่ตั้งไว้เป็นไปได้ไหม ต้องเก็บเดือนละเท่าไหร่"}`,
+    },
+  ],
+  hr: [
+    {
+      key: 'resume', label: 'วิเคราะห์ผู้สมัคร (เรซูเม่ + ดวง)', Icon: Users, color: '#A78BFA',
+      desc: 'แนบรูปเรซูเม่/โปรไฟล์ผู้สมัคร + กรอกวันเกิด → AI วิเคราะห์ความเหมาะสมกับตำแหน่ง ทั้งด้านทักษะและด้านโหราศาสตร์',
+      images: 5, action: 'productFit',
+      fields: [
+        { k: 'name', label: 'ชื่อผู้สมัคร', ph: 'สมชาย ใจดี', required: true },
+        { k: 'birth', label: 'วันเดือนปีเกิด', ph: '15/03/2540 (หรือ 1997-03-15)', required: true },
+        { k: 'birthTime', label: 'เวลาเกิด (ถ้าทราบ)', ph: '08:30' },
+        { k: 'position', label: 'ตำแหน่งที่รับสมัคร', ph: 'ตัดต่อวิดีโอ', required: true },
+        { k: 'need', label: 'คุณสมบัติที่ต้องการ', ph: 'ทำงานเร็ว รับแรงกดดันได้ ทำงานเป็นทีม' },
+      ],
+      sys: `คุณคือผู้จัดการฝ่ายบุคคลที่เชี่ยวชาญทั้งการคัดคนและโหราศาสตร์ไทย/สากล
+วิเคราะห์ผู้สมัครจากเรซูเม่ที่แนบมาและข้อมูลวันเกิด ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"ผลวิเคราะห์ผู้สมัคร","fitScore":1-10,"verdict":"ควรรับ | สัมภาษณ์เพิ่ม | ไม่เหมาะ",
+"skillAnalysis":{"strengths":["จุดแข็งจากเรซูเม่"],"gaps":["สิ่งที่ขาด"],"experienceMatch":"ประสบการณ์ตรงกับตำแหน่งแค่ไหน"},
+"astrology":{"zodiac":"ราศี","dayOfWeek":"วันเกิดในสัปดาห์ พร้อมสีมงคล","element":"ธาตุ","traits":["ลักษณะนิสัยตามหลักโหราศาสตร์"],"workStyle":"สไตล์การทำงานที่คาดว่าจะเป็น","compatibility":"เข้ากับตำแหน่งนี้ไหมในเชิงดวง","caution":"สิ่งที่ต้องระวังในการร่วมงาน"},
+"interviewQuestions":["คำถามสัมภาษณ์ที่ควรถามคนนี้โดยเฉพาะ"],
+"redFlags":["สัญญาณเตือน หรือ ไม่มี"],
+"salaryGuide":"ช่วงเงินเดือนที่เหมาะกับประสบการณ์นี้ในไทย",
+"summary":"สรุปตัดสินใจ 2-3 บรรทัด"}
+กติกา: ส่วนโหราศาสตร์ให้วิเคราะห์อย่างจริงจังตามหลักที่ใช้กันจริง แต่ระบุชัดว่าเป็นข้อมูลประกอบ ไม่ใช่เกณฑ์ตัดสินหลัก · การตัดสินใจต้องยึดทักษะและประสบการณ์เป็นหลัก`,
+    },
+    {
+      key: 'team', label: 'ประเมินและดูแลทีม', Icon: Award, color: '#F472B6',
+      desc: 'กรอกสถานการณ์ในทีม → AI ช่วยวิเคราะห์ปัญหา แนะนำวิธีคุย และวางแผนพัฒนารายบุคคล',
+      action: 'deepAnalysis',
+      fields: [
+        { k: 'member', label: 'ชื่อ/ตำแหน่งพนักงาน', ph: 'สมหญิง - ตัดต่อวิดีโอ', required: true },
+        { k: 'situation', label: 'สถานการณ์', ph: 'ส่งงานช้าบ่อย 3 สัปดาห์ติด แต่คุณภาพงานดี', required: true },
+        { k: 'want', label: 'ผลลัพธ์ที่ต้องการ', ph: 'อยากให้ส่งงานตรงเวลาโดยไม่เสียกำลังใจ' },
+      ],
+      sys: `คุณคือ HR Business Partner มืออาชีพ ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"แผนดูแลพนักงาน","rootCause":["สาเหตุที่แท้จริงที่เป็นไปได้"],
+"conversationScript":[{"step":"ขั้นตอน","say":"ประโยคที่ควรพูดจริงๆ","why":"เหตุผล"}],
+"avoid":["สิ่งที่ห้ามพูด/ทำ"],
+"developmentPlan":[{"action":"สิ่งที่ต้องทำ","timeline":"กรอบเวลา","measure":"วัดผลยังไง"}],
+"escalation":"ถ้ายังไม่ดีขึ้น ควรทำอะไรต่อ",
+"legalNote":"ข้อควรระวังทางกฎหมายแรงงานไทย หรือ null"}`,
+    },
+  ],
+  qc: [
+    {
+      key: 'check', label: 'ตรวจงานก่อนเผยแพร่', Icon: ClipboardCheck, color: '#FBBF24',
+      desc: 'แนบภาพงาน/คลิป + ระบุเกณฑ์ → AI ตรวจละเอียดว่าผ่านไหม อะไรต้องแก้ก่อนปล่อย',
+      images: 8, action: 'review',
+      fields: [
+        { k: 'what', label: 'งานอะไร', ph: 'คลิปโปรโมทสินค้า 30 วิ', required: true },
+        { k: 'standard', label: 'เกณฑ์ที่ต้องผ่าน', ph: 'ภาพคมชัด ไม่มีคำผิด โลโก้อยู่มุมขวาบน มี CTA ท้ายคลิป' },
+      ],
+      sys: `คุณคือหัวหน้าฝ่ายควบคุมคุณภาพที่ละเอียดมาก ตรวจงานจากภาพที่แนบ ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"ผลตรวจ QC","passed":true/false,"score":1-10,"headline":"สรุป 1 ประโยค",
+"checklist":[{"item":"หัวข้อตรวจ","status":"ผ่าน|ไม่ผ่าน|ต้องดูเพิ่ม","detail":"รายละเอียด"}],
+"mustFix":[{"issue":"ปัญหา","where":"อยู่ตรงไหน","how":"แก้ยังไง","severity":"high|medium|low"}],
+"niceToHave":["ปรับได้จะดีขึ้น"],
+"riskIfPublished":"ถ้าปล่อยทั้งที่ยังไม่แก้ จะเกิดอะไร",
+"verdict":"ปล่อยได้ | แก้ก่อนปล่อย | ทำใหม่"}`,
+    },
+  ],
+  rnd: [
+    {
+      key: 'trend', label: 'วิเคราะห์เทรนด์และโอกาส', Icon: Radar, color: '#22D3EE',
+      desc: 'แนบภาพเทรนด์/คู่แข่ง/ข้อมูลตลาด → AI สรุปโอกาสและความเสี่ยง พร้อมข้อเสนอที่ลงมือได้',
+      images: 8, action: 'deepAnalysis',
+      fields: [
+        { k: 'topic', label: 'หัวข้อที่อยากรู้', ph: 'เทรนด์คอนเทนต์สัตว์ AI ในไทยตอนนี้', required: true },
+        { k: 'context', label: 'บริบทของเรา', ph: 'เรามี 4 ช่อง ลง Facebook เป็นหลัก' },
+      ],
+      sys: `คุณคือนักวิจัยตลาดและนักวิเคราะห์เทรนด์ ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"รายงานวิจัย","headline":"สรุปสถานการณ์ 1 ประโยค",
+"findings":[{"finding":"สิ่งที่พบ","evidence":"หลักฐาน/เหตุผล","implication":"แปลว่าอะไรกับเรา"}],
+"opportunities":[{"opportunity":"โอกาส","howToCapture":"คว้ายังไง","effort":"low|medium|high","impact":"low|medium|high"}],
+"threats":[{"threat":"ความเสี่ยง","mitigation":"รับมือยังไง"}],
+"recommendation":"ข้อเสนอหลัก 1 ข้อที่ควรทำก่อน",
+"nextSteps":["ขั้นตอนถัดไปที่ทำได้ทันที"],
+"confidence":"ความมั่นใจของบทวิเคราะห์นี้ และข้อมูลอะไรที่ยังขาด"}`,
+    },
+  ],
+  marketing: [
+    {
+      key: 'campaign', label: 'วางแคมเปญการตลาด', Icon: Megaphone, color: '#F472B6',
+      desc: 'ระบุเป้าหมาย งบ และกลุ่มเป้าหมาย → AI วางแคมเปญครบตั้งแต่ข้อความ ช่องทาง จนถึงวิธีวัดผล',
+      action: 'plan',
+      fields: [
+        { k: 'goal', label: 'เป้าหมายแคมเปญ', ph: 'เพิ่มผู้ติดตาม 5000 คนใน 1 เดือน', required: true },
+        { k: 'budget', label: 'งบประมาณ', ph: '5000 บาท' },
+        { k: 'audience', label: 'กลุ่มเป้าหมาย', ph: 'ผู้หญิง 25-40 สนใจสัตว์และคอนเทนต์ผ่อนคลาย' },
+        { k: 'product', label: 'สินค้า/บริการ (ถ้ามี)', ph: 'ครีมบำรุงผิว' },
+      ],
+      sys: `คุณคือนักวางแผนการตลาดดิจิทัลมืออาชีพ ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"แผนแคมเปญ","bigIdea":"แก่นของแคมเปญ 1 ประโยค",
+"positioning":"วางตำแหน่งยังไงให้ต่างจากคู่แข่ง",
+"messages":[{"angle":"มุมสื่อสาร","headline":"พาดหัวที่ใช้ได้จริง","why":"เหตุผลเชิงจิตวิทยา"}],
+"channels":[{"channel":"ช่องทาง","budgetShare":"สัดส่วนงบ %","why":"ทำไมช่องนี้","kpi":"วัดด้วยอะไร"}],
+"timeline":[{"phase":"ช่วง","days":"กี่วัน","do":"ทำอะไร"}],
+"contentIdeas":["ไอเดียคอนเทนต์ที่ใช้ได้เลย"],
+"kpiTargets":[{"metric":"ตัวชี้วัด","target":"เป้า","how":"วัดยังไง"}],
+"budgetBreakdown":[{"item":"รายการ","amount":ตัวเลข,"note":"หมายเหตุ"}],
+"risks":["ความเสี่ยงและวิธีรับมือ"]}`,
+    },
+  ],
+  sales: [
+    {
+      key: 'reply', label: 'ช่วยตอบลูกค้า / ปิดการขาย', Icon: ShoppingCart, color: '#34D399',
+      desc: 'วางข้อความที่ลูกค้าทักมา → AI ร่างคำตอบที่ปิดการขายได้ พร้อมรับมือข้อโต้แย้ง',
+      action: 'productFit',
+      fields: [
+        { k: 'message', label: 'ข้อความจากลูกค้า', ph: 'สนใจค่ะ แต่ราคาแพงไปหน่อย มีลดไหม', required: true, big: true },
+        { k: 'product', label: 'สินค้า/ราคา', ph: 'ครีมบำรุงผิว 890 บาท ต้นทุน 400' },
+        { k: 'policy', label: 'เงื่อนไขที่ให้ได้', ph: 'ลดได้ไม่เกิน 10% ส่งฟรีเมื่อซื้อ 2 ชิ้น' },
+      ],
+      sys: `คุณคือเซลส์มืออาชีพที่ปิดการขายเก่งโดยไม่กดดันลูกค้า ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"แนวทางตอบลูกค้า","customerIntent":"ลูกค้าต้องการอะไรจริงๆ","stage":"ขั้นตอนที่ลูกค้าอยู่ตอนนี้",
+"replies":[{"tone":"โทนที่ใช้ เช่น อบอุ่น/มืออาชีพ/เร่งปิด","text":"ข้อความที่ส่งได้เลย","whenToUse":"ใช้ตอนไหน"}],
+"objectionHandling":[{"objection":"ข้อโต้แย้งที่จะเจอต่อ","response":"ตอบยังไง"}],
+"upsell":"เสนอเพิ่มอะไรได้บ้าง โดยไม่ทำให้เสียดีล",
+"doNot":["สิ่งที่ห้ามพูด"],
+"closingLine":"ประโยคปิดการขายที่แนะนำ",
+"followUp":"ถ้าลูกค้าเงียบ ควรตามเมื่อไหร่และพูดว่าอะไร"}`,
+    },
+  ],
+  content: [
+    {
+      key: 'ideas', label: 'คลังไอเดียคอนเทนต์', Icon: Sparkles, color: '#4A9DFF',
+      desc: 'ระบุช่องและแนว → AI คิดไอเดียคอนเทนต์พร้อมฮุกและมุมเล่า เก็บไว้ใช้ทั้งเดือน',
+      action: 'plan',
+      fields: [
+        { k: 'channel', label: 'ช่อง/แนวคอนเทนต์', ph: 'ช่องวาฬ AI เสมือนจริง ลง Facebook', required: true },
+        { k: 'count', label: 'อยากได้กี่ไอเดีย', ph: '10' },
+        { k: 'avoid', label: 'เคยทำไปแล้ว (ห้ามซ้ำ)', ph: 'วาฬกินแพลงก์ตอน, วาฬว่ายกับพระอาทิตย์ตก' },
+      ],
+      sys: `คุณคือครีเอทีฟไดเรกเตอร์คอนเทนต์สั้น ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{"title":"คลังไอเดียคอนเทนต์",
+"ideas":[{"no":1,"concept":"แนวคิดคลิป","hook":"ฮุก 3 วินาทีแรก เขียนให้เห็นภาพ","story":"เล่าเรื่องยังไง","emotion":"อารมณ์ที่ต้องการให้คนดูรู้สึก","cta":"ปิดท้ายยังไง","difficulty":"ง่าย|กลาง|ยาก"}],
+"seriesIdea":"ถ้าทำเป็นซีรีส์ต่อเนื่อง ควรร้อยเรื่องยังไง",
+"trendTie":"ผูกกับเทรนด์อะไรได้บ้าง"}`,
+    },
+  ],
+};
+
+// แสดงผล JSON จาก AI ให้อ่านง่ายแบบอัตโนมัติ
+function AutoResult({ data }) {
+  if (!data || typeof data !== 'object') return null;
+  const sevCol = (v) => {
+    const t = String(v || '').toLowerCase();
+    if (['high', 'ไม่ผ่าน', 'ยาก', 'ทำใหม่'].some((x) => t.includes(x))) return C.red;
+    if (['medium', 'กลาง', 'ต้องดูเพิ่ม', 'แก้ก่อนปล่อย', 'สัมภาษณ์เพิ่ม'].some((x) => t.includes(x))) return C.orange;
+    if (['low', 'ผ่าน', 'ง่าย', 'ปล่อยได้', 'ควรรับ'].some((x) => t.includes(x))) return C.emerald;
+    return C.blue;
+  };
+  const skip = new Set(['title']);
+
+  function renderVal(key, val) {
+    if (val == null || val === '') return null;
+    // ตัวเลขคะแนน
+    if (typeof val === 'number' && /score|fitScore|healthScore/i.test(key)) {
+      const max = /health/i.test(key) ? 100 : 10;
+      const col = val >= max * 0.75 ? C.emerald : val >= max * 0.45 ? C.orange : C.red;
+      return (
+        <div className="flex items-center gap-2.5 p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${col}` }}>
+          <span className="font-display text-2xl font-bold leading-none" style={{ color: col }}>{val}<span className="font-mono text-xs" style={{ color: C.muted }}>/{max}</span></span>
+          <span className="font-mono text-2xs" style={{ color: C.muted }}>{key}</span>
+        </div>
+      );
+    }
+    if (typeof val === 'boolean') {
+      return <span className="font-mono text-2xs px-2 py-1 rounded" style={{ color: val ? C.emerald : C.red, border: `1px solid ${val ? C.emerald : C.red}` }}>{val ? 'ผ่าน' : 'ไม่ผ่าน'}</span>;
+    }
+    if (typeof val === 'string' || typeof val === 'number') {
+      return <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{String(val)}</p>;
+    }
+    if (Array.isArray(val)) {
+      if (val.length === 0) return null;
+      if (typeof val[0] === 'string') {
+        return <ul className="space-y-1">{val.map((x, i) => <li key={i} className="font-body text-xs flex gap-1.5" style={{ color: C.text }}><span style={{ color: C.blue }}>▸</span>{x}</li>)}</ul>;
+      }
+      // array ของ object → การ์ด
+      return (
+        <div className="space-y-1.5">
+          {val.map((o, i) => {
+            const entries = Object.entries(o).filter(([, v]) => v != null && v !== '');
+            const sevKey = entries.find(([k]) => /severity|priority|status|difficulty|impact|effort|verdict/i.test(k));
+            const col = sevKey ? sevCol(sevKey[1]) : C.border;
+            return (
+              <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, borderLeft: `3px solid ${col}` }}>
+                {entries.map(([k, v], j) => (
+                  <div key={k} className={j === 0 ? '' : 'mt-0.5'}>
+                    {j === 0 ? (
+                      <div className="font-body text-xs" style={{ color: col === C.border ? C.text : col }}>
+                        {typeof v === 'number' && /amount|total/i.test(k) ? `${v.toLocaleString()} ฿` : String(v)}
+                      </div>
+                    ) : (
+                      <div className="font-body text-xs" style={{ color: C.muted }}>
+                        <span style={{ color: C.blue }}>{k}: </span>
+                        {typeof v === 'number' && /amount|total|vat/i.test(k) ? `${v.toLocaleString()} ฿` : String(v)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    // object → แสดงเป็นคู่ key/value
+    return (
+      <div className="p-2.5 rounded-xl space-y-1" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+        {Object.entries(val).filter(([, v]) => v != null && v !== '').map(([k, v]) => (
+          <div key={k}>
+            <span className="font-mono text-2xs" style={{ color: C.blue }}>{k}: </span>
+            {Array.isArray(v)
+              ? <span className="font-body text-xs" style={{ color: C.text }}>{v.join(' · ')}</span>
+              : <span className="font-body text-xs" style={{ color: C.text }}>{typeof v === 'number' && /amount|total|vat|subtotal|grand/i.test(k) ? `${v.toLocaleString()} ฿` : String(v)}</span>}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.title && <h4 className="font-body text-base" style={{ color: C.text }}>{data.title}</h4>}
+      {Object.entries(data).filter(([k, v]) => !skip.has(k) && v != null && v !== '').map(([k, v]) => (
+        <div key={k}>
+          <div className="font-mono text-2xs mb-1 tracking-wide" style={{ color: C.muted }}>{k}</div>
+          {renderVal(k, v)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeptTool({ tool, deptId, records, setRecords, showToast }) {
+  const [vals, setVals] = useState({});
+  const [imgs, setImgs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [openId, setOpenId] = useState(null);
+
+  const mine = (records || []).filter((r) => r.dept === deptId && r.tool === tool.key);
+  const active = mine.find((r) => r.id === openId) || mine[mine.length - 1] || null;
+
+  async function addFiles(files) {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/')).slice(0, tool.images || 0);
+    const out = await Promise.all(arr.map(async (f) => {
+      const base64 = await fileToBase64(f);
+      const mimeType = f.type || 'image/jpeg';
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}` };
+    }));
+    setImgs((p) => [...p, ...out].slice(0, tool.images || 0));
+  }
+
+  async function run() {
+    const missing = (tool.fields || []).filter((f) => f.required && !String(vals[f.k] || '').trim());
+    if (missing.length) { setErr(`กรุณากรอก: ${missing.map((m) => m.label).join(', ')}`); return; }
+    if (tool.images && imgs.length === 0 && (tool.fields || []).length === 0) { setErr('กรุณาแนบรูปอย่างน้อย 1 รูป'); return; }
+    setBusy(true); setErr('');
+    const body = (tool.fields || []).map((f) => `${f.label}: ${vals[f.k] || '-'}`).join('\n');
+    try {
+      const text = await callClaude(tool.sys, body || 'วิเคราะห์จากภาพที่แนบมา',
+        imgs.length ? imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })) : undefined, tool.action);
+      const json = parseJsonLoose(text);
+      const rec = { id: `${Date.now()}`, at: Date.now(), date: todayDateStr(), dept: deptId, tool: tool.key, toolLabel: tool.label, input: { ...vals }, thumb: imgs[0]?.dataUrl || null, imageCount: imgs.length, data: json };
+      setRecords([...(records || []), rec].slice(-300));
+      setOpenId(rec.id);
+      setVals({}); setImgs([]);
+      showToast('วิเคราะห์เสร็จแล้ว');
+    } catch (e) { setErr(e.message || 'ไม่สำเร็จ'); }
+    setBusy(false);
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-2 mb-1">
+        <tool.Icon size={15} style={{ color: tool.color }} />
+        <span className="font-body text-sm" style={{ color: C.text }}>{tool.label}</span>
+      </div>
+      <p className="font-body text-xs mb-3 leading-relaxed" style={{ color: C.muted }}>{tool.desc}</p>
+
+      {tool.images > 0 && (
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+          className="p-3.5 rounded-xl mb-2.5 text-center"
+          style={{ background: C.bgDeep, border: `1.5px dashed ${C.border}` }}
+        >
+          <Upload size={18} style={{ color: C.muted }} className="mx-auto mb-1.5" />
+          <p className="font-body text-xs mb-2" style={{ color: C.muted }}>ลากรูปมาวาง หรือกดเลือก (สูงสุด {tool.images} รูป)</p>
+          <label className="inline-flex font-mono text-2xs px-3 py-1.5 rounded-lg cursor-pointer items-center gap-1.5" style={{ background: tool.color, color: '#111' }}>
+            <Upload size={11} /> เลือกรูป
+            <input type="file" accept="image/*" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+          </label>
+          {imgs.length > 0 && (
+            <div className="grid grid-cols-5 gap-1.5 mt-2.5">
+              {imgs.map((im) => (
+                <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                  <img src={im.dataUrl} alt="" className="w-full object-cover" style={{ height: 46 }} />
+                  <button onClick={() => setImgs((p) => p.filter((x) => x.id !== im.id))} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,.7)', color: '#fff' }}><X size={9} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid sm:grid-cols-2 gap-2 mb-2.5">
+        {(tool.fields || []).map((f) => (
+          <div key={f.k} className={f.big ? 'sm:col-span-2' : ''}>
+            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>{f.label}{f.required && <span style={{ color: C.red }}> *</span>}</label>
+            {f.big
+              ? <textarea value={vals[f.k] || ''} onChange={(e) => setVals((v) => ({ ...v, [f.k]: e.target.value }))} rows={3} placeholder={f.ph} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              : <input value={vals[f.k] || ''} onChange={(e) => setVals((v) => ({ ...v, [f.k]: e.target.value }))} placeholder={f.ph} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />}
+          </div>
+        ))}
+      </div>
+
+      {err && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{err}</p>}
+      <button onClick={run} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: tool.color, color: '#111', opacity: busy ? 0.6 : 1 }}>
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI วิเคราะห์
+      </button>
+
+      {mine.length > 0 && (
+        <>
+          <div className="flex gap-1.5 mt-3 mb-2 flex-wrap">
+            {mine.slice().reverse().slice(0, 8).map((r) => (
+              <button key={r.id} onClick={() => setOpenId(r.id)} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ background: active?.id === r.id ? tool.color : 'transparent', color: active?.id === r.id ? '#111' : C.muted, border: `1px solid ${active?.id === r.id ? 'transparent' : C.border}` }}>
+                {new Date(r.at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })} {new Date(r.at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}
+              </button>
+            ))}
+          </div>
+          {active && (
+            <div className="p-3 rounded-xl mt-1" style={{ background: C.panel, border: `1px solid ${tool.color}44` }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span className="font-mono text-2xs" style={{ color: C.muted }}>บันทึกเมื่อ {new Date(active.at).toLocaleString('th-TH')}{active.imageCount ? ` · ${active.imageCount} รูป` : ''}</span>
+                <button onClick={() => { setRecords((records || []).filter((x) => x.id !== active.id)); setOpenId(null); }} style={{ color: C.muted }}><Trash2 size={12} /></button>
+              </div>
+              <AutoResult data={active.data} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function DeptWorkspace({ dept, records, setRecords, showToast }) {
+  const tools = DEPT_TOOLS[dept.id] || [];
+  const [active, setActive] = useState(tools[0]?.key || null);
+  if (tools.length === 0) {
+    return <p className="font-body text-xs p-4 rounded-2xl" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>แผนกนี้ยังไม่มีเครื่องมือ AI</p>;
+  }
+  const tool = tools.find((t) => t.key === active) || tools[0];
+  const deptRecords = (records || []).filter((r) => r.dept === dept.id);
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap">
+          {tools.map((t) => (
+            <button key={t.key} onClick={() => setActive(t.key)} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background: active === t.key ? t.color : 'transparent', color: active === t.key ? '#111' : C.muted, border: `1px solid ${active === t.key ? 'transparent' : C.border}` }}>
+              <t.Icon size={11} /> {t.label}
+            </button>
+          ))}
+        </div>
+        {deptRecords.length > 0 && <span className="font-mono text-2xs" style={{ color: C.muted }}>บันทึกไว้ {deptRecords.length} รายการ</span>}
+      </div>
+      <DeptTool tool={tool} deptId={dept.id} records={records} setRecords={setRecords} showToast={showToast} />
+    </div>
+  );
+}
+
+function Directory({ user, denied, onOpen, features }) {
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="mb-6"><div className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>DEPARTMENT DIRECTORY</div><h2 className="font-body text-xl mt-1" style={{ color: C.text }}>เลือกแผนกที่ต้องการเข้าถึง</h2></div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">{DEPARTMENTS.map((d) => <DeptCard key={d.id} dept={d} userClearance={user.clearance} denied={denied} onOpen={onOpen} />)}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {DEPARTMENTS.filter((d) => user.isOwner || !features || features.departments?.[d.id] !== false)
+          .map((d) => <DeptCard key={d.id} dept={d} userClearance={user.clearance} denied={denied} onOpen={onOpen} />)}
+      </div>
     </div>
   );
 }
@@ -897,7 +1312,7 @@ function RoleFile({ role, index, accent }) {
   );
 }
 
-function DepartmentView({ dept, onBack }) {
+function DepartmentView({ dept, onBack, records, setRecords, showToast }) {
   const Icon = dept.icon;
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-stamp">
@@ -907,8 +1322,14 @@ function DepartmentView({ dept, onBack }) {
         <p className="font-body text-sm mt-3" style={{ color: C.muted }}>{dept.brief}</p>
         <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}><Bot size={14} style={{ color: dept.accent }} /><span className="font-body text-xs" style={{ color: C.text }}>{dept.manager}</span><span className="font-mono text-2xs" style={{ color: C.muted }}>· ดำเนินการโดย AI ภายใต้การกำกับของคุณ</span></div>
       </div>
-      <div className="space-y-3 mb-6">{dept.roles.map((r, i) => <RoleFile key={r.en} role={r} index={i} accent={dept.accent} />)}</div>
-      {dept.hasChart && (
+      {/* เครื่องมือ AI ของแผนกนี้ — ใช้งานได้จริง เก็บผลไว้ดูย้อนหลังได้ */}
+      <DeptWorkspace dept={dept} records={records} setRecords={setRecords} showToast={showToast} />
+
+      <details className="mb-6">
+        <summary className="font-mono text-2xs cursor-pointer mb-2" style={{ color: C.muted }}>ดูโครงสร้างตำแหน่งงานในแผนกนี้ ({dept.roles.length})</summary>
+        <div className="space-y-3 mt-2">{dept.roles.map((r, i) => <RoleFile key={r.en} role={r} index={i} accent={dept.accent} />)}</div>
+      </details>
+      {false && dept.hasChart && (
         <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
           <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: dept.accent }}>สรุปผลรายเดือน (ข้อมูลตัวอย่าง)</div>
           <ResponsiveContainer width="100%" height={180}>
@@ -5656,6 +6077,7 @@ export default function CompanyPortal() {
   const [tokens, setTokens] = useState(null);   // สถานะโทเค็นของผู้ใช้คนนี้
   const [ads, setAds] = useState([]);           // ข้อมูลแคมเปญโฆษณาที่อ่านมาจากภาพ
   const [features, setFeatures] = useState(null); // ฟีเจอร์ที่เจ้าของระบบเปิดให้ใช้
+  const [deptData, setDeptData] = useState([]);   // ผลงานจากเครื่องมือ AI ของแต่ละแผนก
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -5753,7 +6175,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -5765,6 +6187,7 @@ export default function CompanyPortal() {
           api('/api/store?key=plans'),
           api('/api/store?key=rivals'),
           api('/api/store?key=ads'),
+          api('/api/store?key=deptData'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -5777,6 +6200,7 @@ export default function CompanyPortal() {
         const planData = planRes.data;
         const rivalData = rivalRes.data;
         const adData = adRes.data;
+        const deptD = deptRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -5834,6 +6258,7 @@ export default function CompanyPortal() {
         setPlans(Array.isArray(planData.value) ? planData.value : []);
         setRivals(Array.isArray(rivalData.value) ? rivalData.value : []);
         setAds(Array.isArray(adData.value) ? adData.value : []);
+        setDeptData(Array.isArray(deptD.value) ? deptD.value : []);
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -5886,6 +6311,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'ads', value: ads }).catch(() => {});
   }, [ads, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'deptData', value: deptData }).catch(() => {});
+  }, [deptData, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -6090,8 +6519,8 @@ export default function CompanyPortal() {
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} features={features} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
-            {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
-            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} />}
+            {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
+            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
