@@ -565,21 +565,23 @@ function OverdueSidebarPanel({ history, onOpenDay, onDismissDay }) {
   );
 }
 
-function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay, tokens }) {
+function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay, tokens, features }) {
   const account = (accounts || []).find((a) => a.email === user.email);
   const totalToday = tasks.length;
   const doneToday = tasks.filter((t) => t.done).length;
   const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
 
+  // เจ้าของระบบเห็นทุกหน้าเสมอ ส่วนคนอื่นเห็นเฉพาะหน้าที่เจ้าของเปิดให้
+  const on = (key) => user.isOwner || !features || features.pages?.[key] !== false;
   const navItems = [
     { key: 'daily', label: 'งานประจำวัน', Icon: ClipboardCheck },
-    { key: 'calendar', label: 'ปฏิทิน', Icon: Calendar },
-    { key: 'directory', label: 'Directory', Icon: FileText },
-    { key: 'platforms', label: 'แพลตฟอร์ม', Icon: Share2 },
+    ...(on('calendar') ? [{ key: 'calendar', label: 'ปฏิทิน', Icon: Calendar }] : []),
+    ...(on('directory') ? [{ key: 'directory', label: 'Directory', Icon: FileText }] : []),
+    ...(on('platforms') ? [{ key: 'platforms', label: 'แพลตฟอร์ม', Icon: Share2 }] : []),
     ...(user.clearance === 3 ? [{ key: 'team', label: 'ทีมงาน', Icon: Users }] : []),
-    { key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp },
-    { key: 'kpi', label: 'KPI / รายเดือน', Icon: Target },
-    { key: 'security', label: 'Protocol', Icon: ScrollText },
+    ...(on('analytics') ? [{ key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp }] : []),
+    ...(on('kpi') ? [{ key: 'kpi', label: 'KPI / รายเดือน', Icon: Target }] : []),
+    ...(on('security') ? [{ key: 'security', label: 'Protocol', Icon: ScrollText }] : []),
     { key: 'settings', label: 'Setting', Icon: SettingsIcon },
   ];
 
@@ -653,6 +655,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingAccount, setPendingAccount] = useState(null); // เก็บไว้แสดงชื่อระหว่างรอ OTP
   const [inviteCode, setInviteCode] = useState('');
+  const [birthDate, setBirthDate] = useState('');
   const [gateMode, setGateMode] = useState(null);
   const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
@@ -680,7 +683,11 @@ function Terminal({ accounts, onSignup, onLogin }) {
 
       const { ok: sendOk, data } = await apiPost('/api/send-code', { email: acc.email });
       setOtpLoading(false);
-      if (!sendOk) { setLoginError(data.error || 'ส่งรหัสไม่สำเร็จ ลองใหม่อีกครั้ง'); return; }
+      if (!sendOk || !data.token) {
+        // ส่งอีเมลไม่ได้ (เช่น ยังไม่ได้ยืนยันโดเมนใน Resend) — บอกให้ชัด อย่าปล่อยค้าง
+        setLoginError((data.error || 'ส่งรหัสยืนยันไม่สำเร็จ') + ' — กรุณาแจ้งผู้ดูแลระบบให้ยกเว้นการยืนยันอีเมลให้บัญชีนี้');
+        return;
+      }
       setOtpToken(data.token);
       setOtpEmail(acc.email);
       setPendingAccount(acc);
@@ -718,9 +725,10 @@ function Terminal({ accounts, onSignup, onLogin }) {
     if (!signupForm.name.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
     if (signupForm.password.length < 8) { setSignupError('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
+    if (!birthDate) { setSignupError('กรุณาระบุวันเกิดจริง (ใช้กับฟีเจอร์ในฝ่ายบุคคล)'); return; }
     setSignupLoading(true);
     try {
-      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
+      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, birthDate, inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
       setSignupLoading(false);
       if (!ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
       if (data.token) saveSession(data.token);
@@ -756,6 +764,11 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
+          <div>
+            <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วันเดือนปีเกิด (จริง)</label>
+            <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} required max={todayDateStr()} className="w-full px-3 py-2.5 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <p className="font-mono text-2xs mt-1" style={{ color: C.muted, fontSize: 10 }}>* ใช้กับฟีเจอร์วิเคราะห์ในฝ่ายบุคคล กรุณาใส่ให้ตรงความจริง</p>
+          </div>
           {gateMode?.needCode && (
             <div>
               <TextField label="รหัสเชิญ" value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" />
@@ -3066,13 +3079,17 @@ const INTEL_TABS = [
 ];
 
 function AnalyticsPage(props) {
-  const [tab, setTab] = useState('stats');
+  const isOwner = props.user?.isOwner;
+  const f = props.features?.analyticsTabs;
+  const tabOn = (k) => isOwner || !f || f[k] !== false;
+  const visibleTabs = INTEL_TABS.filter((t) => tabOn(t.key));
+  const [tab, setTab] = useState(visibleTabs[0]?.key || 'stats');
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><Gauge size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>INTELLIGENCE CENTER</span></div>
       <h2 className="font-body text-xl mb-4" style={{ color: C.text }}>ศูนย์วิเคราะห์ &amp; วางแผน</h2>
       <div className="flex gap-1.5 mb-5 flex-wrap">
-        {INTEL_TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: tab === t.key ? BRAND : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>
             <t.Icon size={12} /> {t.label}
           </button>
@@ -3778,7 +3795,7 @@ function HelpPanel({ tokens, showToast }) {
 }
 
 // ---------- แผงเจ้าของระบบ: ผู้ใช้ / โทเค็น / งบการเงิน ----------
-function OwnerConsole({ user, showToast }) {
+function OwnerConsole({ user, showToast, onFeaturesChanged }) {
   const [tab, setTab] = useState('users');
   const [users, setUsers] = useState([]);
   const [plans, setPlans] = useState({});
@@ -3789,6 +3806,12 @@ function OwnerConsole({ user, showToast }) {
   const [allowEmail, setAllowEmail] = useState('');
   const [codeNote, setCodeNote] = useState('');
   const [tickets, setTickets] = useState([]);
+  const [feats, setFeats] = useState(null);
+  const [featDefs, setFeatDefs] = useState(null);
+  const [presence, setPresence] = useState({});
+  const [feed, setFeed] = useState([]);
+  const [newPw, setNewPw] = useState({});
+  const [sec, setSec] = useState({});
   const [reply, setReply] = useState({});
 
   async function load() {
@@ -3800,6 +3823,12 @@ function OwnerConsole({ user, showToast }) {
     if (g.ok) setGate(g.data.gate);
     const tk = await apiPost('/api/auth', { action: 'adminTickets' });
     if (tk.ok) setTickets(tk.data.tickets || []);
+    const fe = await apiPost('/api/auth', { action: 'getFeatures' });
+    if (fe.ok) { setFeats(fe.data.features); setFeatDefs(fe.data.defs); }
+    const pr = await apiPost('/api/auth', { action: 'adminPresence' });
+    if (pr.ok) { setPresence(pr.data.presence || {}); setFeed(pr.data.feed || []); }
+    const sc = await apiPost('/api/auth', { action: 'getSecurity' });
+    if (sc.ok) setSec(sc.data.security || {});
   }
   useEffect(() => { if (user.isOwner) load(); }, [user.isOwner]);
   if (!user.isOwner) return null;
@@ -3836,6 +3865,40 @@ function OwnerConsole({ user, showToast }) {
 
   const openTickets = tickets.filter((t) => t.status === 'open').length;
 
+  const online = Object.values(presence).filter((p) => Date.now() - p.at < 3 * 60 * 1000).length;
+  const PAGE_LABEL = { daily: 'งานประจำวัน', calendar: 'ปฏิทิน', directory: 'Directory', platforms: 'แพลตฟอร์ม', analytics: 'ศูนย์วิเคราะห์', kpi: 'KPI', security: 'Protocol', settings: 'ตั้งค่า', team: 'ทีมงาน', profile: 'โปรไฟล์' };
+
+  // รีเฟรชสถานะสดทุก 20 วินาที
+  useEffect(() => {
+    if (!user.isOwner) return;
+    const id = setInterval(async () => {
+      const pr = await apiPost('/api/auth', { action: 'adminPresence' });
+      if (pr.ok) { setPresence(pr.data.presence || {}); setFeed(pr.data.feed || []); }
+    }, 20000);
+    return () => clearInterval(id);
+  }, [user.isOwner]);
+
+  async function resetPw(email) {
+    const pw = newPw[email];
+    if (!pw || pw.length < 8) { showToast('รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัว'); return; }
+    const { ok, data } = await apiPost('/api/auth', { action: 'adminResetPassword', email, newPassword: pw });
+    if (ok) { showToast(`ตั้งรหัสใหม่ให้ ${email} แล้ว — แจ้งเขาได้เลย`); setNewPw((n) => ({ ...n, [email]: '' })); }
+    else showToast(data.error || 'ไม่สำเร็จ');
+  }
+  async function toggleOtpDisabled() {
+    const { ok, data } = await apiPost('/api/auth', { action: 'updateSecurity', otpDisabled: !sec.otpDisabled });
+    if (ok) { setSec(data.security); showToast(data.security.otpDisabled ? 'ปิดการยืนยันอีเมลทั้งระบบแล้ว' : 'เปิดการยืนยันอีเมลแล้ว'); }
+  }
+
+  async function toggleFeature(group, key, value) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'saveFeatures', group, key, value });
+    if (ok) { setFeats(data.features); if (onFeaturesChanged) onFeaturesChanged(); }
+  }
+  async function toggleOtpExempt(email, exempt) {
+    const { ok } = await apiPost('/api/auth', { action: 'adminSetOtpExempt', email, exempt });
+    if (ok) { showToast(exempt ? 'ยกเว้นการยืนยันอีเมลแล้ว' : 'เปิดการยืนยันอีเมลแล้ว'); load(); }
+  }
+
   async function replyTicket(id) {
     const { ok, data } = await apiPost('/api/auth', { action: 'adminReplyTicket', id, reply: reply[id] || '', status: 'closed' });
     if (ok) { setTickets(data.tickets || []); setReply((r) => ({ ...r, [id]: '' })); showToast('ตอบกลับแล้ว'); }
@@ -3868,6 +3931,8 @@ function OwnerConsole({ user, showToast }) {
   }
 
   const TABS = [
+    { key: 'live', label: `สถานะสด${online ? ` (${online})` : ''}` },
+    { key: 'features', label: 'เปิด/ปิดฟีเจอร์' },
     { key: 'tickets', label: `กล่องข้อความ${openTickets ? ` (${openTickets})` : ''}` },
     { key: 'gate', label: 'ล็อกเว็บ' },
     { key: 'users', label: `ผู้ใช้ (${users.length})` },
@@ -3889,6 +3954,78 @@ function OwnerConsole({ user, showToast }) {
           <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: tab === t.key ? C.violet : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>{t.label}</button>
         ))}
       </div>
+
+      {tab === 'live' && (
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+            <p className="font-body text-xs" style={{ color: C.muted }}>อัปเดตอัตโนมัติทุก 20 วินาที · ออนไลน์ตอนนี้ {online} คน</p>
+          </div>
+          <div className="space-y-1.5 mb-4">
+            {Object.keys(presence).length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีใครใช้งาน</p> : (
+              Object.entries(presence).sort((a, b) => b[1].at - a[1].at).map(([em, p]) => {
+                const mins = Math.round((Date.now() - p.at) / 60000);
+                const isOn = mins < 3;
+                return (
+                  <div key={em} className="flex items-center justify-between gap-2 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${isOn ? C.emerald : C.border}` }}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: isOn ? C.emerald : C.muted, boxShadow: isOn ? `0 0 6px ${C.emerald}` : 'none' }} />
+                      <div className="min-w-0">
+                        <div className="font-mono truncate" style={{ fontSize: 11, color: C.text }}>{em}</div>
+                        <div className="font-mono" style={{ fontSize: 10, color: C.muted }}>{isOn ? `กำลังอยู่หน้า ${PAGE_LABEL[p.page] || p.page || '-'}` : `ออฟไลน์ ${mins < 60 ? `${mins} นาที` : `${Math.round(mins / 60)} ชม.`}ที่แล้ว`}</div>
+                      </div>
+                    </div>
+                    {isOn && <span className="font-mono text-2xs shrink-0" style={{ color: C.emerald }}>ออนไลน์</span>}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>สิ่งที่ผู้ใช้ทำล่าสุด</div>
+          {feed.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูล</p> : (
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {feed.map((f, i) => (
+                <div key={i} className="font-mono flex items-center gap-2 py-1" style={{ fontSize: 10, color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <span className="shrink-0">{new Date(f.at).toLocaleTimeString('th-TH')}</span>
+                  <span className="truncate" style={{ color: C.text }}>{f.email}</span>
+                  <span className="truncate">{f.what}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'features' && (
+        !feats || !featDefs ? <p className="font-body text-xs" style={{ color: C.muted }}>กำลังโหลด...</p> : (
+          <div className="space-y-3">
+            <p className="font-body text-xs leading-relaxed" style={{ color: C.muted }}>
+              ปิดฟีเจอร์ไหน ผู้ใช้จะไม่เห็นเมนูนั้นเลย — <b style={{ color: C.violet }}>คุณในฐานะเจ้าของระบบเห็นทุกอย่างเสมอ</b> ไม่ว่าปิดหรือเปิด
+            </p>
+            {[
+              { g: 'pages', title: 'หน้าหลัก (เมนูซ้าย)', col: C.blue },
+              { g: 'analyticsTabs', title: 'แท็บในหน้าวิเคราะห์', col: C.emerald },
+              { g: 'departments', title: 'แผนกใน Directory', col: C.orange },
+            ].map((sec) => (
+              <div key={sec.g} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs mb-2" style={{ color: sec.col }}>{sec.title}</div>
+                <div className="grid sm:grid-cols-2 gap-1.5">
+                  {Object.entries(featDefs[sec.g] || {}).map(([k, def]) => {
+                    const val = feats[sec.g]?.[k] !== false;
+                    return (
+                      <button key={k} onClick={() => toggleFeature(sec.g, k, !val)} className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg" style={{ background: val ? `${sec.col}12` : 'transparent', border: `1px solid ${val ? sec.col : C.border}` }}>
+                        <span className="font-body text-xs truncate" style={{ color: val ? C.text : C.muted }}>{def.label}</span>
+                        <span className="shrink-0 rounded-full relative" style={{ width: 30, height: 16, background: val ? sec.col : C.border }}>
+                          <span className="absolute rounded-full" style={{ top: 2, left: val ? 16 : 2, width: 12, height: 12, background: '#fff', transition: 'left .15s' }} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
 
       {tab === 'tickets' && (
         tickets.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อความ</p> : (
@@ -3933,6 +4070,19 @@ function OwnerConsole({ user, showToast }) {
                   <p className="font-body" style={{ fontSize: 10, color: C.muted }}>{m.desc}</p>
                 </button>
               ))}
+            </div>
+
+            {/* ปิดยืนยันอีเมลทั้งระบบ — ใช้ตอนยังไม่ได้ยืนยันโดเมนกับผู้ให้บริการอีเมล */}
+            <div className="p-3 rounded-xl mb-3" style={{ background: sec.otpDisabled ? `${C.orange}12` : C.bgDeep, border: `1px solid ${sec.otpDisabled ? C.orange : C.border}` }}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-body text-xs" style={{ color: sec.otpDisabled ? C.orange : C.text }}>ปิดการยืนยันรหัสทางอีเมลทั้งระบบ</div>
+                  <p className="font-body" style={{ fontSize: 10, color: C.muted }}>เปิดสวิตช์นี้ถ้ายังไม่ได้ยืนยันโดเมนกับผู้ให้บริการอีเมล — ผู้ใช้จะล็อกอินด้วยรหัสผ่านอย่างเดียว</p>
+                </div>
+                <button onClick={toggleOtpDisabled} className="shrink-0 rounded-full relative" style={{ width: 38, height: 20, background: sec.otpDisabled ? C.orange : C.border }}>
+                  <span className="absolute rounded-full" style={{ top: 2, left: sec.otpDisabled ? 20 : 2, width: 16, height: 16, background: '#fff', transition: 'left .15s' }} />
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -4018,6 +4168,17 @@ function OwnerConsole({ user, showToast }) {
                   </select>
                   <input value={grant[u.email] || ''} onChange={(e) => setGrant((g) => ({ ...g, [u.email]: e.target.value }))} placeholder="เติมโทเค็น" type="number" className="font-mono text-2xs px-2 py-1 rounded outline-none" style={{ width: 88, background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
                   <button onClick={() => doGrant(u.email)} disabled={busy} className="font-mono text-2xs px-2 py-1 rounded" style={{ background: C.emerald, color: '#062' }}>เติม</button>
+                  {!u.isOwner && (
+                    <>
+                      <input value={newPw[u.email] || ''} onChange={(e) => setNewPw((n) => ({ ...n, [u.email]: e.target.value }))} placeholder="ตั้งรหัสใหม่" className="font-mono text-2xs px-2 py-1 rounded outline-none" style={{ width: 110, background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                      <button onClick={() => resetPw(u.email)} className="font-mono text-2xs px-2 py-1 rounded" style={{ border: `1px solid ${C.violet}`, color: C.violet }}>ตั้งรหัสใหม่</button>
+                    </>
+                  )}
+                  {!u.isOwner && (
+                    <button onClick={() => toggleOtpExempt(u.email, !u.otpExempt)} title="ถ้าอีเมลส่งไม่ถึง ให้ยกเว้นการยืนยันอีเมลชั่วคราว" className="font-mono text-2xs px-2 py-1 rounded" style={{ border: `1px solid ${u.otpExempt ? C.orange : C.border}`, color: u.otpExempt ? C.orange : C.muted }}>
+                      {u.otpExempt ? 'ยกเว้น OTP อยู่' : 'ยกเว้น OTP'}
+                    </button>
+                  )}
                   {!u.isOwner && (
                     <button onClick={() => suspend(u.email, !u.suspended)} className="font-mono text-2xs px-2 py-1 rounded" style={{ border: `1px solid ${u.suspended ? C.emerald : C.red}`, color: u.suspended ? C.emerald : C.red }}>
                       {u.suspended ? 'ปลดระงับ' : 'ระงับ'}
@@ -4126,14 +4287,14 @@ function TrashPanel({ trash, onRestore, onPurge, onEmpty }) {
 }
 
 // ---------- ตรวจสุขภาพระบบ ----------
-function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
+function HealthCheckPanel({ user, channels, tasks, history, futureTasks, loadOk, onFixOrphans, onBackupNow }) {
   const [checks, setChecks] = useState(null);
   const [running, setRunning] = useState(false);
 
   async function runChecks() {
     setRunning(true);
     const out = [];
-    const add = (name, ok, detail, warn) => out.push({ name, ok, detail, warn });
+    const add = (name, ok, detail, warn, fix) => out.push({ name, ok, detail, warn, fix });
 
     add('เชื่อมต่อฐานข้อมูล', loadOk, loadOk ? 'อ่านข้อมูลได้ปกติ' : 'โหลดข้อมูลไม่สำเร็จ — อย่าเพิ่งแก้ไขอะไร');
 
@@ -4147,13 +4308,13 @@ function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
     try {
       const { data } = await apiPost('/api/auth', { action: 'listBackups' });
       const n = (data.backups || []).length;
-      add('ชุดสำรองข้อมูล', n > 0, n > 0 ? `มี ${n} ชุด (ล่าสุด ${data.backups[data.backups.length - 1]})` : 'ยังไม่มีชุดสำรอง — กดสำรองในหน้า Protocol');
+      add('ชุดสำรองข้อมูล', n > 0, n > 0 ? `มี ${n} ชุด (ล่าสุด ${data.backups[data.backups.length - 1]})` : 'ยังไม่มีชุดสำรอง — กดปุ่ม "สำรองเดี๋ยวนี้" ด้านล่าง', null, n === 0 ? 'backup' : null);
     } catch (e) { add('ชุดสำรองข้อมูล', false, 'ตรวจไม่สำเร็จ'); }
 
     // งานที่ไม่มีช่องรองรับ (ข้อมูลกำพร้า)
     const ids = new Set(channels.map((c) => c.id));
     const orphan = tasks.filter((t) => !ids.has(t.channelId)).length;
-    add('ความสมบูรณ์ของข้อมูล', orphan === 0, orphan === 0 ? 'ไม่พบงานกำพร้า' : `พบงาน ${orphan} ชิ้นที่ไม่มีช่องรองรับ`);
+    add('ความสมบูรณ์ของข้อมูล', orphan === 0, orphan === 0 ? 'ไม่พบงานกำพร้า' : `พบงาน ${orphan} ชิ้นที่ไม่มีช่องรองรับ (เกิดจากลบช่องแล้วงานค้างอยู่)`, null, orphan > 0 ? 'orphan' : null);
 
     // งาน id ซ้ำ
     const seen = new Set(); let dup = 0;
@@ -4203,9 +4364,15 @@ function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
             {checks.map((c, i) => (
               <div key={i} className="flex items-start gap-2 py-1.5" style={{ borderBottom: `1px solid ${C.border}` }}>
                 {c.ok ? <CheckCircle2 size={13} style={{ color: c.warn ? C.orange : C.emerald }} className="shrink-0 mt-0.5" /> : <XCircle size={13} style={{ color: C.red }} className="shrink-0 mt-0.5" />}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="font-body text-xs" style={{ color: C.text }}>{c.name}</div>
                   <div className="font-mono text-2xs" style={{ color: c.warn ? C.orange : C.muted, fontSize: 10 }}>{c.warn || c.detail}</div>
+                  {c.fix === 'orphan' && (
+                    <button onClick={async () => { await onFixOrphans(); runChecks(); }} className="mt-1 font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald }}>ลบงานกำพร้าทิ้ง</button>
+                  )}
+                  {c.fix === 'backup' && (
+                    <button onClick={async () => { await onBackupNow(); runChecks(); }} className="mt-1 font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.blue}`, color: C.blue }}>สำรองเดี๋ยวนี้</button>
+                  )}
                 </div>
               </div>
             ))}
@@ -4216,7 +4383,7 @@ function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
   );
 }
 
-function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refreshMe, showToast, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
+function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refreshMe, showToast, onFixOrphans, onBackupNow, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
   const [importMsg, setImportMsg] = useState('');
   const [importing, setImporting] = useState(false);
 
@@ -4261,11 +4428,11 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
 
-      <OwnerConsole user={user} showToast={showToast} />
+      <OwnerConsole user={user} showToast={showToast} onFeaturesChanged={refreshMe} />
       <TokenMeter tokens={tokens} />
       <GeminiKeyPanel user={user} tokens={tokens} onSaved={refreshMe} showToast={showToast} />
       <HelpPanel tokens={tokens} showToast={showToast} />
-      <HealthCheckPanel channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />
+      {user.isOwner && <HealthCheckPanel user={user} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} onFixOrphans={onFixOrphans} onBackupNow={onBackupNow} />}
       <TrashPanel trash={trash} onRestore={onRestoreTrash} onPurge={onPurgeTrash} onEmpty={onEmptyTrash} />
 
       <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -5488,6 +5655,7 @@ export default function CompanyPortal() {
   const [rivals, setRivals] = useState([]);     // คลังถอดสูตรคู่แข่ง
   const [tokens, setTokens] = useState(null);   // สถานะโทเค็นของผู้ใช้คนนี้
   const [ads, setAds] = useState([]);           // ข้อมูลแคมเปญโฆษณาที่อ่านมาจากภาพ
+  const [features, setFeatures] = useState(null); // ฟีเจอร์ที่เจ้าของระบบเปิดให้ใช้
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -5723,6 +5891,23 @@ export default function CompanyPortal() {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
     setActiveDept(dept); setStage('department');
   }
+  // ลบงานกำพร้า (งานที่ช่องถูกลบไปแล้วแต่ตัวงานยังค้าง)
+  async function fixOrphanTasks() {
+    const ids = new Set(channels.map((c) => c.id));
+    setTasks((prev) => prev.filter((t) => ids.has(t.channelId)));
+    setFutureTasks((prev) => {
+      const next = {};
+      Object.keys(prev).forEach((d) => { next[d] = (prev[d] || []).filter((t) => ids.has(t.channelId)); });
+      return next;
+    });
+    setHistory((prev) => prev.map((h) => (Array.isArray(h.tasks) ? { ...h, tasks: h.tasks.filter((t) => ids.has(t.channelId)) } : h)));
+    showToast('ลบงานกำพร้าเรียบร้อย');
+  }
+  async function runBackupNow() {
+    const { ok } = await apiPost('/api/auth', { action: 'runBackup' });
+    showToast(ok ? 'สำรองข้อมูลแล้ว' : 'สำรองไม่สำเร็จ');
+  }
+
   // ---------- ถังขยะ ----------
   function sendToTrash(kind, label, payload) {
     setTrash((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, kind, label, payload, at: Date.now() }].slice(-200));
@@ -5762,6 +5947,7 @@ export default function CompanyPortal() {
     if (ok && data.account) {
       setUser((u) => ({ ...u, hasGeminiKey: !!data.account.hasGeminiKey, clearance: data.account.clearance, isOwner: !!data.account.isOwner }));
       setTokens(data.tokens || null);
+      setFeatures(data.features || null);
       setAiGap(data.account.hasGeminiKey ? 1500 : 13000);
     }
   }
@@ -5800,6 +5986,7 @@ export default function CompanyPortal() {
               hasGeminiKey: !!data.account.hasGeminiKey,
             });
             setTokens(data.tokens || null);
+            setFeatures(data.features || null);
             if (data.account.hasGeminiKey) setAiGap(1500);
             setStage('daily');
           } else {
@@ -5809,6 +5996,15 @@ export default function CompanyPortal() {
         .catch(() => clearSession());
     }
   }, []);
+
+  // ส่งสถานะว่ากำลังอยู่หน้าไหน ทุก 45 วินาที (ให้เจ้าของเห็นแบบเรียลไทม์)
+  useEffect(() => {
+    if (!user) return;
+    const send = () => { apiPost('/api/auth', { action: 'presence', page: stage }).catch(() => {}); };
+    send();
+    const id = setInterval(send, 45000);
+    return () => clearInterval(id);
+  }, [user, stage]);
 
   // โทเค็นหมดอายุหรือถูกเพิกถอน — เด้งกลับหน้าล็อกอินทันที
   useEffect(() => {
@@ -5891,7 +6087,7 @@ export default function CompanyPortal() {
 
       {stage !== 'terminal' && user && (
         <div className="flex">
-          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} features={features} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
@@ -5899,9 +6095,9 @@ export default function CompanyPortal() {
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
-            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
+            {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
-            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} tokens={tokens} refreshMe={refreshMe} showToast={showToast} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
+            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} tokens={tokens} refreshMe={refreshMe} showToast={showToast} onFixOrphans={fixOrphanTasks} onBackupNow={runBackupNow} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
           </div>
