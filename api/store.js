@@ -1,7 +1,7 @@
 import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, autoBackup, logActivity } from './_lib.js';
 
 // ข้อมูลส่วนตัวของแต่ละคน — เก็บแยกตามอีเมล ห้ามปนกันเด็ดขาด
-const USER_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads'];
+const USER_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptRecords', 'dayNotes'];
 
 // สร้างชื่อคีย์เฉพาะของผู้ใช้คนนั้น
 function scopedKey(key, email) {
