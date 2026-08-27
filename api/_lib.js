@@ -127,35 +127,41 @@ export async function rateLimit(bucketKey, maxHits, windowMs) {
 // เก็บสแนปช็อตรายวันไว้ 7 ชุด (เขียนทับชุดเดิมของวันเดียวกัน) กู้คืนได้จากหน้า Setting
 const BACKUP_KEYS = ['channels', 'tasks', 'history', 'futureTasks', 'lastActiveDate'];
 
-export async function autoBackup(dateStr) {
-  const index = (await redisGet('backup_index')) || [];
+// สำรองข้อมูลแยกตามผู้ใช้ — ของใครของมัน ไม่ทับกัน
+export async function autoBackup(dateStr, email) {
+  if (!email) return { skipped: true, reason: 'no-email' };
+  const em = String(email).toLowerCase();
+  const idxKey = `bk:${em}:index`;
+  const index = (await redisGet(idxKey)) || [];
   if (index.includes(dateStr)) return { skipped: true };
+
   const snapshot = {};
   for (const k of BACKUP_KEYS) {
-    snapshot[k] = await redisGet(k);
+    snapshot[k] = await redisGet(`u:${em}:${k}`);
   }
-  // ไม่สำรองถ้าไม่มีข้อมูลจริง — กันการเขียนทับชุดสำรองดีๆ ด้วยชุดว่าง
+  // ไม่สำรองถ้าไม่มีข้อมูลจริง — กันชุดว่างทับชุดดี
   const hasData = Array.isArray(snapshot.channels) && snapshot.channels.length > 0;
   if (!hasData) return { skipped: true, reason: 'empty' };
 
-  await redisSet(`backup_${dateStr}`, { at: Date.now(), data: snapshot });
+  await redisSet(`bk:${em}:${dateStr}`, { at: Date.now(), data: snapshot });
   const nextIndex = [...index, dateStr].slice(-7);
-  await redisSet('backup_index', nextIndex);
-  // ลบชุดที่เกิน 7 วัน
+  await redisSet(idxKey, nextIndex);
   for (const old of index) {
     if (!nextIndex.includes(old)) {
-      try { await redisSet(`backup_${old}`, null); } catch (e) {}
+      try { await redisSet(`bk:${em}:${old}`, null); } catch (e) {}
     }
   }
   return { ok: true, kept: nextIndex };
 }
 
-export async function listBackups() {
-  return (await redisGet('backup_index')) || [];
+export async function listBackups(email) {
+  if (!email) return [];
+  return (await redisGet(`bk:${String(email).toLowerCase()}:index`)) || [];
 }
 
-export async function getBackup(dateStr) {
-  return await redisGet(`backup_${dateStr}`);
+export async function getBackup(dateStr, email) {
+  if (!email) return null;
+  return await redisGet(`bk:${String(email).toLowerCase()}:${dateStr}`);
 }
 
 // ---------- บันทึกกิจกรรม (Activity Log) ----------
@@ -395,4 +401,19 @@ export function makeInviteCode() {
   let out = '';
   for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return `${out.slice(0, 4)}-${out.slice(4)}`;
+}
+
+// ---------- คำขอความช่วยเหลือ / ขอโทเค็นเพิ่ม ----------
+export async function addTicket(entry) {
+  const list = (await redisGet('tickets')) || [];
+  list.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), status: 'open', ...entry });
+  await redisSet('tickets', list.slice(-200));
+  return list[list.length - 1];
+}
+export async function listTickets() { return (await redisGet('tickets')) || []; }
+export async function updateTicket(id, patch) {
+  const list = (await redisGet('tickets')) || [];
+  const next = list.map((t) => (t.id === id ? { ...t, ...patch } : t));
+  await redisSet('tickets', next);
+  return next;
 }
