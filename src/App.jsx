@@ -8,6 +8,7 @@ import {
   CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
   X, Upload, PieChart as PieChartIcon, Download, Undo2, Redo2,
   Target, Trash, RotateCcw, Activity, Search, Flame, Award, Gauge,
+  Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -533,6 +534,7 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
     ...(user.clearance === 3 ? [{ key: 'team', label: 'ทีมงาน', Icon: Users }] : []),
     { key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp },
     { key: 'kpi', label: 'KPI / รายเดือน', Icon: Target },
+    { key: 'strategy', label: 'แผน & กลยุทธ์', Icon: Compass },
     { key: 'security', label: 'Protocol', Icon: ScrollText },
     { key: 'settings', label: 'Setting', Icon: SettingsIcon },
   ];
@@ -1699,6 +1701,465 @@ function engagementRate(m) {
   if (!m || !m.views) return null;
   const inter = (m.likes || 0) + (m.comments || 0) + (m.shares || 0) + (m.saves || 0);
   return Math.round((inter / m.views) * 1000) / 10;
+}
+
+// ---------- ระบบวางแผน & กลยุทธ์ ----------
+const HORIZONS = [
+  { key: '1d', label: '1 วัน', days: 1 },
+  { key: '2d', label: '2 วัน', days: 2 },
+  { key: '3d', label: '3 วัน', days: 3 },
+  { key: '4d', label: '4 วัน', days: 4 },
+  { key: '5d', label: '5 วัน', days: 5 },
+  { key: '6d', label: '6 วัน', days: 6 },
+  { key: '1w', label: '1 สัปดาห์', days: 7 },
+  { key: '1m', label: '1 เดือน', days: 30 },
+  { key: '3m', label: '3 เดือน', days: 90 },
+  { key: '6m', label: '6 เดือน', days: 180 },
+  { key: '9m', label: '9 เดือน', days: 270 },
+  { key: '1y', label: '1 ปี', days: 365 },
+  { key: '2y', label: '2 ปี', days: 730 },
+];
+
+const PLAN_SYS = `คุณคือนักวางกลยุทธ์การเติบโตช่องโซเชียลและครีเอเตอร์คอมเมิร์ซระดับมืออาชีพ
+เชี่ยวชาญจิตวิทยาผู้ชม เทคนิคการหยุดนิ้ว (scroll-stopping) และการเปลี่ยนคนดูเป็นคนซื้อ
+วางแผนจากข้อมูลจริงที่ให้มา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+
+รูปแบบ:
+{
+  "planName": "ชื่อแผนสั้นๆ",
+  "thesis": "แก่นของแผน 1-2 ประโยค ว่าจะชนะด้วยอะไร",
+  "targets": {
+    "views": ตัวเลขเป้าหมายรวมทั้งช่วง,
+    "engagementRate": ตัวเลข % เป้าหมาย,
+    "newFollowers": ตัวเลข,
+    "postsTotal": ตัวเลขจำนวนคลิปทั้งช่วง,
+    "postsPerDay": ตัวเลข,
+    "salesOrders": ตัวเลขหรือ null,
+    "aov": ตัวเลขมูลค่าเฉลี่ยต่อคำสั่งซื้อหรือ null,
+    "ctr": ตัวเลข % คลิกไปตะกร้าหรือ null
+  },
+  "targetRationale": "อธิบายว่าตั้งเป้านี้จากฐานอะไร อ้างตัวเลขจริง",
+  "phases": [
+    {"name":"ชื่อเฟส","range":"ช่วงวันที่","focus":"โฟกัสอะไร","successMetric":"วัดยังไงว่าผ่าน"}
+  ],
+  "contentPillars": [
+    {"name":"เสาหลักคอนเทนต์","ratio":"สัดส่วน % ของคลิปทั้งหมด","why":"เหตุผลเชิงจิตวิทยา","exampleHook":"ตัวอย่างฮุก 3 วินาทีแรก"}
+  ],
+  "hookFormulas": ["สูตรฮุกที่ต้องใช้ พร้อมอธิบายว่าทำไมถึงหยุดนิ้วได้"],
+  "psychologyNotes": ["หลักจิตวิทยาที่ใช้ในแผนนี้ อธิบายให้เข้าใจง่าย"],
+  "weeklyRhythm": "จังหวะการทำงานรายสัปดาห์ที่ทำได้จริง",
+  "contentDirective": "ข้อความสั่งการสำหรับ AI สร้างคอนเทนต์ ใช้เป็นสไตล์ตั้งต้นของทุกคลิปในช่วงนี้ เขียนละเอียด ระบุโทน มุมกล้อง จังหวะ และสิ่งที่ต้องมีใน 3 วินาทีแรก",
+  "leadingIndicators": ["ตัวเลขที่ต้องจับตาทุกวัน เพราะบอกล่วงหน้าว่าแผนจะสำเร็จหรือไม่"],
+  "risks": [{"risk":"ความเสี่ยง","mitigation":"วิธีรับมือ"}],
+  "checkpointEvery": "ควรตรวจแผนทุกกี่วัน"
+}
+
+กติกา:
+- เป้าหมายต้องท้าทายแต่เป็นไปได้จริงจากฐานปัจจุบัน ถ้าไม่มีข้อมูลฐานให้ตั้งแบบอนุรักษ์นิยมและบอกไว้
+- contentPillars 3-5 ข้อ, hookFormulas 3-5 ข้อ, phases 2-5 เฟส
+- ยิ่งช่วงเวลายาว ยิ่งต้องแบ่งเฟสและมีจุดตรวจถี่ขึ้น
+- ห้ามพูดลอยๆ ต้องอ้างตัวเลขหรือหลักการที่ตรวจสอบได้`;
+
+const PLAN_REVIEW_SYS = `คุณคือที่ปรึกษาที่ตรวจว่าแผนที่วางไว้เป็นไปตามเป้าหรือไม่ ตรงไปตรงมา ไม่ปลอบใจ
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+{
+  "onTrack": true หรือ false,
+  "progressPercent": ตัวเลข 0-100 ความคืบหน้าเทียบเป้า,
+  "verdict": "สรุปตรงๆ ว่าตอนนี้สถานการณ์เป็นยังไง",
+  "gaps": [{"metric":"ตัวชี้วัด","target":"เป้า","actual":"จริง","gap":"ห่างเท่าไหร่","cause":"สาเหตุที่น่าจะเป็น"}],
+  "fixNow": [{"action":"สิ่งที่ต้องทำทันที","expectedEffect":"คาดว่าจะช่วยอะไร","priority":"high|medium|low"}],
+  "planAdjustment": "ควรปรับแผนยังไง หรือ null ถ้ายังไม่ต้องปรับ",
+  "contentDirectiveUpdate": "ข้อความสั่งการใหม่สำหรับ AI สร้างคอนเทนต์ ถ้าควรเปลี่ยนแนว หรือ null"
+}`;
+
+function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, showToast }) {
+  const [horizon, setHorizon] = useState('1m');
+  const [goal, setGoal] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [err, setErr] = useState('');
+  const [openId, setOpenId] = useState(null);
+
+  const list = Array.isArray(plans) ? plans : [];
+  const active = list.find((p) => p.id === openId) || list[list.length - 1] || null;
+  const saved = Array.isArray(metrics) ? metrics : [];
+
+  // สรุปฐานปัจจุบันจากสถิติจริงที่อ่านมา
+  function baselineSummary() {
+    if (saved.length === 0) return 'ยังไม่มีข้อมูลสถิติจริงในระบบ';
+    const views = saved.map((m) => m.metrics?.views).filter((v) => typeof v === 'number');
+    const ers = saved.map((m) => engagementRate(m.metrics)).filter((v) => v != null);
+    const byPlat = {};
+    saved.forEach((m) => { byPlat[m.platform] = (byPlat[m.platform] || 0) + 1; });
+    return [
+      `จำนวนโพสต์ที่มีข้อมูล: ${saved.length}`,
+      views.length ? `วิวรวม: ${views.reduce((a, b) => a + b, 0)} · เฉลี่ยต่อคลิป: ${Math.round(views.reduce((a, b) => a + b, 0) / views.length)}` : 'ยังไม่มีข้อมูลวิว',
+      ers.length ? `อัตรามีส่วนร่วมเฉลี่ย: ${(ers.reduce((a, b) => a + b, 0) / ers.length).toFixed(1)}%` : 'ยังไม่มีข้อมูลการมีส่วนร่วม',
+      `แพลตฟอร์มที่มีข้อมูล: ${Object.entries(byPlat).map(([k, v]) => `${k} (${v})`).join(', ')}`,
+      `ช่องที่ทำอยู่: ${channels.map((c) => c.name).join(', ') || '-'}`,
+    ].join('\n');
+  }
+
+  async function createPlan() {
+    if (!goal.trim()) { setErr('กรุณาระบุเป้าหมายที่ต้องการก่อน'); return; }
+    setCreating(true); setErr('');
+    const h = HORIZONS.find((x) => x.key === horizon);
+    try {
+      const text = await callClaude(PLAN_SYS, `ช่วงเวลาของแผน: ${h.label} (${h.days} วัน)\nเป้าหมายที่ผมต้องการ: ${goal.trim()}\n\nข้อมูลฐานปัจจุบัน:\n${baselineSummary()}`);
+      const json = parseJsonLoose(text);
+      const start = todayDateStr();
+      const end = shiftDateStr(start, h.days);
+      const plan = { id: `${Date.now()}`, createdAt: Date.now(), horizon, horizonLabel: h.label, days: h.days, startDate: start, endDate: end, goal: goal.trim(), data: json, checkpoints: [], status: 'active' };
+      setPlans([...(Array.isArray(plans) ? plans : []), plan].slice(-30));
+      setOpenId(plan.id);
+      setGoal('');
+    } catch (e) {
+      setErr(`สร้างแผนไม่สำเร็จ: ${e.message || ''}`);
+    }
+    setCreating(false);
+  }
+
+  // เทียบผลจริงกับเป้าที่วางไว้
+  function actualsFor(plan) {
+    const rows = saved.filter((m) => m.date >= plan.startDate);
+    const views = rows.map((m) => m.metrics?.views).filter((v) => typeof v === 'number');
+    const ers = rows.map((m) => engagementRate(m.metrics)).filter((v) => v != null);
+    const nf = rows.map((m) => m.metrics?.newFollowers).filter((v) => typeof v === 'number');
+    return {
+      posts: rows.length,
+      views: views.reduce((a, b) => a + b, 0),
+      engagementRate: ers.length ? Math.round((ers.reduce((a, b) => a + b, 0) / ers.length) * 10) / 10 : null,
+      newFollowers: nf.reduce((a, b) => a + b, 0),
+    };
+  }
+
+  async function reviewPlan(plan) {
+    setReviewing(true); setErr('');
+    const act = actualsFor(plan);
+    const daysPassed = Math.max(1, Math.round((Date.now() - new Date(plan.startDate + 'T00:00:00')) / 86400000));
+    try {
+      const text = await callClaude(PLAN_REVIEW_SYS, `แผน: ${plan.data.planName} (${plan.horizonLabel})\nเป้าหมายที่ตั้งไว้: ${JSON.stringify(plan.data.targets)}\nผ่านมาแล้ว ${daysPassed} จาก ${plan.days} วัน\n\nผลจริงถึงตอนนี้: ${JSON.stringify(act)}\n\nเป้าหมายที่ผู้ใช้ต้องการ: ${plan.goal}`);
+      const json = parseJsonLoose(text);
+      setPlans((Array.isArray(plans) ? plans : []).map((p) => (p.id === plan.id ? { ...p, checkpoints: [...(p.checkpoints || []), { at: Date.now(), daysPassed, actual: act, review: json }].slice(-20) } : p)));
+    } catch (e) {
+      setErr(`ตรวจแผนไม่สำเร็จ: ${e.message || ''}`);
+    }
+    setReviewing(false);
+  }
+
+  // ---- จุดเชื่อมสำคัญ: ส่งแนวทางจากแผนไปให้ AI สร้างคอนเทนต์ใช้จริง ----
+  function applyDirective(text) {
+    if (!text) return;
+    setTasks((prev) => prev.map((t) => ({ ...t, styleTemplate: text })));
+    showToast('ใส่แนวทางลงงานวันนี้ทุกชิ้นแล้ว — AI จะยึดแนวนี้ตอนคิดโครงเรื่อง');
+  }
+
+  function deletePlan(id) {
+    if (!window.confirm('ลบแผนนี้?')) return;
+    setPlans((Array.isArray(plans) ? plans : []).filter((p) => p.id !== id));
+    setOpenId(null);
+  }
+
+  const d = active?.data;
+  const latestReview = active?.checkpoints?.length ? active.checkpoints[active.checkpoints.length - 1] : null;
+  const act = active ? actualsFor(active) : null;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><Compass size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>GROWTH STRATEGY</span></div>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>แผน &amp; กลยุทธ์</h2>
+      <p className="font-body text-xs mb-6 leading-relaxed" style={{ color: C.muted }}>
+        วางแผนจากข้อมูลจริงที่ระบบเก็บไว้ → ลงมือทำ → ตรวจว่าเป็นไปตามเป้าไหม → ปรับแนวทางแล้วส่งกลับให้ AI สร้างคอนเทนต์ใช้ทันที
+      </p>
+
+      {err && (
+        <div className="mb-4 p-3 rounded-xl flex items-start gap-2" style={{ background: `${C.red}15`, border: `1px solid ${C.red}55` }}>
+          <AlertTriangle size={13} style={{ color: C.red }} className="shrink-0 mt-0.5" />
+          <span className="font-body text-xs" style={{ color: C.text }}>{err}</span>
+        </div>
+      )}
+
+      {/* ---- สร้างแผนใหม่ ---- */}
+      <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>สร้างแผนใหม่</div>
+        <label className="font-mono text-2xs block mb-1.5" style={{ color: C.muted }}>เลือกช่วงเวลา</label>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {HORIZONS.map((h) => (
+            <button key={h.key} onClick={() => setHorizon(h.key)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ background: horizon === h.key ? BRAND : 'transparent', color: horizon === h.key ? '#fff' : C.muted, border: `1px solid ${horizon === h.key ? 'transparent' : C.border}` }}>{h.label}</button>
+          ))}
+        </div>
+        <label className="font-mono text-2xs block mb-1.5" style={{ color: C.muted }}>เป้าหมายที่ต้องการ (ยิ่งระบุชัด แผนยิ่งแม่น)</label>
+        <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} placeholder="เช่น อยากให้ Whalandia แตะ 1 ล้านวิวต่อเดือน และเริ่มขายของผ่านตะกร้าให้ได้ 50 ออเดอร์" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y mb-2" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+        <div className="p-2.5 rounded-xl mb-2.5" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs mb-1" style={{ color: C.cyan }}>ฐานข้อมูลที่ AI จะใช้วางแผน</div>
+          <pre className="font-mono whitespace-pre-wrap" style={{ fontSize: 10, color: C.muted }}>{baselineSummary()}</pre>
+        </div>
+        <button onClick={createPlan} disabled={creating} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: BRAND, color: '#fff', opacity: creating ? 0.6 : 1 }}>
+          {creating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI วางแผน {HORIZONS.find((h) => h.key === horizon)?.label}
+        </button>
+      </div>
+
+      {/* ---- รายการแผน ---- */}
+      {list.length > 0 && (
+        <div className="flex gap-1.5 mb-4 flex-wrap">
+          {list.slice().reverse().map((p) => (
+            <button key={p.id} onClick={() => setOpenId(p.id)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ background: active?.id === p.id ? C.violet : 'transparent', color: active?.id === p.id ? '#fff' : C.muted, border: `1px solid ${active?.id === p.id ? 'transparent' : C.border}` }}>
+              {p.data?.planName || p.horizonLabel} · {p.horizonLabel}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ---- รายละเอียดแผน ---- */}
+      {active && d && (
+        <>
+          <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.violet}44` }}>
+            <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
+              <div className="min-w-0">
+                <h3 className="font-body text-lg" style={{ color: C.text }}>{d.planName}</h3>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>{active.startDate} → {active.endDate} · {active.horizonLabel}</div>
+              </div>
+              <button onClick={() => deletePlan(active.id)} style={{ color: C.muted }}><Trash2 size={14} /></button>
+            </div>
+            <p className="font-body text-sm mb-3" style={{ color: C.text }}>{d.thesis}</p>
+
+            {/* เป้าหมาย vs ผลจริง */}
+            <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>เป้าหมาย เทียบ ผลจริง</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+              {[
+                { k: 'views', label: 'ยอดวิว', actual: act?.views },
+                { k: 'engagementRate', label: 'มีส่วนร่วม %', actual: act?.engagementRate },
+                { k: 'newFollowers', label: 'ผู้ติดตามใหม่', actual: act?.newFollowers },
+                { k: 'postsTotal', label: 'จำนวนคลิป', actual: act?.posts },
+              ].map((row) => {
+                const target = d.targets?.[row.k];
+                const pct = (typeof target === 'number' && target > 0 && typeof row.actual === 'number') ? Math.min(100, Math.round((row.actual / target) * 100)) : null;
+                const col = pct == null ? C.muted : pct >= 80 ? C.emerald : pct >= 40 ? C.orange : C.red;
+                return (
+                  <div key={row.k} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.muted, fontSize: 10 }}>{row.label}</div>
+                    <div className="font-display text-base font-bold leading-none" style={{ color: col }}>{fmtNum(row.actual)}<span className="font-mono" style={{ fontSize: 10, color: C.muted }}> / {fmtNum(target)}</span></div>
+                    {pct != null && (
+                      <div className="mt-1.5" style={{ width: '100%', height: 3, background: C.panel, borderRadius: 999, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: col }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {(d.targets?.salesOrders || d.targets?.aov || d.targets?.ctr) && (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
+                {d.targets.salesOrders && <span className="font-mono text-2xs" style={{ color: C.muted }}>เป้าออเดอร์ <span style={{ color: C.emerald }}>{fmtNum(d.targets.salesOrders)}</span></span>}
+                {d.targets.aov && <span className="font-mono text-2xs" style={{ color: C.muted }}>ยอดเฉลี่ย/ออเดอร์ <span style={{ color: C.emerald }}>{fmtNum(d.targets.aov)}</span></span>}
+                {d.targets.ctr && <span className="font-mono text-2xs" style={{ color: C.muted }}>คลิกไปตะกร้า <span style={{ color: C.emerald }}>{d.targets.ctr}%</span></span>}
+              </div>
+            )}
+            {d.targetRationale && <p className="font-body text-xs" style={{ color: C.muted }}>{d.targetRationale}</p>}
+          </div>
+
+          {/* เฟส */}
+          {Array.isArray(d.phases) && d.phases.length > 0 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แบ่งเฟสการทำงาน</div>
+              <div className="space-y-2">
+                {d.phases.map((ph, i) => (
+                  <div key={i} className="flex gap-2.5">
+                    <div className="shrink-0 flex flex-col items-center">
+                      <div className="rounded-full flex items-center justify-center font-mono font-bold" style={{ width: 22, height: 22, background: C.violet, color: '#fff', fontSize: 10 }}>{i + 1}</div>
+                      {i < d.phases.length - 1 && <div style={{ width: 1, flex: 1, background: C.border, marginTop: 3 }} />}
+                    </div>
+                    <div className="pb-2 min-w-0">
+                      <div className="font-body text-xs" style={{ color: C.text }}>{ph.name} <span className="font-mono" style={{ fontSize: 10, color: C.muted }}>· {ph.range}</span></div>
+                      <p className="font-body text-xs" style={{ color: C.muted }}>{ph.focus}</p>
+                      {ph.successMetric && <p className="font-mono mt-0.5" style={{ fontSize: 10, color: C.emerald }}>วัดผล: {ph.successMetric}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* เสาหลักคอนเทนต์ */}
+          {Array.isArray(d.contentPillars) && d.contentPillars.length > 0 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เสาหลักคอนเทนต์</div>
+              <div className="space-y-2">
+                {d.contentPillars.map((pl, i) => (
+                  <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-body text-xs" style={{ color: C.text }}>{pl.name}</span>
+                      <span className="font-mono text-2xs px-1.5 py-0.5 rounded shrink-0" style={{ color: C.violet, border: `1px solid ${C.violet}` }}>{pl.ratio}</span>
+                    </div>
+                    <p className="font-body text-xs mb-1" style={{ color: C.muted }}>{pl.why}</p>
+                    {pl.exampleHook && <p className="font-body text-xs p-1.5 rounded" style={{ color: C.emerald, background: `${C.emerald}10` }}>ฮุกตัวอย่าง: {pl.exampleHook}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ฮุก + จิตวิทยา */}
+          <div className="grid sm:grid-cols-2 gap-3 mb-4">
+            {Array.isArray(d.hookFormulas) && d.hookFormulas.length > 0 && (
+              <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.orange }}>สูตรฮุก 3 วินาทีแรก</div>
+                <ul className="space-y-1.5">
+                  {d.hookFormulas.map((h, i) => <li key={i} className="font-body text-xs flex gap-1.5" style={{ color: C.text }}><span style={{ color: C.orange }}>▸</span>{h}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(d.psychologyNotes) && d.psychologyNotes.length > 0 && (
+              <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.violet }}>หลักจิตวิทยาที่ใช้</div>
+                <ul className="space-y-1.5">
+                  {d.psychologyNotes.map((h, i) => <li key={i} className="font-body text-xs flex gap-1.5" style={{ color: C.text }}><span style={{ color: C.violet }}>▸</span>{h}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* ตัวเลขที่ต้องจับตา + ความเสี่ยง */}
+          <div className="grid sm:grid-cols-2 gap-3 mb-4">
+            {Array.isArray(d.leadingIndicators) && d.leadingIndicators.length > 0 && (
+              <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.cyan }}>ตัวเลขที่ต้องดูทุกวัน</div>
+                <ul className="space-y-1.5">
+                  {d.leadingIndicators.map((h, i) => <li key={i} className="font-body text-xs flex gap-1.5" style={{ color: C.text }}><Gauge size={11} style={{ color: C.cyan }} className="shrink-0 mt-0.5" />{h}</li>)}
+                </ul>
+              </div>
+            )}
+            {Array.isArray(d.risks) && d.risks.length > 0 && (
+              <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.red }}>ความเสี่ยง &amp; วิธีรับมือ</div>
+                <div className="space-y-2">
+                  {d.risks.map((r, i) => (
+                    <div key={i}>
+                      <div className="font-body text-xs" style={{ color: C.red }}>{r.risk}</div>
+                      <div className="font-body text-xs" style={{ color: C.muted }}>→ {r.mitigation}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* จุดเชื่อมกับ AI สร้างคอนเทนต์ */}
+          {d.contentDirective && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.emerald}55` }}>
+              <div className="flex items-center gap-2 mb-2">
+                <ArrowRight size={14} style={{ color: C.emerald }} />
+                <span className="font-mono text-2xs tracking-widest" style={{ color: C.emerald }}>ส่งแนวทางนี้ให้ AI สร้างคอนเทนต์</span>
+              </div>
+              <p className="font-body text-xs mb-2 p-2.5 rounded-xl whitespace-pre-wrap" style={{ color: C.text, background: C.bgDeep, border: `1px solid ${C.border}` }}>{d.contentDirective}</p>
+              <div className="flex gap-1.5 flex-wrap">
+                <button onClick={() => applyDirective(d.contentDirective)} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.emerald, color: '#062' }}>
+                  <ArrowRight size={11} /> ใส่ลงงานวันนี้ทุกชิ้น
+                </button>
+                <button onClick={() => copyText(d.contentDirective).then(() => showToast('คัดลอกแล้ว'))} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>คัดลอก</button>
+              </div>
+              <p className="font-mono text-2xs mt-2" style={{ color: C.muted, fontSize: 10 }}>* กดแล้วแนวทางนี้จะไปอยู่ในช่อง "เทมเพลต/สคริปต์อ้างอิง" ของงานทุกชิ้นวันนี้ AI จะยึดแนวนี้ตอนคิดโครงเรื่อง</p>
+            </div>
+          )}
+
+          {/* ตรวจแผน */}
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Activity size={14} style={{ color: C.blue }} />
+                <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ตรวจว่าเป็นไปตามแผนไหม</span>
+              </div>
+              <button onClick={() => reviewPlan(active)} disabled={reviewing} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: BRAND, color: '#fff', opacity: reviewing ? 0.6 : 1 }}>
+                {reviewing ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />} ตรวจเดี๋ยวนี้
+              </button>
+            </div>
+            {d.checkpointEvery && <p className="font-mono text-2xs mb-2" style={{ color: C.muted }}>แนะนำให้ตรวจ: {d.checkpointEvery}</p>}
+
+            {!latestReview ? (
+              <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่เคยตรวจ — กดปุ่มด้านบนเพื่อเทียบผลจริงกับเป้าที่วางไว้</p>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <span className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: latestReview.review.onTrack ? `${C.emerald}22` : `${C.red}22`, color: latestReview.review.onTrack ? C.emerald : C.red, border: `1px solid ${latestReview.review.onTrack ? C.emerald : C.red}` }}>
+                    {latestReview.review.onTrack ? 'เป็นไปตามแผน' : 'หลุดเป้า'}
+                  </span>
+                  <span className="font-mono text-2xs" style={{ color: C.muted }}>ความคืบหน้า {latestReview.review.progressPercent}% · ผ่านมา {latestReview.daysPassed} วัน</span>
+                </div>
+                <p className="font-body text-xs" style={{ color: C.text }}>{latestReview.review.verdict}</p>
+
+                {Array.isArray(latestReview.review.gaps) && latestReview.review.gaps.length > 0 && (
+                  <div className="space-y-1.5">
+                    {latestReview.review.gaps.map((g, i) => (
+                      <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                        <div className="font-mono text-2xs mb-0.5" style={{ color: C.orange }}>{g.metric} · เป้า {g.target} · จริง {g.actual} ({g.gap})</div>
+                        <p className="font-body text-xs" style={{ color: C.muted }}>{g.cause}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {Array.isArray(latestReview.review.fixNow) && latestReview.review.fixNow.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.emerald }}>ต้องทำทันที</div>
+                    <div className="space-y-1.5">
+                      {latestReview.review.fixNow.map((f, i) => (
+                        <div key={i} className="p-2.5 rounded-xl flex items-start gap-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                          <span className="font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ fontSize: 9, color: f.priority === 'high' ? C.red : C.muted, border: `1px solid ${f.priority === 'high' ? C.red : C.border}` }}>{f.priority === 'high' ? 'ด่วน' : f.priority === 'medium' ? 'ปานกลาง' : 'เสริม'}</span>
+                          <div className="min-w-0">
+                            <p className="font-body text-xs" style={{ color: C.text }}>{f.action}</p>
+                            {f.expectedEffect && <p className="font-body text-xs" style={{ color: C.muted }}>คาดว่า: {f.expectedEffect}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {latestReview.review.planAdjustment && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>ควรปรับแผน</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{latestReview.review.planAdjustment}</p>
+                  </div>
+                )}
+
+                {latestReview.review.contentDirectiveUpdate && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>แนวทางคอนเทนต์ใหม่ที่ควรใช้</div>
+                    <p className="font-body text-xs mb-2" style={{ color: C.text }}>{latestReview.review.contentDirectiveUpdate}</p>
+                    <button onClick={() => applyDirective(latestReview.review.contentDirectiveUpdate)} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.emerald, color: '#062' }}>
+                      <ArrowRight size={11} /> ใส่ลงงานวันนี้ทุกชิ้น
+                    </button>
+                  </div>
+                )}
+
+                {active.checkpoints.length > 1 && (
+                  <div className="pt-2" style={{ borderTop: `1px solid ${C.border}` }}>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.muted }}>ประวัติการตรวจ ({active.checkpoints.length})</div>
+                    <ResponsiveContainer width="100%" height={110}>
+                      <LineChart data={active.checkpoints.map((c) => ({ d: `วัน ${c.daysPassed}`, p: c.review.progressPercent }))}>
+                        <XAxis dataKey="d" tick={{ fill: C.muted, fontSize: 9 }} />
+                        <YAxis domain={[0, 100]} tick={{ fill: C.muted, fontSize: 9 }} />
+                        <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                        <Line type="monotone" dataKey="p" name="ความคืบหน้า %" stroke={C.emerald} strokeWidth={2} dot={{ r: 3 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {list.length === 0 && (
+        <div className="p-8 rounded-2xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <Compass size={26} style={{ color: C.muted }} className="mx-auto mb-2" />
+          <p className="font-body text-sm mb-1" style={{ color: C.text }}>ยังไม่มีแผน</p>
+          <p className="font-body text-xs" style={{ color: C.muted }}>เลือกช่วงเวลาและระบุเป้าหมายด้านบนเพื่อให้ AI วางแผนให้</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AnalyticsPage({ history, tasks, channels, metrics, setMetrics }) {
@@ -3548,6 +4009,7 @@ export default function CompanyPortal() {
   const [loadOk, setLoadOk] = useState(false);   // true เมื่อโหลดข้อมูลจากฐานข้อมูลสำเร็จจริง
   const [trash, setTrash] = useState([]);       // ถังขยะ เก็บของที่ลบไว้ 30 วัน
   const [metrics, setMetrics] = useState([]);   // สถิติจริงที่อ่านมาจากภาพหน้าจอแพลตฟอร์ม
+  const [plans, setPlans] = useState([]);       // แผนการเติบโตที่ AI วางให้
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -3644,7 +4106,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -3653,6 +4115,7 @@ export default function CompanyPortal() {
           api('/api/store?key=futureTasks'),
           api('/api/store?key=trash'),
           api('/api/store?key=metrics'),
+          api('/api/store?key=plans'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -3662,6 +4125,7 @@ export default function CompanyPortal() {
         const futureData = futureRes.data;
         const trashData = trashRes.data;
         const metricData = metricRes.data;
+        const planData = planRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -3716,6 +4180,7 @@ export default function CompanyPortal() {
         const rawTrash = Array.isArray(trashData.value) ? trashData.value : [];
         setTrash(rawTrash.filter((t) => Date.now() - (t.at || 0) < 30 * 24 * 60 * 60 * 1000));
         setMetrics(Array.isArray(metricData.value) ? metricData.value : []);
+        setPlans(Array.isArray(planData.value) ? planData.value : []);
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -3756,6 +4221,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'metrics', value: metrics }).catch(() => {});
   }, [metrics, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'plans', value: plans }).catch(() => {});
+  }, [plans, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -3918,6 +4387,7 @@ export default function CompanyPortal() {
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'strategy' && <StrategyPage metrics={metrics} plans={plans} setPlans={setPlans} channels={channels} tasks={tasks} setTasks={setTasks} showToast={showToast} />}
             {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
