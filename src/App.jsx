@@ -190,11 +190,13 @@ function daysAgoLabel(ts) {
 }
 
 // ---------- คิวเรียก AI: ยิงทีละคำขอ และเว้นช่วงกันชนลิมิต 5 ครั้ง/นาที ของแพ็กฟรี Gemini ----------
-const AI_MIN_GAP_MS = 13000; // เว้นห่างอย่างน้อย ~13 วิ ต่อคำขอ (ราว 4-5 ครั้ง/นาที)
+// ผู้ใช้ที่ใส่คีย์ของตัวเองไม่ต้องแย่งคิวกับคนอื่น ลดเวลารอลงมาก
+export function setAiGap(ms) { AI_MIN_GAP_MS = ms; }
+let AI_MIN_GAP_MS = 13000; // เว้นห่างอย่างน้อย ~13 วิ ต่อคำขอ (ราว 4-5 ครั้ง/นาที)
 let aiChain = Promise.resolve();
 let aiLastCallAt = 0;
 
-function callClaude(system, content, images) {
+function callClaude(system, content, images, action) {
   // ต่อคิวไว้ท้ายแถว งานถัดไปจะเริ่มก็ต่อเมื่องานก่อนหน้าเสร็จและเว้นระยะครบแล้ว
   const run = aiChain.then(async () => {
     const since = Date.now() - aiLastCallAt;
@@ -205,11 +207,17 @@ function callClaude(system, content, images) {
     const response = await fetch('/api/claude', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system, content, images }),
+      body: JSON.stringify({ system, content, images, action }),
     });
     const data = await response.json();
     aiLastCallAt = Date.now();
-    if (!response.ok || data?.error) throw new Error(data.error || 'เกิดข้อผิดพลาด');
+    if (!response.ok || data?.error) {
+      const e = new Error(data.error || 'เกิดข้อผิดพลาด');
+      e.needKey = data.needKey; e.outOfTokens = data.outOfTokens; e.badKey = data.badKey;
+      throw e;
+    }
+    // แจ้งยอดโทเค็นคงเหลือให้หน้าเว็บอัปเดต
+    if (data.tokensLeft != null) window.dispatchEvent(new CustomEvent('forge-tokens', { detail: { left: data.tokensLeft, cost: data.cost } }));
     return data.text || '(ไม่มีคำตอบ)';
   });
   // กันไม่ให้คิวขาดเมื่อมีคำขอใดล้มเหลว
@@ -225,6 +233,20 @@ function fileToBase64(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// ลายนิ้วมืออุปกรณ์อย่างง่าย — ใช้กันคนสมัครบัญชีทดลองซ้ำจากเครื่องเดิม
+function deviceFingerprint() {
+  try {
+    const parts = [
+      navigator.userAgent, navigator.language, String(screen.width), String(screen.height),
+      String(screen.colorDepth), String(new Date().getTimezoneOffset()),
+      String(navigator.hardwareConcurrency || ''), String(navigator.maxTouchPoints || ''),
+    ].join('|');
+    let h = 0;
+    for (let i = 0; i < parts.length; i++) { h = ((h << 5) - h) + parts.charCodeAt(i); h |= 0; }
+    return `fp${Math.abs(h).toString(36)}`;
+  } catch (e) { return ''; }
 }
 
 // ---------- session: เก็บเฉพาะ "โทเค็น" ที่เซิร์ฟเวอร์เซ็นมา ----------
@@ -520,7 +542,7 @@ function OverdueSidebarPanel({ history, onOpenDay, onDismissDay }) {
   );
 }
 
-function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay }) {
+function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay, tokens }) {
   const account = (accounts || []).find((a) => a.email === user.email);
   const totalToday = tasks.length;
   const doneToday = tasks.filter((t) => t.done).length;
@@ -534,7 +556,6 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
     ...(user.clearance === 3 ? [{ key: 'team', label: 'ทีมงาน', Icon: Users }] : []),
     { key: 'analytics', label: 'การวิเคราะห์', Icon: TrendingUp },
     { key: 'kpi', label: 'KPI / รายเดือน', Icon: Target },
-    { key: 'strategy', label: 'แผน & กลยุทธ์', Icon: Compass },
     { key: 'security', label: 'Protocol', Icon: ScrollText },
     { key: 'settings', label: 'Setting', Icon: SettingsIcon },
   ];
@@ -567,6 +588,7 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
           <div className="hidden sm:block text-left min-w-0">
             <div className="font-body text-xs truncate" style={{ color: C.text }}>{user.name}</div>
             <div className="font-mono text-2xs" style={{ color: C.emerald }}>{pct}% วันนี้</div>
+            {tokens && <div className="mt-0.5"><TokenMeter tokens={tokens} compact /></div>}
           </div>
         </button>
         <button onClick={logout} className="w-full flex items-center gap-2.5 px-1 py-1.5 justify-center sm:justify-start" style={{ color: C.muted }}>
@@ -607,6 +629,8 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingAccount, setPendingAccount] = useState(null); // เก็บไว้แสดงชื่อระหว่างรอ OTP
+  const [inviteCode, setInviteCode] = useState('');
+  const [gateMode, setGateMode] = useState(null);
   const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
@@ -661,6 +685,10 @@ function Terminal({ accounts, onSignup, onLogin }) {
       setLoginError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ลองใหม่อีกครั้ง');
     }
   }
+  useEffect(() => {
+    apiPost('/api/auth', { action: 'gateInfo' }).then(({ ok, data }) => { if (ok) setGateMode(data); }).catch(() => {});
+  }, []);
+
   async function submitSignup(e) {
     e.preventDefault();
     setSignupError('');
@@ -669,7 +697,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     setSignupLoading(true);
     try {
-      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password });
+      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
       setSignupLoading(false);
       if (!ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
       if (data.token) saveSession(data.token);
@@ -705,6 +733,12 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
+          {gateMode?.needCode && (
+            <div>
+              <TextField label="รหัสเชิญ" value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" />
+              <p className="font-mono text-2xs mt-1" style={{ color: C.orange, fontSize: 10 }}>* เว็บนี้เปิดเฉพาะผู้ได้รับเชิญ — ถ้าอีเมลคุณอยู่ในรายชื่อแล้ว ไม่ต้องกรอกรหัส</p>
+            </div>
+          )}
             {signupError && <p className="font-mono text-2xs" style={{ color: C.red }}>{signupError}</p>}
             <button type="submit" disabled={signupLoading} className="w-full py-2.5 font-mono text-xs tracking-widest uppercase rounded-xl flex items-center justify-center gap-2" style={{ background: BRAND, color: '#fff', opacity: signupLoading ? 0.6 : 1 }}>
               {signupLoading ? <Loader2 size={14} className="animate-spin" /> : null} {signupLoading ? 'กำลังสร้างบัญชี...' : 'สร้างบัญชี'}
@@ -1772,6 +1806,799 @@ const PLAN_REVIEW_SYS = `คุณคือที่ปรึกษาที่�
   "contentDirectiveUpdate": "ข้อความสั่งการใหม่สำหรับ AI สร้างคอนเทนต์ ถ้าควรเปลี่ยนแนว หรือ null"
 }`;
 
+// ---------- ถอดสูตรคู่แข่ง แล้วสร้างของที่ดีกว่า ----------
+const RIVAL_SYS = `คุณคือนักวิเคราะห์คอนเทนต์สายครีเอเตอร์คอมเมิร์ซระดับโลก เชี่ยวชาญการถอดสูตรว่าคลิปไหน "ขายได้" เพราะอะไร
+ผมจะให้ภาพจากคลิปของช่องอื่น (คู่แข่ง) พร้อมข้อมูลสินค้าที่เขาปักตะกร้า
+ถอดสูตรอย่างละเอียด แล้วออกแบบคลิปเวอร์ชันที่ดีกว่าให้ผม โดยใช้สินค้าตัวเดียวกัน
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+
+{
+  "rivalBreakdown": {
+    "hookType": "ประเภทฮุกที่เขาใช้",
+    "hookSeconds": "เกิดอะไรใน 0-3 วินาทีแรก อธิบายละเอียด",
+    "structure": [{"time":"ช่วงวินาที","what":"เกิดอะไร","purpose":"ทำไมต้องมีตรงนี้"}],
+    "psychologyUsed": ["หลักจิตวิทยาที่เขาใช้ อธิบายว่าทำงานยังไงกับสมองคนดู"],
+    "productIntegration": "เขาสอดแทรกสินค้าเข้ามาตอนไหนและอย่างไร โดยไม่ทำให้คนเลื่อนหนี",
+    "ctaMethod": "เขาผลักให้คนกดตะกร้ายังไง",
+    "whyItWorks": "เหตุผลหลักที่คลิปนี้ได้ผล",
+    "weaknesses": ["จุดอ่อนของคลิปเขา ที่เราแซงได้"]
+  },
+  "ourVersion": {
+    "concept": "แนวคิดคลิปของเราที่จะดีกว่า",
+    "whyBetter": "อธิบายว่าเหนือกว่าเขาตรงไหน อ้างจุดอ่อนที่เจอ",
+    "hook": "ฮุก 3 วินาทีแรกของเรา เขียนให้เห็นภาพ",
+    "script": [{"time":"ช่วงวินาที","visual":"เห็นอะไร","voiceover":"พูดว่าอะไร (ภาษาไทย)","onScreenText":"ข้อความบนจอ"}],
+    "videoPrompt": "Prompt ภาษาอังกฤษสำหรับสร้างวิดีโอ แนวตั้ง 9:16 ละเอียด ระบุมุมกล้อง แสง อารมณ์",
+    "coverPrompt": "Prompt ภาษาอังกฤษสำหรับรูปหน้าปก แนวตั้ง 9:16 สะดุดตาบนฟีด",
+    "caption": "แคปชั่นภาษาไทยพร้อมโพสต์",
+    "hashtags": "แฮชแท็กที่ควรใช้",
+    "ctaLine": "ประโยคผลักให้กดตะกร้า"
+  },
+  "fitScore": ตัวเลข 1-10 (สินค้านี้เหมาะกับช่องเราแค่ไหน),
+  "fitReason": "อธิบายคะแนน",
+  "estimatedCommission": "ประเมินค่าคอมที่น่าจะได้ต่อออเดอร์ ถ้ามีข้อมูลพอ ไม่งั้นบอกว่าต้องการข้อมูลอะไรเพิ่ม",
+  "riskNote": "สิ่งที่ต้องระวัง เช่น ลอกเกินไป ผิดกฎแพลตฟอร์ม หรือ null",
+  "lessonForLibrary": "บทเรียน 1 ประโยคที่ควรจำไว้ใช้กับคลิปอื่นในอนาคต"
+}
+
+กติกา:
+- ห้ามลอกคลิปเขาแบบตรงๆ ต้องต่อยอดให้ดีกว่าและเป็นสไตล์ของเราเอง
+- script ต้องละเอียดพอที่เอาไปถ่ายทำได้จริงทันที
+- ถ้าภาพที่ให้มาไม่พอจะวิเคราะห์ ให้บอกตรงๆ ใน riskNote`;
+
+const PRODUCT_FIT_SYS = `คุณคือที่ปรึกษาครีเอเตอร์คอมเมิร์ซ วิเคราะห์ว่าสินค้าที่ให้มาเหมาะกับช่องที่ระบุหรือไม่
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+{
+  "fitScore": ตัวเลข 1-10,
+  "verdict": "ควรทำ | ทำได้แต่ต้องปรับ | ไม่ควรทำ",
+  "reason": "เหตุผลละเอียด อ้างกลุ่มคนดูของช่องนี้",
+  "audienceMatch": "คนดูช่องนี้ตรงกับคนซื้อสินค้านี้แค่ไหน",
+  "contentAngles": [{"angle":"มุมคอนเทนต์","hook":"ฮุก 3 วิแรก","why":"ทำไมมุมนี้ถึงเวิร์กกับช่องนี้"}],
+  "objections": ["ข้อโต้แย้งที่คนดูจะคิดในใจ และวิธีตอบในคลิป"],
+  "commissionEstimate": "ประเมินค่าคอมต่อออเดอร์และต่อเดือนถ้าทำจริง ระบุสมมติฐานที่ใช้คำนวณ",
+  "breakEven": "ต้องขายกี่ชิ้นถึงคุ้มเวลาที่ลงไป",
+  "pricePositioning": "ราคานี้เหมาะกับกำลังซื้อคนดูช่องนี้ไหม",
+  "bestPlatform": "ควรลงแพลตฟอร์มไหนก่อน เพราะอะไร",
+  "warning": "สิ่งที่ต้องระวัง หรือ null"
+}`;
+
+// ---------- ระบบยิงแอด: อ่านตัวเลขจากภาพ + คำนวณ ROAS ----------
+const AD_EXTRACT_SYS = `คุณคือระบบอ่านข้อมูลจากภาพหน้าจอโฆษณา (Ads Manager) ของแพลตฟอร์มโซเชียล
+อ่านตัวเลขทั้งหมดที่เห็นในภาพ ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+{
+  "platform": "tiktok | facebook | shopee | youtube | other",
+  "campaignName": "ชื่อแคมเปญที่เห็น หรือ null",
+  "periodLabel": "ช่วงเวลา หรือ null",
+  "objective": "วัตถุประสงค์แคมเปญ เช่น ยอดขาย/การเข้าถึง/คลิก หรือ null",
+  "metrics": {
+    "spend": ตัวเลขเงินที่ใช้ไปหรือ null,
+    "impressions": ตัวเลขหรือ null,
+    "clicks": ตัวเลขหรือ null,
+    "ctr": ตัวเลข % หรือ null,
+    "cpc": ตัวเลขต้นทุนต่อคลิกหรือ null,
+    "cpm": ตัวเลขต้นทุนต่อพันครั้งหรือ null,
+    "orders": ตัวเลขคำสั่งซื้อหรือ null,
+    "revenue": ตัวเลขยอดขายหรือ null,
+    "roas": ตัวเลขผลตอบแทนต่อค่าโฆษณาหรือ null,
+    "addToCart": ตัวเลขเพิ่มลงตะกร้าหรือ null,
+    "conversionRate": ตัวเลข % หรือ null,
+    "costPerOrder": ตัวเลขหรือ null
+  },
+  "currency": "THB หรือสกุลที่เห็น",
+  "topNote": "ข้อสังเกตสำคัญจากภาพนี้ 1 ประโยค ภาษาไทย",
+  "notes": "สิ่งที่อ่านไม่ชัด หรือ null"
+}
+กติกา: แปลงตัวย่อเป็นเลขเต็ม (1.2K=1200) · ไม่เห็นค่าไหนใส่ null อย่าเดา · ตัวเลขห้ามมีเครื่องหมายจุลภาคหรือหน่วย`;
+
+const AD_ANALYSIS_SYS = `คุณคือผู้เชี่ยวชาญการยิงแอดสายครีเอเตอร์คอมเมิร์ซ วิเคราะห์ผลแคมเปญจากตัวเลขจริง ตรงไปตรงมา
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+{
+  "verdict": "กำไร | เท่าทุน | ขาดทุน",
+  "healthScore": ตัวเลข 0-100,
+  "headline": "สรุปสถานการณ์ 1 ประโยค",
+  "keyNumbers": [{"label":"ชื่อตัวเลข","value":"ค่า","status":"good|warn|bad","meaning":"แปลว่าอะไร"}],
+  "bottleneck": "จุดที่เป็นคอขวดจริงๆ ของกรวยการขาย (คนไม่คลิก / คลิกแล้วไม่ซื้อ / ต้นทุนสูงเกิน)",
+  "diagnosis": [{"issue":"ปัญหา","evidence":"อ้างตัวเลข","fix":"วิธีแก้ที่ทำได้ทันที","priority":"high|medium|low"}],
+  "budgetAdvice": "ควรเพิ่ม ลด หรือหยุดงบ พร้อมเหตุผลและตัวเลขที่ควรตั้ง",
+  "creativeAdvice": "คลิป/ภาพโฆษณาควรแก้อะไร โดยเฉพาะ 3 วินาทีแรก",
+  "scaleReadiness": "พร้อมขยายงบหรือยัง ถ้าพร้อมควรขยายทีละกี่ % ",
+  "breakEvenRoas": "ROAS ที่ต้องทำได้ถึงจะไม่ขาดทุน พร้อมวิธีคำนวณ",
+  "warning": "สิ่งที่ต้องระวัง หรือ null"
+}
+กติกา: อ้างตัวเลขจริงเสมอ · ถ้าข้อมูลไม่พอให้บอกตรงๆ ใน warning`;
+
+const AD_FIELDS = [
+  { key: 'spend', label: 'ใช้จ่าย', color: '#FB923C', money: true },
+  { key: 'revenue', label: 'ยอดขาย', color: '#34D399', money: true },
+  { key: 'orders', label: 'ออเดอร์', color: '#4A9DFF' },
+  { key: 'roas', label: 'ROAS', color: '#A78BFA', suffix: 'x' },
+  { key: 'clicks', label: 'คลิก', color: '#22D3EE' },
+  { key: 'ctr', label: 'CTR', color: '#F472B6', suffix: '%' },
+  { key: 'cpc', label: 'ต้นทุน/คลิก', color: '#FBBF24', money: true },
+  { key: 'costPerOrder', label: 'ต้นทุน/ออเดอร์', color: '#F87171', money: true },
+];
+
+const AD_PLATFORMS = [
+  { key: 'all', label: 'ทั้งหมด' },
+  { key: 'tiktok', label: 'TikTok Ads' },
+  { key: 'facebook', label: 'Facebook Ads' },
+  { key: 'shopee', label: 'Shopee Ads' },
+  { key: 'youtube', label: 'YouTube Ads' },
+  { key: 'other', label: 'อื่นๆ' },
+];
+
+function AdsPanel({ ads, setAds, showToast }) {
+  const [images, setImages] = useState([]);
+  const [reading, setReading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [tab, setTab] = useState('all');
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [err, setErr] = useState('');
+  const [dragOver, setDragOver] = useState(false);
+
+  const saved = Array.isArray(ads) ? ads : [];
+  const filtered = tab === 'all' ? saved : saved.filter((a) => a.platform === tab);
+
+  async function addFiles(files) {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
+    const newOnes = await Promise.all(arr.map(async (f) => {
+      const base64 = await fileToBase64(f);
+      const mimeType = f.type || 'image/jpeg';
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: f.name, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}`, status: 'pending' };
+    }));
+    setImages((prev) => [...prev, ...newOnes]);
+  }
+
+  async function readAll() {
+    const targets = images.filter((im) => im.status !== 'done');
+    if (targets.length === 0) return;
+    setReading(true); setErr(''); setProgress({ done: 0, total: targets.length });
+    const collected = [];
+    for (let i = 0; i < targets.length; i++) {
+      const im = targets[i];
+      setImages((p) => p.map((x) => (x.id === im.id ? { ...x, status: 'reading' } : x)));
+      try {
+        const text = await callClaude(AD_EXTRACT_SYS, 'อ่านตัวเลขทั้งหมดจากภาพหน้าจอโฆษณานี้', [{ mimeType: im.mimeType, data: im.base64 }], 'metricRead');
+        const j = parseJsonLoose(text);
+        const entry = {
+          id: im.id, at: Date.now(), date: todayDateStr(), fileName: im.name,
+          platform: j.platform || 'other', campaignName: j.campaignName || null,
+          periodLabel: j.periodLabel || null, objective: j.objective || null,
+          currency: j.currency || 'THB', metrics: j.metrics || {},
+          topNote: j.topNote || '', notes: j.notes || null,
+        };
+        collected.push(entry);
+        setImages((p) => p.map((x) => (x.id === im.id ? { ...x, status: 'done' } : x)));
+      } catch (e) {
+        setImages((p) => p.map((x) => (x.id === im.id ? { ...x, status: 'error' } : x)));
+        setErr(`อ่านบางรูปไม่สำเร็จ: ${e.message || ''}`);
+      }
+      setProgress({ done: i + 1, total: targets.length });
+    }
+    if (collected.length) setAds([...(Array.isArray(ads) ? ads : []), ...collected].slice(-400));
+    setReading(false);
+  }
+
+  async function analyze() {
+    if (filtered.length === 0) return;
+    setAnalyzing(true); setAnalysis(null);
+    const payload = filtered.slice(-30).map((a) => ({ date: a.date, platform: a.platform, campaign: a.campaignName, objective: a.objective, currency: a.currency, ...a.metrics }));
+    try {
+      const text = await callClaude(AD_ANALYSIS_SYS, `ข้อมูลโฆษณาจริง (${payload.length} แคมเปญ):\n${JSON.stringify(payload, null, 1)}`, undefined, 'deepAnalysis');
+      setAnalysis(parseJsonLoose(text));
+    } catch (e) { setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`); }
+    setAnalyzing(false);
+  }
+
+  // ---- ตัวเลขรวม ----
+  const sum = (k) => filtered.map((a) => a.metrics?.[k]).filter((v) => typeof v === 'number').reduce((x, y) => x + y, 0);
+  const spend = sum('spend'); const revenue = sum('revenue'); const orders = sum('orders'); const clicks = sum('clicks');
+  const roas = spend > 0 ? Math.round((revenue / spend) * 100) / 100 : null;
+  const cpo = orders > 0 ? Math.round(spend / orders) : null;
+  const profit = revenue - spend;
+
+  const byPlatform = AD_PLATFORMS.filter((p) => p.key !== 'all').map((p) => {
+    const rows = saved.filter((a) => a.platform === p.key);
+    const sp = rows.map((a) => a.metrics?.spend).filter((v) => typeof v === 'number').reduce((x, y) => x + y, 0);
+    const rv = rows.map((a) => a.metrics?.revenue).filter((v) => typeof v === 'number').reduce((x, y) => x + y, 0);
+    return { name: p.label.replace(' Ads', ''), ใช้จ่าย: sp, ยอดขาย: rv, ROAS: sp > 0 ? Math.round((rv / sp) * 100) / 100 : 0, n: rows.length };
+  }).filter((r) => r.n > 0);
+
+  const stColor = (s) => (s === 'good' ? C.emerald : s === 'warn' ? C.orange : C.red);
+  const money = (n) => (n == null ? '—' : `${fmtNum(Math.round(n))}฿`);
+
+  return (
+    <div>
+      <p className="font-body text-xs mb-4 leading-relaxed" style={{ color: C.muted }}>
+        แนบภาพหน้าจอ Ads Manager จากทุกแพลตฟอร์ม — ระบบอ่านตัวเลขออกมาเป็นข้อมูลจริง คำนวณ ROAS กำไรขาดทุน แล้ววิเคราะห์ว่าคอขวดอยู่ตรงไหน ควรเพิ่มหรือหยุดงบ
+      </p>
+
+      {err && <div className="mb-3 p-3 rounded-xl flex items-start gap-2" style={{ background: `${C.red}15`, border: `1px solid ${C.red}55` }}><AlertTriangle size={13} style={{ color: C.red }} className="shrink-0 mt-0.5" /><span className="font-body text-xs" style={{ color: C.text }}>{err}</span></div>}
+
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files); }}
+        className="p-5 rounded-2xl mb-4 text-center"
+        style={{ background: dragOver ? `${C.orange}15` : C.panel, border: `1.5px dashed ${dragOver ? C.orange : C.border}` }}
+      >
+        <Megaphone size={22} style={{ color: dragOver ? C.orange : C.muted }} className="mx-auto mb-2" />
+        <p className="font-body text-sm mb-1" style={{ color: C.text }}>ลากภาพหน้าจอโฆษณามาวางที่นี่</p>
+        <p className="font-body text-xs mb-3" style={{ color: C.muted }}>TikTok Ads · Facebook Ads · Shopee Ads · YouTube Ads — ปนกันได้ ระบบแยกให้เอง</p>
+        <label className="inline-flex font-mono text-2xs px-4 py-2 rounded-lg cursor-pointer items-center gap-1.5" style={{ background: C.orange, color: '#231' }}>
+          <Upload size={12} /> เลือกรูป
+          <input type="file" accept="image/*" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+        </label>
+      </div>
+
+      {images.length > 0 && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+            <span className="font-mono text-2xs" style={{ color: C.blue }}>รูปที่แนบ ({images.length})</span>
+            <div className="flex gap-1.5">
+              <button onClick={() => setImages([])} className="font-mono text-2xs px-2 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ล้าง</button>
+              <button onClick={readAll} disabled={reading} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: BRAND, color: '#fff', opacity: reading ? 0.6 : 1 }}>
+                {reading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                {reading ? `อ่าน ${progress.done}/${progress.total}` : 'อ่านตัวเลขทั้งหมด'}
+              </button>
+            </div>
+          </div>
+          {reading && <div className="mb-2" style={{ width: '100%', height: 4, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}><div style={{ width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`, height: '100%', background: `linear-gradient(90deg, ${C.orange}, ${C.violet})` }} /></div>}
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+            {images.map((im) => (
+              <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${im.status === 'done' ? C.emerald : im.status === 'error' ? C.red : C.border}` }}>
+                <img src={im.dataUrl} alt="" className="w-full object-cover" style={{ height: 62 }} />
+                <button onClick={() => setImages((p) => p.filter((x) => x.id !== im.id))} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,.7)', color: '#fff' }}><X size={10} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {saved.length > 0 && (
+        <>
+          <div className="flex gap-1.5 mb-4 flex-wrap">
+            {AD_PLATFORMS.map((p) => {
+              const n = p.key === 'all' ? saved.length : saved.filter((a) => a.platform === p.key).length;
+              if (p.key !== 'all' && n === 0) return null;
+              return <button key={p.key} onClick={() => setTab(p.key)} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ background: tab === p.key ? BRAND : 'transparent', color: tab === p.key ? '#fff' : C.muted, border: `1px solid ${tab === p.key ? 'transparent' : C.border}` }}>{p.label} ({n})</button>;
+            })}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3">
+            <StatCard label="ใช้จ่ายรวม" value={money(spend)} sub={`${filtered.length} แคมเปญ`} color={C.orange} Icon={Megaphone} />
+            <StatCard label="ยอดขายรวม" value={money(revenue)} sub={`${orders} ออเดอร์`} color={C.emerald} Icon={ShoppingCart} />
+            <StatCard label="ROAS" value={roas == null ? '—' : `${roas}x`} sub={roas == null ? '' : roas >= 3 ? 'ดีมาก' : roas >= 1.5 ? 'พอไปได้' : 'ขาดทุน'} color={roas == null ? C.muted : roas >= 3 ? C.emerald : roas >= 1.5 ? C.orange : C.red} Icon={Gauge} />
+            <StatCard label="กำไรสุทธิ" value={money(profit)} sub={cpo ? `ต้นทุน/ออเดอร์ ${cpo}฿` : ''} color={profit >= 0 ? C.emerald : C.red} Icon={TrendingUp} />
+          </div>
+
+          {byPlatform.length > 1 && (
+            <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เทียบผลแอดข้ามแพลตฟอร์ม</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={byPlatform}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+                  <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 10 }} />
+                  <YAxis tick={{ fill: C.muted, fontSize: 10 }} tickFormatter={fmtNum} />
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="ใช้จ่าย" fill={C.orange} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="ยอดขาย" fill={C.emerald} radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {byPlatform.map((p) => (
+                  <span key={p.name} className="font-mono text-2xs px-2 py-1 rounded" style={{ color: p.ROAS >= 3 ? C.emerald : p.ROAS >= 1.5 ? C.orange : C.red, border: `1px solid ${p.ROAS >= 3 ? C.emerald : p.ROAS >= 1.5 ? C.orange : C.red}` }}>{p.name} ROAS {p.ROAS}x</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.orange}44` }}>
+            <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <div className="flex items-center gap-2"><Sparkles size={14} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>วิเคราะห์แคมเปญเชิงลึก</span></div>
+              <button onClick={analyze} disabled={analyzing} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.orange, color: '#231', opacity: analyzing ? 0.6 : 1 }}>
+                {analyzing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์
+              </button>
+            </div>
+            {!analysis && !analyzing && <p className="font-body text-xs" style={{ color: C.muted }}>กดเพื่อให้ AI หาคอขวด บอกว่าควรเพิ่มหรือหยุดงบ และต้องแก้คลิปตรงไหน</p>}
+            {analysis && (
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 flex-wrap">
+                  <div className="shrink-0 text-center px-3 py-2 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${analysis.verdict === 'กำไร' ? C.emerald : analysis.verdict === 'ขาดทุน' ? C.red : C.orange}` }}>
+                    <div className="font-display text-xl font-bold leading-none" style={{ color: analysis.verdict === 'กำไร' ? C.emerald : analysis.verdict === 'ขาดทุน' ? C.red : C.orange }}>{analysis.healthScore}</div>
+                    <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>{analysis.verdict}</div>
+                  </div>
+                  <p className="font-body text-sm flex-1 min-w-[180px]" style={{ color: C.text }}>{analysis.headline}</p>
+                </div>
+
+                {Array.isArray(analysis.keyNumbers) && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {analysis.keyNumbers.map((k, i) => (
+                      <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${stColor(k.status)}`, border: `1px solid ${C.border}` }}>
+                        <div className="font-mono text-2xs" style={{ color: C.muted, fontSize: 10 }}>{k.label}</div>
+                        <div className="font-display text-base font-bold" style={{ color: stColor(k.status) }}>{k.value}</div>
+                        <p className="font-body text-xs" style={{ color: C.muted }}>{k.meaning}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {analysis.bottleneck && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.red}12`, border: `1px solid ${C.red}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>คอขวดที่แท้จริง</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{analysis.bottleneck}</p>
+                  </div>
+                )}
+
+                {Array.isArray(analysis.diagnosis) && analysis.diagnosis.length > 0 && (
+                  <div className="space-y-1.5">
+                    {analysis.diagnosis.map((dg, i) => (
+                      <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="font-mono px-1.5 rounded shrink-0" style={{ fontSize: 9, color: dg.priority === 'high' ? C.red : C.muted, border: `1px solid ${dg.priority === 'high' ? C.red : C.border}` }}>{dg.priority === 'high' ? 'ด่วน' : dg.priority === 'medium' ? 'กลาง' : 'เสริม'}</span>
+                          <span className="font-body text-xs" style={{ color: C.text }}>{dg.issue}</span>
+                        </div>
+                        <p className="font-body text-xs" style={{ color: C.muted }}>หลักฐาน: {dg.evidence}</p>
+                        <p className="font-body text-xs mt-0.5" style={{ color: C.emerald }}>แก้: {dg.fix}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {analysis.budgetAdvice && <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}><div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>คำแนะนำเรื่องงบ</div><p className="font-body text-xs" style={{ color: C.text }}>{analysis.budgetAdvice}</p></div>}
+                  {analysis.creativeAdvice && <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}><div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>คลิป/ภาพต้องแก้</div><p className="font-body text-xs" style={{ color: C.text }}>{analysis.creativeAdvice}</p></div>}
+                  {analysis.scaleReadiness && <div className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}><div className="font-mono text-2xs mb-1" style={{ color: C.cyan }}>พร้อมขยายงบไหม</div><p className="font-body text-xs" style={{ color: C.text }}>{analysis.scaleReadiness}</p></div>}
+                  {analysis.breakEvenRoas && <div className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}><div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>ROAS จุดคุ้มทุน</div><p className="font-body text-xs" style={{ color: C.text }}>{analysis.breakEvenRoas}</p></div>}
+                </div>
+
+                {analysis.warning && <div className="p-2.5 rounded-xl flex items-start gap-2" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}><AlertTriangle size={13} style={{ color: C.orange }} className="shrink-0 mt-0.5" /><p className="font-body text-xs" style={{ color: C.text }}>{analysis.warning}</p></div>}
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แคมเปญทั้งหมด ({filtered.length})</div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {filtered.slice().reverse().map((a) => {
+                const r = a.metrics?.roas ?? (a.metrics?.spend > 0 && a.metrics?.revenue != null ? Math.round((a.metrics.revenue / a.metrics.spend) * 100) / 100 : null);
+                return (
+                  <div key={a.id} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="font-body text-xs truncate" style={{ color: C.text }}>{a.campaignName || a.fileName}</div>
+                        <div className="font-mono" style={{ fontSize: 10, color: C.muted }}>{a.platform} · {a.date}{a.objective ? ` · ${a.objective}` : ''}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {r != null && <span className="font-mono text-2xs px-1.5 py-0.5 rounded" style={{ color: r >= 3 ? C.emerald : r >= 1.5 ? C.orange : C.red, border: `1px solid ${r >= 3 ? C.emerald : r >= 1.5 ? C.orange : C.red}` }}>{r}x</span>}
+                        <button onClick={() => setAds(saved.filter((x) => x.id !== a.id))} style={{ color: C.muted }}><X size={12} /></button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                      {AD_FIELDS.map((f) => (typeof a.metrics?.[f.key] === 'number' ? (
+                        <span key={f.key} className="font-mono" style={{ fontSize: 10, color: C.muted }}>{f.label} <span style={{ color: f.color }}>{f.money ? money(a.metrics[f.key]) : fmtNum(a.metrics[f.key])}{f.suffix || ''}</span></span>
+                      ) : null))}
+                    </div>
+                    {a.topNote && <p className="font-body text-xs mt-1" style={{ color: C.muted }}>{a.topNote}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {saved.length === 0 && images.length === 0 && (
+        <div className="p-8 rounded-2xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <Megaphone size={26} style={{ color: C.muted }} className="mx-auto mb-2" />
+          <p className="font-body text-sm mb-1" style={{ color: C.text }}>ยังไม่มีข้อมูลโฆษณา</p>
+          <p className="font-body text-xs" style={{ color: C.muted }}>แนบภาพหน้าจอ Ads Manager ด้านบนเพื่อเริ่มติดตามผล</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompetitorIntel({ rivals, setRivals, channels, showToast }) {
+  const [images, setImages] = useState([]);
+  const [productName, setProductName] = useState('');
+  const [productPrice, setProductPrice] = useState('');
+  const [commission, setCommission] = useState('');
+  const [rivalPlatform, setRivalPlatform] = useState('tiktok');
+  const [rivalStats, setRivalStats] = useState('');
+  const [targetChannel, setTargetChannel] = useState(channels[0]?.id || '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [openId, setOpenId] = useState(null);
+
+  const list = Array.isArray(rivals) ? rivals : [];
+  const active = list.find((r) => r.id === openId) || list[list.length - 1] || null;
+
+  async function addFiles(files) {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/'));
+    const newOnes = await Promise.all(arr.map(async (f) => {
+      const base64 = await fileToBase64(f);
+      const mimeType = f.type || 'image/jpeg';
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: f.name, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}` };
+    }));
+    setImages((prev) => [...prev, ...newOnes].slice(0, 8));
+  }
+
+  async function analyze() {
+    if (images.length === 0) { setErr('แนบภาพจากคลิปคู่แข่งอย่างน้อย 1 ภาพ (แคปช่วงเปิด กลาง จบ จะแม่นที่สุด)'); return; }
+    if (!productName.trim()) { setErr('ระบุชื่อสินค้าที่เขาปักตะกร้าก่อน'); return; }
+    setBusy(true); setErr('');
+    const ch = channels.find((c) => c.id === targetChannel);
+    try {
+      const text = await callClaude(RIVAL_SYS,
+        `ภาพจากคลิปคู่แข่ง ${images.length} ภาพ (เรียงตามลำดับเวลาในคลิป)\n` +
+        `แพลตฟอร์มที่เขาลง: ${rivalPlatform}\n` +
+        `สินค้าที่เขาปักตะกร้า: ${productName.trim()}\n` +
+        `ราคาสินค้า: ${productPrice.trim() || 'ไม่ระบุ'}\n` +
+        `ค่าคอมมิชชั่น: ${commission.trim() || 'ไม่ระบุ'}\n` +
+        `ยอดของคลิปเขา: ${rivalStats.trim() || 'ไม่ระบุ'}\n\n` +
+        `ช่องของผมที่จะเอาไปทำ: ${ch ? ch.name : 'ไม่ระบุ'}\n` +
+        `แนวคอนเทนต์ช่องผม: คอนเทนต์ AI เสมือนจริง`,
+        images.map((im) => ({ mimeType: im.mimeType, data: im.base64 })));
+      const json = parseJsonLoose(text);
+      const entry = {
+        id: `${Date.now()}`, at: Date.now(), date: todayDateStr(),
+        productName: productName.trim(), productPrice: productPrice.trim(), commission: commission.trim(),
+        rivalPlatform, rivalStats: rivalStats.trim(),
+        channelId: targetChannel, channelName: ch?.name || '',
+        thumb: images[0]?.dataUrl || null,
+        data: json,
+      };
+      setRivals([...(Array.isArray(rivals) ? rivals : []), entry].slice(-100));
+      setOpenId(entry.id);
+      setImages([]); setProductName(''); setProductPrice(''); setCommission(''); setRivalStats('');
+    } catch (e) {
+      setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`);
+    }
+    setBusy(false);
+  }
+
+  const d = active?.data;
+  const fit = d?.fitScore;
+  const fitColor = fit == null ? C.muted : fit >= 8 ? C.emerald : fit >= 5 ? C.orange : C.red;
+
+  return (
+    <div>
+      <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-1" style={{ color: C.orange }}>ถอดสูตรคู่แข่ง → สร้างของที่ดีกว่า</div>
+        <p className="font-body text-xs mb-3 leading-relaxed" style={{ color: C.muted }}>
+          แคปภาพจากคลิปคู่แข่ง (ช่วงเปิด/กลาง/จบ) + ใส่สินค้าที่เขาปักตะกร้า → AI ถอดว่าเขาใช้เทคนิคอะไร จุดอ่อนอยู่ไหน แล้วเขียนคลิปเวอร์ชันที่ดีกว่าให้เลย พร้อม Prompt และบทพูด
+        </p>
+
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+          className="p-4 rounded-xl mb-3 text-center"
+          style={{ border: `1.5px dashed ${C.border}`, background: C.bgDeep }}
+        >
+          <Clapperboard size={20} style={{ color: C.muted }} className="mx-auto mb-1.5" />
+          <p className="font-body text-xs mb-2" style={{ color: C.muted }}>ลากภาพจากคลิปคู่แข่งมาวาง (สูงสุด 8 ภาพ)</p>
+          <label className="inline-flex font-mono text-2xs px-3 py-1.5 rounded-lg cursor-pointer items-center gap-1.5" style={{ background: BRAND, color: '#fff' }}>
+            <Upload size={11} /> เลือกภาพ
+            <input type="file" accept="image/*" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+          </label>
+          {images.length > 0 && (
+            <div className="grid grid-cols-4 gap-1.5 mt-3">
+              {images.map((im, i) => (
+                <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                  <img src={im.dataUrl} alt="" className="w-full object-cover" style={{ height: 54 }} />
+                  <span className="absolute bottom-0 left-0 px-1 font-mono" style={{ fontSize: 9, background: 'rgba(0,0,0,.7)', color: '#fff' }}>{i + 1}</span>
+                  <button onClick={() => setImages((p) => p.filter((x) => x.id !== im.id))} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,.7)', color: '#fff' }}><X size={9} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-2 mb-2">
+          <input value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="ชื่อสินค้าที่เขาปักตะกร้า *" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          <input value={productPrice} onChange={(e) => setProductPrice(e.target.value)} placeholder="ราคาสินค้า เช่น 299 บาท" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          <input value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="ค่าคอม เช่น 15% หรือ 45 บาท" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          <input value={rivalStats} onChange={(e) => setRivalStats(e.target.value)} placeholder="ยอดคลิปเขา เช่น 2.1M วิว 30K ไลก์" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          <select value={rivalPlatform} onChange={(e) => setRivalPlatform(e.target.value)} className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
+            <option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="shopee">Shopee</option>
+            <option value="lemon8">Lemon8</option><option value="youtube">YouTube</option><option value="instagram">Instagram</option><option value="other">อื่นๆ</option>
+          </select>
+          <select value={targetChannel} onChange={(e) => setTargetChannel(e.target.value)} className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
+            <option value="">— เลือกช่องของเราที่จะเอาไปทำ —</option>
+            {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {err && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{err}</p>}
+        <button onClick={analyze} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: C.orange, color: '#231', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ถอดสูตร + สร้างเวอร์ชันที่ดีกว่า
+        </button>
+      </div>
+
+      {list.length > 0 && (
+        <div className="flex gap-1.5 mb-4 flex-wrap">
+          {list.slice().reverse().slice(0, 12).map((r) => (
+            <button key={r.id} onClick={() => setOpenId(r.id)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg truncate" style={{ maxWidth: 190, background: active?.id === r.id ? C.orange : 'transparent', color: active?.id === r.id ? '#231' : C.muted, border: `1px solid ${active?.id === r.id ? 'transparent' : C.border}` }}>
+              {r.productName}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {active && d && (
+        <div className="space-y-3">
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${fitColor}55` }}>
+            <div className="flex items-start gap-3 flex-wrap">
+              {active.thumb && <img src={active.thumb} alt="" className="rounded-lg shrink-0" style={{ width: 54, height: 54, objectFit: 'cover', border: `1px solid ${C.border}` }} />}
+              <div className="min-w-0 flex-1">
+                <div className="font-body text-sm" style={{ color: C.text }}>{active.productName}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>{active.rivalPlatform} · {active.channelName} · {active.date}{active.commission ? ` · คอม ${active.commission}` : ''}</div>
+              </div>
+              <div className="text-center shrink-0 px-3 py-1.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${fitColor}` }}>
+                <div className="font-display text-xl font-bold leading-none" style={{ color: fitColor }}>{fit}/10</div>
+                <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>เหมาะกับช่อง</div>
+              </div>
+            </div>
+            {d.fitReason && <p className="font-body text-xs mt-2" style={{ color: C.muted }}>{d.fitReason}</p>}
+            {d.estimatedCommission && <p className="font-body text-xs mt-1.5 p-2 rounded-lg" style={{ color: C.emerald, background: `${C.emerald}10` }}>ประเมินรายได้: {d.estimatedCommission}</p>}
+          </div>
+
+          {d.rivalBreakdown && (
+            <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.red }}>สูตรที่คู่แข่งใช้</div>
+              <div className="space-y-2">
+                <div className="p-2.5 rounded-xl" style={{ background: C.bgDeep }}>
+                  <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>ฮุก: {d.rivalBreakdown.hookType}</div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{d.rivalBreakdown.hookSeconds}</p>
+                </div>
+                {Array.isArray(d.rivalBreakdown.structure) && (
+                  <div className="space-y-1">
+                    {d.rivalBreakdown.structure.map((st, i) => (
+                      <div key={i} className="flex gap-2 p-2 rounded-lg" style={{ background: C.bgDeep }}>
+                        <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.blue, width: 52 }}>{st.time}</span>
+                        <div className="min-w-0">
+                          <p className="font-body text-xs" style={{ color: C.text }}>{st.what}</p>
+                          <p className="font-body text-xs" style={{ color: C.muted }}>→ {st.purpose}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(d.rivalBreakdown.psychologyUsed) && d.rivalBreakdown.psychologyUsed.length > 0 && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}33` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>จิตวิทยาที่เขาใช้</div>
+                    <ul className="space-y-1">{d.rivalBreakdown.psychologyUsed.map((x, i) => <li key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</li>)}</ul>
+                  </div>
+                )}
+                {d.rivalBreakdown.productIntegration && <p className="font-body text-xs p-2.5 rounded-xl" style={{ color: C.text, background: C.bgDeep }}><span style={{ color: C.cyan }}>สอดแทรกสินค้า: </span>{d.rivalBreakdown.productIntegration}</p>}
+                {d.rivalBreakdown.ctaMethod && <p className="font-body text-xs p-2.5 rounded-xl" style={{ color: C.text, background: C.bgDeep }}><span style={{ color: C.cyan }}>ผลักให้กดตะกร้า: </span>{d.rivalBreakdown.ctaMethod}</p>}
+                {Array.isArray(d.rivalBreakdown.weaknesses) && d.rivalBreakdown.weaknesses.length > 0 && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>จุดอ่อนที่เราแซงได้</div>
+                    <ul className="space-y-1">{d.rivalBreakdown.weaknesses.map((x, i) => <li key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</li>)}</ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {d.ourVersion && (
+            <div className="p-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.emerald}55` }}>
+              <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.emerald }}>เวอร์ชันของเรา (ดีกว่า)</div>
+              <p className="font-body text-sm mb-1.5" style={{ color: C.text }}>{d.ourVersion.concept}</p>
+              {d.ourVersion.whyBetter && <p className="font-body text-xs mb-2.5 p-2 rounded-lg" style={{ color: C.emerald, background: `${C.emerald}10` }}>เหนือกว่าเพราะ: {d.ourVersion.whyBetter}</p>}
+              {d.ourVersion.hook && (
+                <div className="p-2.5 rounded-xl mb-2" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.orange}` }}>
+                  <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>ฮุก 3 วินาทีแรก</div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{d.ourVersion.hook}</p>
+                </div>
+              )}
+              {Array.isArray(d.ourVersion.script) && d.ourVersion.script.length > 0 && (
+                <div className="mb-2">
+                  <div className="font-mono text-2xs mb-1.5" style={{ color: C.blue }}>สคริปต์ถ่ายทำ</div>
+                  <div className="space-y-1.5">
+                    {d.ourVersion.script.map((sc, i) => (
+                      <div key={i} className="p-2.5 rounded-lg" style={{ background: C.bgDeep }}>
+                        <div className="font-mono mb-1" style={{ fontSize: 10, color: C.blue }}>{sc.time}</div>
+                        <p className="font-body text-xs" style={{ color: C.text }}>ภาพ: {sc.visual}</p>
+                        {sc.voiceover && <p className="font-body text-xs" style={{ color: C.violet }}>พูด: "{sc.voiceover}"</p>}
+                        {sc.onScreenText && <p className="font-body text-xs" style={{ color: C.muted }}>ข้อความบนจอ: {sc.onScreenText}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2">
+                {d.ourVersion.videoPrompt && <PromptCopyRow label="Prompt วิดีโอ" text={d.ourVersion.videoPrompt} color={C.cyan} tools={['flow', 'meta']} showToast={showToast} />}
+                {d.ourVersion.coverPrompt && <PromptCopyRow label="Prompt หน้าปก" text={d.ourVersion.coverPrompt} color={C.violet} tools={['meta', 'chatgpt']} showToast={showToast} />}
+                {d.ourVersion.caption && <PromptCopyRow label="แคปชั่น" text={`${d.ourVersion.caption}\n\n${d.ourVersion.hashtags || ''}`} color={C.emerald} showToast={showToast} />}
+                {d.ourVersion.ctaLine && <PromptCopyRow label="ประโยคผลักตะกร้า" text={d.ourVersion.ctaLine} color={C.orange} showToast={showToast} />}
+              </div>
+            </div>
+          )}
+
+          {d.riskNote && (
+            <div className="p-3 rounded-xl flex items-start gap-2" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+              <AlertTriangle size={13} style={{ color: C.orange }} className="shrink-0 mt-0.5" />
+              <p className="font-body text-xs" style={{ color: C.text }}>{d.riskNote}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* คลังบทเรียนสะสม */}
+      {list.length > 0 && (
+        <div className="p-4 rounded-2xl mt-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.cyan }}>คลังบทเรียนที่สะสมไว้ ({list.length})</div>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {list.slice().reverse().map((r) => (
+              <div key={r.id} className="flex items-start justify-between gap-2 p-2.5 rounded-lg" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="min-w-0">
+                  <div className="font-body text-xs truncate" style={{ color: C.text }}>{r.productName} <span className="font-mono" style={{ fontSize: 10, color: C.muted }}>· {r.rivalPlatform}</span></div>
+                  {r.data?.lessonForLibrary && <p className="font-body text-xs" style={{ color: C.cyan }}>💡 {r.data.lessonForLibrary}</p>}
+                </div>
+                <button onClick={() => setRivals(list.filter((x) => x.id !== r.id))} style={{ color: C.muted }} className="shrink-0"><X size={12} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// แถวแสดง Prompt พร้อมปุ่มคัดลอก/ส่งต่อ
+function PromptCopyRow({ label, text, color, tools, showToast }) {
+  return (
+    <div className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="font-mono text-2xs" style={{ color }}>{label}</span>
+        <button onClick={() => copyText(text).then(() => showToast && showToast('คัดลอกแล้ว'))} className="font-mono text-2xs px-2 py-0.5 rounded shrink-0" style={{ border: `1px solid ${color}`, color }}>คัดลอก</button>
+      </div>
+      <p className="font-body text-xs whitespace-pre-wrap" style={{ color: C.text }}>{text}</p>
+      {tools && <SendToTools text={text} tools={tools} />}
+    </div>
+  );
+}
+
+function ProductFitPanel({ channels, showToast }) {
+  const [img, setImg] = useState(null);
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [commission, setCommission] = useState('');
+  const [detail, setDetail] = useState('');
+  const [channelId, setChannelId] = useState(channels[0]?.id || '');
+  const [platform, setPlatform] = useState('tiktok');
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function pickFile(f) {
+    if (!f) return;
+    const base64 = await fileToBase64(f);
+    setImg({ base64, mimeType: f.type || 'image/jpeg', dataUrl: `data:${f.type};base64,${base64}` });
+  }
+
+  async function run() {
+    if (!name.trim()) { setErr('ระบุชื่อสินค้าก่อน'); return; }
+    setBusy(true); setErr(''); setRes(null);
+    const ch = channels.find((c) => c.id === channelId);
+    try {
+      const text = await callClaude(PRODUCT_FIT_SYS,
+        `สินค้า: ${name.trim()}\nราคา: ${price.trim() || 'ไม่ระบุ'}\nค่าคอม: ${commission.trim() || 'ไม่ระบุ'}\nรายละเอียด: ${detail.trim() || 'ดูจากรูป'}\n\nช่องที่จะเอาไปขาย: ${ch ? ch.name : 'ไม่ระบุ'}\nแพลตฟอร์ม: ${platform}\nแนวช่อง: คอนเทนต์ AI เสมือนจริง`,
+        img ? [{ mimeType: img.mimeType, data: img.base64 }] : undefined);
+      setRes(parseJsonLoose(text));
+    } catch (e) { setErr(`วิเคราะห์ไม่สำเร็จ: ${e.message || ''}`); }
+    setBusy(false);
+  }
+
+  const fit = res?.fitScore;
+  const col = fit == null ? C.muted : fit >= 8 ? C.emerald : fit >= 5 ? C.orange : C.red;
+
+  return (
+    <div>
+      <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-1" style={{ color: C.emerald }}>วิเคราะห์สินค้าก่อนปักตะกร้า</div>
+        <p className="font-body text-xs mb-3" style={{ color: C.muted }}>แนบรูปสินค้า + เลือกช่อง → AI บอกว่าเหมาะไหม ค่าคอมคุ้มไหม และควรทำคอนเทนต์มุมไหน</p>
+
+        <div className="flex gap-2.5 mb-2.5 flex-wrap">
+          <label className="rounded-xl cursor-pointer flex items-center justify-center shrink-0" style={{ width: 84, height: 84, background: C.bgDeep, border: `1.5px dashed ${C.border}`, overflow: 'hidden' }}>
+            {img ? <img src={img.dataUrl} alt="" className="w-full h-full object-cover" /> : <div className="text-center"><ShoppingCart size={16} style={{ color: C.muted }} className="mx-auto" /><span className="font-mono block mt-1" style={{ fontSize: 9, color: C.muted }}>แนบรูป</span></div>}
+            <input type="file" accept="image/*" onChange={(e) => { pickFile(e.target.files[0]); e.target.value = ''; }} className="hidden" />
+          </label>
+          <div className="flex-1 min-w-[180px] space-y-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อสินค้า *" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <div className="grid grid-cols-2 gap-2">
+              <input value={price} onChange={(e) => setPrice(e.target.value)} placeholder="ราคา" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              <input value={commission} onChange={(e) => setCommission(e.target.value)} placeholder="ค่าคอม %" className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            </div>
+          </div>
+        </div>
+        <textarea value={detail} onChange={(e) => setDetail(e.target.value)} rows={2} placeholder="รายละเอียดสินค้า จุดขาย กลุ่มเป้าหมาย (ไม่ใส่ก็ได้ AI จะดูจากรูป)" className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y mb-2" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+        <div className="grid grid-cols-2 gap-2 mb-2.5">
+          <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
+            <option value="">— เลือกช่อง —</option>
+            {channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
+            <option value="tiktok">TikTok Shop</option><option value="facebook">Facebook</option><option value="shopee">Shopee</option><option value="lemon8">Lemon8</option><option value="youtube">YouTube</option>
+          </select>
+        </div>
+        {err && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{err}</p>}
+        <button onClick={run} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: C.emerald, color: '#062', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์ว่าควรทำไหม
+        </button>
+      </div>
+
+      {res && (
+        <div className="space-y-3">
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${col}55` }}>
+            <div className="flex items-center gap-3 mb-2 flex-wrap">
+              <div className="text-center shrink-0 px-3 py-2 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${col}` }}>
+                <div className="font-display text-2xl font-bold leading-none" style={{ color: col }}>{fit}/10</div>
+              </div>
+              <div className="min-w-0">
+                <div className="font-body text-base" style={{ color: col }}>{res.verdict}</div>
+                <p className="font-body text-xs" style={{ color: C.muted }}>{res.audienceMatch}</p>
+              </div>
+            </div>
+            <p className="font-body text-xs" style={{ color: C.text }}>{res.reason}</p>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            {res.commissionEstimate && (
+              <div className="p-3 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>ประเมินรายได้</div>
+                <p className="font-body text-xs" style={{ color: C.text }}>{res.commissionEstimate}</p>
+                {res.breakEven && <p className="font-body text-xs mt-1" style={{ color: C.muted }}>จุดคุ้มทุน: {res.breakEven}</p>}
+              </div>
+            )}
+            {res.pricePositioning && (
+              <div className="p-3 rounded-xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.cyan }}>ราคากับกำลังซื้อคนดู</div>
+                <p className="font-body text-xs" style={{ color: C.text }}>{res.pricePositioning}</p>
+                {res.bestPlatform && <p className="font-body text-xs mt-1" style={{ color: C.muted }}>ควรลง: {res.bestPlatform}</p>}
+              </div>
+            )}
+          </div>
+
+          {Array.isArray(res.contentAngles) && res.contentAngles.length > 0 && (
+            <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-2.5" style={{ color: C.blue }}>มุมคอนเทนต์ที่ควรใช้</div>
+              <div className="space-y-2">
+                {res.contentAngles.map((a, i) => (
+                  <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep }}>
+                    <div className="font-body text-xs mb-1" style={{ color: C.text }}>{a.angle}</div>
+                    <p className="font-body text-xs p-1.5 rounded mb-1" style={{ color: C.orange, background: `${C.orange}10` }}>ฮุก: {a.hook}</p>
+                    <p className="font-body text-xs" style={{ color: C.muted }}>{a.why}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(res.objections) && res.objections.length > 0 && (
+            <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.violet }}>ข้อโต้แย้งในใจคนดู &amp; วิธีตอบ</div>
+              <ul className="space-y-1.5">{res.objections.map((o, i) => <li key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {o}</li>)}</ul>
+            </div>
+          )}
+
+          {res.warning && (
+            <div className="p-3 rounded-xl flex items-start gap-2" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+              <AlertTriangle size={13} style={{ color: C.orange }} className="shrink-0 mt-0.5" />
+              <p className="font-body text-xs" style={{ color: C.text }}>{res.warning}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, showToast }) {
   const [horizon, setHorizon] = useState('1m');
   const [goal, setGoal] = useState('');
@@ -1779,10 +2606,34 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
   const [reviewing, setReviewing] = useState(false);
   const [err, setErr] = useState('');
   const [openId, setOpenId] = useState(null);
+  const [myPlan, setMyPlan] = useState('');   // แผนที่ CEO เขียนเอง
+  const [ceoNote, setCeoNote] = useState(''); // คอมเมนต์สั่งแก้แผน
+  const [revising, setRevising] = useState(false);
 
   const list = Array.isArray(plans) ? plans : [];
   const active = list.find((p) => p.id === openId) || list[list.length - 1] || null;
   const saved = Array.isArray(metrics) ? metrics : [];
+
+  // CEO สั่งแก้แผน — AI ปรับให้ตามคอมเมนต์ โดยยังยึดข้อมูลจริงเป็นฐาน
+  async function revisePlan() {
+    if (!active || !ceoNote.trim()) return;
+    setRevising(true); setErr('');
+    try {
+      const text = await callClaude(PLAN_SYS,
+        `นี่คือแผนเดิมที่คุณวางไว้:\n${JSON.stringify(active.data)}\n\n` +
+        `CEO สั่งแก้ดังนี้: ${ceoNote.trim()}\n\n` +
+        (myPlan.trim() ? `แผนที่ CEO ร่างไว้เอง (ให้นำมาผสาน): ${myPlan.trim()}\n\n` : '') +
+        `ช่วงเวลา: ${active.horizonLabel}\nเป้าหมายเดิม: ${active.goal}\n\nข้อมูลฐาน:\n${baselineSummary()}\n\n` +
+        `กรุณาปรับแผนใหม่ตามที่ CEO สั่ง แต่ยังต้องอิงข้อมูลจริง ถ้าสิ่งที่ CEO สั่งเสี่ยงหรือไม่สมเหตุสมผล ให้เตือนไว้ใน risks`);
+      const json = parseJsonLoose(text);
+      setPlans((Array.isArray(plans) ? plans : []).map((p) => (p.id === active.id
+        ? { ...p, data: json, revisions: [...(p.revisions || []), { at: Date.now(), note: ceoNote.trim(), prev: active.data }].slice(-10) }
+        : p)));
+      setCeoNote('');
+      showToast('ปรับแผนตามที่สั่งแล้ว');
+    } catch (e) { setErr(`ปรับแผนไม่สำเร็จ: ${e.message || ''}`); }
+    setRevising(false);
+  }
 
   // สรุปฐานปัจจุบันจากสถิติจริงที่อ่านมา
   function baselineSummary() {
@@ -1805,7 +2656,7 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
     setCreating(true); setErr('');
     const h = HORIZONS.find((x) => x.key === horizon);
     try {
-      const text = await callClaude(PLAN_SYS, `ช่วงเวลาของแผน: ${h.label} (${h.days} วัน)\nเป้าหมายที่ผมต้องการ: ${goal.trim()}\n\nข้อมูลฐานปัจจุบัน:\n${baselineSummary()}`);
+      const text = await callClaude(PLAN_SYS, `ช่วงเวลาของแผน: ${h.label} (${h.days} วัน)\nเป้าหมายที่ผมต้องการ: ${goal.trim()}\n${myPlan.trim() ? `\nแผนที่ CEO ร่างไว้เอง (ให้นำมาผสาน): ${myPlan.trim()}\n` : ''}\nข้อมูลฐานปัจจุบัน:\n${baselineSummary()}`);
       const json = parseJsonLoose(text);
       const start = todayDateStr();
       const end = shiftDateStr(start, h.days);
@@ -1865,10 +2716,8 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
   const act = active ? actualsFor(active) : null;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><Compass size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>GROWTH STRATEGY</span></div>
-      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>แผน &amp; กลยุทธ์</h2>
-      <p className="font-body text-xs mb-6 leading-relaxed" style={{ color: C.muted }}>
+    <div>
+      <p className="font-body text-xs mb-5 leading-relaxed" style={{ color: C.muted }}>
         วางแผนจากข้อมูลจริงที่ระบบเก็บไว้ → ลงมือทำ → ตรวจว่าเป็นไปตามเป้าไหม → ปรับแนวทางแล้วส่งกลับให้ AI สร้างคอนเทนต์ใช้ทันที
       </p>
 
@@ -1878,6 +2727,29 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
           <span className="font-body text-xs" style={{ color: C.text }}>{err}</span>
         </div>
       )}
+
+      {/* ---- สองคอลัมน์: แผนของ CEO / แผนของ AI ---- */}
+      <div className="grid md:grid-cols-2 gap-3 mb-4">
+        <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.cyan}44` }}>
+          <div className="flex items-center gap-2 mb-2">
+            <UserCog size={14} style={{ color: C.cyan }} />
+            <span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>แผนที่คุณเขียนเอง (CEO)</span>
+          </div>
+          <textarea value={myPlan} onChange={(e) => setMyPlan(e.target.value)} rows={7} placeholder={'เขียนแผนหรือแนวทางที่คุณคิดไว้เอง เช่น\n- อาทิตย์นี้เน้นคลิปสั้น 10 วิ\n- ลองปักตะกร้าสินค้าราคาถูกก่อน\n- อยากได้คนดูกลุ่มแม่บ้าน'} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+          <p className="font-mono text-2xs mt-1.5" style={{ color: C.muted, fontSize: 10 }}>* AI จะนำแผนนี้ไปผสานตอนสร้างหรือปรับแผน</p>
+        </div>
+        <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.violet}44` }}>
+          <div className="flex items-center gap-2 mb-2">
+            <Bot size={14} style={{ color: C.violet }} />
+            <span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>สั่งแก้แผนของ AI</span>
+          </div>
+          <textarea value={ceoNote} onChange={(e) => setCeoNote(e.target.value)} rows={7} placeholder={active ? 'สั่งได้เลย เช่น\n- เป้าวิวสูงไป ลดลงครึ่งหนึ่ง\n- เพิ่มเสาหลักคอนเทนต์แนวตลก\n- ตัดเฟสสุดท้ายออก เอาเวลาไปทุ่มเฟสแรก' : 'สร้างแผนก่อนถึงจะสั่งแก้ได้'} disabled={!active} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}`, opacity: active ? 1 : 0.5 }} />
+          <button onClick={revisePlan} disabled={!active || revising || !ceoNote.trim()} className="mt-1.5 font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff', opacity: (!active || revising || !ceoNote.trim()) ? 0.5 : 1 }}>
+            {revising ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />} ให้ AI ปรับแผนตามที่สั่ง
+          </button>
+          {active?.revisions?.length > 0 && <p className="font-mono text-2xs mt-1.5" style={{ color: C.muted, fontSize: 10 }}>ปรับมาแล้ว {active.revisions.length} ครั้ง</p>}
+        </div>
+      </div>
 
       {/* ---- สร้างแผนใหม่ ---- */}
       <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.border}` }}>
@@ -2162,7 +3034,37 @@ function StrategyPage({ metrics, plans, setPlans, channels, tasks, setTasks, sho
   );
 }
 
-function AnalyticsPage({ history, tasks, channels, metrics, setMetrics }) {
+const INTEL_TABS = [
+  { key: 'stats', label: 'สถิติผลงาน', Icon: TrendingUp },
+  { key: 'plan', label: 'แผน & กลยุทธ์', Icon: Compass },
+  { key: 'ads', label: 'ยิงแอด & ROAS', Icon: Megaphone },
+  { key: 'rival', label: 'ถอดสูตรคู่แข่ง', Icon: Clapperboard },
+  { key: 'product', label: 'วิเคราะห์สินค้า', Icon: ShoppingCart },
+];
+
+function AnalyticsPage(props) {
+  const [tab, setTab] = useState('stats');
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      <div className="flex items-center gap-2 mb-1"><Gauge size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>INTELLIGENCE CENTER</span></div>
+      <h2 className="font-body text-xl mb-4" style={{ color: C.text }}>ศูนย์วิเคราะห์ &amp; วางแผน</h2>
+      <div className="flex gap-1.5 mb-5 flex-wrap">
+        {INTEL_TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: tab === t.key ? BRAND : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>
+            <t.Icon size={12} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'stats' && <StatsPanel {...props} />}
+      {tab === 'plan' && <StrategyPage {...props} />}
+      {tab === 'ads' && <AdsPanel ads={props.ads} setAds={props.setAds} showToast={props.showToast} />}
+      {tab === 'rival' && <CompetitorIntel rivals={props.rivals} setRivals={props.setRivals} channels={props.channels} showToast={props.showToast} />}
+      {tab === 'product' && <ProductFitPanel channels={props.channels} showToast={props.showToast} />}
+    </div>
+  );
+}
+
+function StatsPanel({ history, tasks, channels, metrics, setMetrics }) {
   const [images, setImages] = useState([]);       // { id, name, base64, mimeType, dataUrl, platform, status, result }
   const [reading, setReading] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -2286,10 +3188,8 @@ function AnalyticsPage({ history, tasks, channels, metrics, setMetrics }) {
   const sevColor = (s) => (s === 'high' ? C.red : s === 'medium' ? C.orange : C.blue);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
-      <div className="flex items-center gap-2 mb-1"><TrendingUp size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>PERFORMANCE INTELLIGENCE</span></div>
-      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การวิเคราะห์ผลงานจริง</h2>
-      <p className="font-body text-xs mb-6 leading-relaxed" style={{ color: C.muted }}>
+    <div>
+      <p className="font-body text-xs mb-5 leading-relaxed" style={{ color: C.muted }}>
         แนบภาพหน้าจอสถิติจากทุกแพลตฟอร์มพร้อมกันได้เลย — ระบบจะอ่านตัวเลขออกมาเป็นข้อมูลจริง แยกแพลตฟอร์มให้อัตโนมัติ แล้วสะสมเป็นสถิติเทียบข้ามแพลตฟอร์มและดูแนวโน้มได้
       </p>
 
@@ -2609,6 +3509,382 @@ const SHORTCUTS = [
 const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ---------- ถังขยะ: เก็บของที่ลบไว้ 30 วัน กู้คืนได้ ----------
+// ---------- ตั้งค่าคีย์ Gemini ส่วนตัว ----------
+function GeminiKeyPanel({ user, tokens, onSaved, showToast }) {
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [showGuide, setShowGuide] = useState(false);
+  const has = user.hasGeminiKey;
+
+  async function save(remove) {
+    setBusy(true); setErr('');
+    const { ok, data } = await apiPost('/api/auth', { action: 'saveGeminiKey', key: remove ? '' : key.trim() });
+    setBusy(false);
+    if (!ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); return; }
+    setKey('');
+    showToast(remove ? 'ลบคีย์แล้ว — กลับมาใช้โทเค็นของระบบ' : 'บันทึกคีย์แล้ว ใช้ AI ได้ไม่จำกัดแล้ว');
+    onSaved();
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${has ? C.emerald : C.orange}55` }}>
+      <div className="flex items-center gap-2 mb-2">
+        <KeyRound size={14} style={{ color: has ? C.emerald : C.orange }} />
+        <span className="font-mono text-2xs tracking-widest" style={{ color: has ? C.emerald : C.orange }}>คีย์ AI ส่วนตัว</span>
+        {has && <span className="font-mono text-2xs px-2 py-0.5 rounded" style={{ color: C.emerald, border: `1px solid ${C.emerald}` }}>ใช้งานอยู่ · ไม่จำกัด</span>}
+      </div>
+
+      {has ? (
+        <>
+          <p className="font-body text-xs mb-2.5 leading-relaxed" style={{ color: C.muted }}>
+            คุณใช้คีย์ของตัวเองอยู่ — ใช้ AI ได้<b style={{ color: C.emerald }}>ไม่จำกัดโทเค็น</b> และไม่ต้องรอคิวร่วมกับคนอื่น
+          </p>
+          <button onClick={() => save(true)} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ลบคีย์ออก</button>
+        </>
+      ) : (
+        <>
+          <div className="p-2.5 rounded-xl mb-2.5" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+            <p className="font-body text-xs leading-relaxed" style={{ color: C.text }}>
+              <b>ใส่คีย์ของตัวเองแล้วได้อะไร:</b> ใช้ AI ได้ไม่จำกัด · ไม่ต้องรอคิวคนอื่น · ไม่เสียโทเค็น · <b>ฟรี ไม่ต้องผูกบัตร</b>
+            </p>
+          </div>
+          <div className="flex gap-1.5 mb-2 flex-wrap">
+            <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="วางคีย์ Gemini ที่นี่ (ขึ้นต้นด้วย AIza...)" className="flex-1 min-w-[180px] px-2.5 py-2 font-mono text-2xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+            <button onClick={() => save(false)} disabled={busy || !key.trim()} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1 shrink-0" style={{ background: BRAND, color: '#fff', opacity: (busy || !key.trim()) ? 0.5 : 1 }}>
+              {busy ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />} ทดสอบ + บันทึก
+            </button>
+          </div>
+          {err && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{err}</p>}
+          <button onClick={() => setShowGuide((v) => !v)} className="font-mono text-2xs" style={{ color: C.blue }}>
+            {showGuide ? 'ซ่อนวิธีขอคีย์' : 'ยังไม่มีคีย์? ดูวิธีขอ (2 นาที ฟรี)'}
+          </button>
+          {showGuide && (
+            <div className="mt-2 p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <ol className="space-y-1.5">
+                {[
+                  'เปิด aistudio.google.com/api-keys แล้วล็อกอินด้วยบัญชี Google',
+                  'กดปุ่ม "Create API key" มุมขวาบน',
+                  'เลือกโปรเจกต์ (หรือกดสร้างใหม่) แล้วกดยืนยัน',
+                  'กดไอคอนคัดลอกคีย์ที่ได้',
+                  'กลับมาวางในช่องด้านบน แล้วกด "ทดสอบ + บันทึก"',
+                ].map((t, i) => (
+                  <li key={i} className="font-body text-xs flex gap-2" style={{ color: C.text }}>
+                    <span className="font-mono shrink-0 rounded-full flex items-center justify-center" style={{ width: 16, height: 16, background: C.blue, color: '#fff', fontSize: 9 }}>{i + 1}</span>
+                    {t}
+                  </li>
+                ))}
+              </ol>
+              <a href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer" className="mt-2.5 inline-flex font-mono text-2xs px-3 py-1.5 rounded-lg items-center gap-1" style={{ background: C.blue, color: '#fff' }}>
+                <Share2 size={10} /> เปิดหน้าขอคีย์
+              </a>
+              <p className="font-mono text-2xs mt-2" style={{ color: C.muted, fontSize: 10 }}>* คีย์ถูกเก็บเข้ารหัสฝั่งเซิร์ฟเวอร์ ไม่แสดงกลับมาให้ใครเห็นอีก แม้แต่คุณเอง</p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------- แถบโทเค็นคงเหลือ ----------
+function TokenMeter({ tokens, compact }) {
+  if (!tokens) return null;
+  if (tokens.unlimited) {
+    return <span className="font-mono text-2xs px-2 py-0.5 rounded" style={{ color: C.emerald, border: `1px solid ${C.emerald}` }}>ไม่จำกัด</span>;
+  }
+  const pct = tokens.quota ? Math.round((tokens.left / tokens.quota) * 100) : 0;
+  const col = pct > 40 ? C.emerald : pct > 15 ? C.orange : C.red;
+  if (compact) {
+    return <span className="font-mono text-2xs" style={{ color: col }}>{tokens.left} โทเค็น</span>;
+  }
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Gauge size={14} style={{ color: col }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: col }}>โทเค็นคงเหลือ</span>
+        </div>
+        <span className="font-mono text-2xs" style={{ color: C.muted }}>แพ็ก {tokens.plan?.name} · เหลืออีก {tokens.daysLeft} วัน</span>
+      </div>
+      <div className="flex items-end gap-2 mb-2">
+        <span className="font-display text-2xl font-bold leading-none" style={{ color: col }}>{tokens.left}</span>
+        <span className="font-mono text-2xs mb-0.5" style={{ color: C.muted }}>/ {tokens.quota}</span>
+      </div>
+      <div style={{ width: '100%', height: 6, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: `linear-gradient(90deg, ${col}, ${col}99)`, transition: 'width .3s' }} />
+      </div>
+      {pct <= 20 && <p className="font-body text-xs mt-2" style={{ color: C.orange }}>โทเค็นใกล้หมด — ใส่คีย์ Gemini ของคุณเองด้านล่างเพื่อใช้ได้ไม่จำกัด (ฟรี)</p>}
+    </div>
+  );
+}
+
+// ---------- แผงเจ้าของระบบ: ผู้ใช้ / โทเค็น / งบการเงิน ----------
+function OwnerConsole({ user, showToast }) {
+  const [tab, setTab] = useState('users');
+  const [users, setUsers] = useState([]);
+  const [plans, setPlans] = useState({});
+  const [stats, setStats] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [grant, setGrant] = useState({});
+  const [gate, setGate] = useState(null);
+  const [allowEmail, setAllowEmail] = useState('');
+  const [codeNote, setCodeNote] = useState('');
+
+  async function load() {
+    const a = await apiPost('/api/auth', { action: 'adminUsers' });
+    if (a.ok) { setUsers(a.data.users || []); setPlans(a.data.plans || {}); }
+    const b = await apiPost('/api/auth', { action: 'adminUsage' });
+    if (b.ok) setStats(b.data.stats || {});
+    const g = await apiPost('/api/auth', { action: 'getGate' });
+    if (g.ok) setGate(g.data.gate);
+  }
+  useEffect(() => { if (user.isOwner) load(); }, [user.isOwner]);
+  if (!user.isOwner) return null;
+
+  async function doGrant(email) {
+    const amount = Number(grant[email] || 0);
+    if (!amount) return;
+    setBusy(true);
+    const { ok } = await apiPost('/api/auth', { action: 'adminGrantTokens', email, amount });
+    setBusy(false);
+    if (ok) { showToast(`เติม ${amount} โทเค็นให้ ${email} แล้ว`); setGrant((g) => ({ ...g, [email]: '' })); load(); }
+  }
+  async function setPlan(email, plan) {
+    const { ok } = await apiPost('/api/auth', { action: 'adminSetPlan', email, plan });
+    if (ok) { showToast('เปลี่ยนแพ็กเกจแล้ว'); load(); }
+  }
+  async function suspend(email, val) {
+    if (val && !window.confirm(`ระงับบัญชี ${email}?`)) return;
+    const { ok } = await apiPost('/api/auth', { action: 'adminSuspend', email, suspended: val });
+    if (ok) { showToast(val ? 'ระงับบัญชีแล้ว' : 'ปลดระงับแล้ว'); load(); }
+  }
+
+  // ---- งบการเงิน ----
+  const revenue = users.reduce((sum, u) => sum + (plans[u.plan]?.price || 0), 0);
+  const days = Object.keys(stats).sort();
+  const last30 = days.slice(-30);
+  const totalTokens30 = last30.reduce((sum, d) => sum + Object.values(stats[d] || {}).reduce((a, u) => a + u.total, 0), 0);
+  // ประเมินต้นทุน: 1 โทเค็น ≈ 1 คำขอ AI ≈ 0.06 บาท (อิงราคา Gemini Flash แบบจ่ายเงิน)
+  const COST_PER_TOKEN = 0.06;
+  const aiCost = Math.round(totalTokens30 * COST_PER_TOKEN);
+  const usersWithKey = users.filter((u) => u.hasKey).length;
+  const profit = revenue - aiCost;
+  const trendData = last30.map((d) => ({ d: d.slice(5), t: Object.values(stats[d] || {}).reduce((a, u) => a + u.total, 0) }));
+
+  async function setGateMode(mode) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'saveGate', mode });
+    if (ok) { setGate(data.gate); showToast(mode === 'open' ? 'เปิดให้ทุกคนเข้าใช้แล้ว' : mode === 'closed' ? 'ปิดเว็บแล้ว (คุณยังเข้าได้)' : 'เปิดเฉพาะคนที่ได้รับเชิญ'); }
+  }
+  async function setMax(n) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'saveGate', maxAccounts: n });
+    if (ok) setGate(data.gate);
+  }
+  async function allow() {
+    if (!allowEmail.trim()) return;
+    const { ok, data } = await apiPost('/api/auth', { action: 'gateAllow', email: allowEmail.trim() });
+    if (ok) { setGate(data.gate); setAllowEmail(''); showToast('เพิ่มรายชื่อแล้ว'); }
+  }
+  async function revoke(em) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'gateRevoke', email: em });
+    if (ok) setGate(data.gate);
+  }
+  async function newCode() {
+    const { ok, data } = await apiPost('/api/auth', { action: 'gateNewCode', note: codeNote });
+    if (ok) { setGate(data.gate); setCodeNote(''); copyText(data.code); showToast(`สร้างรหัส ${data.code} และคัดลอกแล้ว`); }
+  }
+  async function delCode(code) {
+    const { ok, data } = await apiPost('/api/auth', { action: 'gateDeleteCode', code });
+    if (ok) setGate(data.gate);
+  }
+
+  const TABS = [
+    { key: 'gate', label: 'ล็อกเว็บ' },
+    { key: 'users', label: `ผู้ใช้ (${users.length})` },
+    { key: 'finance', label: 'งบการเงิน' },
+    { key: 'usage', label: 'การใช้งานรายคน' },
+  ];
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}55` }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <UserCog size={14} style={{ color: C.violet }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>ศูนย์ควบคุมเจ้าของระบบ</span>
+        </div>
+        <button onClick={load} className="font-mono text-2xs px-2 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.border}`, color: C.muted }}><RefreshCw size={10} /> รีเฟรช</button>
+      </div>
+      <div className="flex gap-1.5 mb-3 flex-wrap">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)} className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ background: tab === t.key ? C.violet : 'transparent', color: tab === t.key ? '#fff' : C.muted, border: `1px solid ${tab === t.key ? 'transparent' : C.border}` }}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === 'gate' && (
+        gate == null ? <p className="font-body text-xs" style={{ color: C.muted }}>กำลังโหลด...</p> : (
+          <div>
+            <p className="font-body text-xs mb-2.5 leading-relaxed" style={{ color: C.muted }}>คุมว่าใครเข้าเว็บได้ — คุณในฐานะเจ้าของระบบเข้าได้เสมอไม่ว่าตั้งค่าแบบไหน</p>
+            <div className="grid sm:grid-cols-3 gap-2 mb-3">
+              {[
+                { k: 'open', label: 'เปิดทุกคน', desc: 'ใครก็สมัครเข้าใช้ได้', col: C.emerald },
+                { k: 'invite', label: 'เฉพาะคนที่เชิญ', desc: 'ต้องอยู่ในรายชื่อหรือมีรหัสเชิญ', col: C.orange },
+                { k: 'closed', label: 'ปิดเว็บ', desc: 'ไม่มีใครเข้าได้เลย', col: C.red },
+              ].map((m) => (
+                <button key={m.k} onClick={() => setGateMode(m.k)} className="p-3 rounded-xl text-left" style={{ background: gate.mode === m.k ? `${m.col}18` : C.bgDeep, border: `1.5px solid ${gate.mode === m.k ? m.col : C.border}` }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    {gate.mode === m.k ? <CheckCircle2 size={13} style={{ color: m.col }} /> : <Square size={13} style={{ color: C.muted }} />}
+                    <span className="font-body text-xs" style={{ color: gate.mode === m.k ? m.col : C.text }}>{m.label}</span>
+                  </div>
+                  <p className="font-body" style={{ fontSize: 10, color: C.muted }}>{m.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <span className="font-mono text-2xs" style={{ color: C.muted }}>รับสมาชิกสูงสุด</span>
+              <input type="number" value={gate.maxAccounts} onChange={(e) => setMax(Number(e.target.value))} className="font-mono text-2xs px-2 py-1 rounded outline-none" style={{ width: 70, background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+              <span className="font-mono text-2xs" style={{ color: C.muted }}>บัญชี (ตอนนี้ {users.length})</span>
+            </div>
+
+            {gate.mode === 'invite' && (
+              <>
+                <div className="p-3 rounded-xl mb-2.5" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                  <div className="font-mono text-2xs mb-2" style={{ color: C.emerald }}>รายชื่ออีเมลที่อนุญาต ({gate.allowList.length})</div>
+                  <div className="flex gap-1.5 mb-2 flex-wrap">
+                    <input value={allowEmail} onChange={(e) => setAllowEmail(e.target.value)} placeholder="อีเมลที่จะให้เข้าใช้" className="flex-1 min-w-[160px] px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                    <button onClick={allow} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ background: C.emerald, color: '#062' }}>เพิ่ม</button>
+                  </div>
+                  {gate.allowList.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีรายชื่อ</p> : (
+                    <div className="space-y-1">
+                      {gate.allowList.map((em) => (
+                        <div key={em} className="flex items-center justify-between gap-2 py-1">
+                          <span className="font-mono truncate" style={{ fontSize: 10, color: C.text }}>{em}</span>
+                          <button onClick={() => revoke(em)} style={{ color: C.muted }} className="shrink-0"><X size={11} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                  <div className="font-mono text-2xs mb-2" style={{ color: C.violet }}>รหัสเชิญ (ใช้ได้ครั้งเดียวต่อรหัส)</div>
+                  <div className="flex gap-1.5 mb-2 flex-wrap">
+                    <input value={codeNote} onChange={(e) => setCodeNote(e.target.value)} placeholder="โน้ต เช่น ให้พี่เอ" className="flex-1 min-w-[140px] px-2 py-1.5 font-mono text-2xs outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                    <button onClick={newCode} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff' }}><Plus size={11} /> สร้างรหัส</button>
+                  </div>
+                  {gate.inviteCodes.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีรหัส</p> : (
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {gate.inviteCodes.slice().reverse().map((c) => (
+                        <div key={c.code} className="flex items-center justify-between gap-2 py-1">
+                          <div className="min-w-0">
+                            <span className="font-mono" style={{ fontSize: 11, color: c.usedBy ? C.muted : C.violet, textDecoration: c.usedBy ? 'line-through' : 'none' }}>{c.code}</span>
+                            <span className="font-mono ml-1.5" style={{ fontSize: 9, color: C.muted }}>{c.usedBy ? `ใช้แล้วโดย ${c.usedBy}` : (c.note || 'ยังไม่ถูกใช้')}</span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {!c.usedBy && <button onClick={() => { copyText(c.code); showToast('คัดลอกรหัสแล้ว'); }} className="font-mono" style={{ fontSize: 9, color: C.blue }}>คัดลอก</button>}
+                            <button onClick={() => delCode(c.code)} style={{ color: C.muted }}><X size={11} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )
+      )}
+
+      {tab === 'users' && (
+        <div className="space-y-2">
+          {users.map((u) => {
+            const tk = u.tokens || {};
+            const pct = tk.unlimited ? 100 : (tk.quota ? Math.round((tk.left / tk.quota) * 100) : 0);
+            const col = tk.unlimited ? C.emerald : pct > 40 ? C.emerald : pct > 15 ? C.orange : C.red;
+            return (
+              <div key={u.email} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${u.suspended ? C.red : C.border}` }}>
+                <div className="flex items-start justify-between gap-2 mb-1.5 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="font-body text-xs flex items-center gap-1.5" style={{ color: C.text }}>
+                      {u.name} {u.isOwner && <span className="font-mono px-1.5 rounded" style={{ fontSize: 9, color: C.violet, border: `1px solid ${C.violet}` }}>เจ้าของ</span>}
+                      {u.hasKey && <span className="font-mono px-1.5 rounded" style={{ fontSize: 9, color: C.emerald, border: `1px solid ${C.emerald}` }}>มีคีย์เอง</span>}
+                      {u.suspended && <span className="font-mono px-1.5 rounded" style={{ fontSize: 9, color: C.red, border: `1px solid ${C.red}` }}>ถูกระงับ</span>}
+                    </div>
+                    <div className="font-mono truncate" style={{ fontSize: 10, color: C.muted }}>{u.email} · เข้าล่าสุด {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('th-TH') : '-'}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-mono text-xs" style={{ color: col }}>{tk.unlimited ? 'ไม่จำกัด' : `${tk.left}/${tk.quota}`}</div>
+                    <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>ใช้ไป {tk.used || 0}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <select value={u.isOwner ? 'owner' : (u.plan || 'trial')} onChange={(e) => setPlan(u.email, e.target.value)} disabled={u.isOwner} className="font-mono text-2xs px-2 py-1 rounded outline-none" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }}>
+                    {Object.entries(plans).map(([k, p]) => <option key={k} value={k}>{p.name}{p.price ? ` (${p.price}฿)` : ''}</option>)}
+                  </select>
+                  <input value={grant[u.email] || ''} onChange={(e) => setGrant((g) => ({ ...g, [u.email]: e.target.value }))} placeholder="เติมโทเค็น" type="number" className="font-mono text-2xs px-2 py-1 rounded outline-none" style={{ width: 88, background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                  <button onClick={() => doGrant(u.email)} disabled={busy} className="font-mono text-2xs px-2 py-1 rounded" style={{ background: C.emerald, color: '#062' }}>เติม</button>
+                  {!u.isOwner && (
+                    <button onClick={() => suspend(u.email, !u.suspended)} className="font-mono text-2xs px-2 py-1 rounded" style={{ border: `1px solid ${u.suspended ? C.emerald : C.red}`, color: u.suspended ? C.emerald : C.red }}>
+                      {u.suspended ? 'ปลดระงับ' : 'ระงับ'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'finance' && (
+        <div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+            <StatCard label="รายได้/เดือน" value={`${revenue}฿`} sub={`${users.filter((u) => (plans[u.plan]?.price || 0) > 0).length} บัญชีจ่ายเงิน`} color={C.emerald} Icon={Award} />
+            <StatCard label="ต้นทุน AI (30 วัน)" value={`~${aiCost}฿`} sub={`${totalTokens30} โทเค็น`} color={C.orange} Icon={Gauge} />
+            <StatCard label="กำไรโดยประมาณ" value={`${profit}฿`} sub={profit >= 0 ? 'เป็นบวก' : 'ขาดทุน'} color={profit >= 0 ? C.emerald : C.red} Icon={TrendingUp} />
+            <StatCard label="ใช้คีย์ตัวเอง" value={`${usersWithKey}/${users.length}`} sub="ยิ่งเยอะ ต้นทุนยิ่งต่ำ" color={C.cyan} Icon={KeyRound} />
+          </div>
+          {trendData.length > 1 && (
+            <div className="p-3 rounded-xl mb-2" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>โทเค็นที่ใช้รายวัน</div>
+              <ResponsiveContainer width="100%" height={130}>
+                <BarChart data={trendData}>
+                  <XAxis dataKey="d" tick={{ fill: C.muted, fontSize: 9 }} />
+                  <YAxis tick={{ fill: C.muted, fontSize: 9 }} />
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                  <Bar dataKey="t" name="โทเค็น" fill={C.blue} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <p className="font-mono text-2xs" style={{ color: C.muted, fontSize: 10 }}>
+            * ต้นทุน AI ประเมินที่ {COST_PER_TOKEN} บาท/โทเค็น (อิงราคา Gemini Flash แบบจ่ายเงิน) — ผู้ใช้ที่ใส่คีย์เองไม่คิดต้นทุนฝั่งเรา
+          </p>
+        </div>
+      )}
+
+      {tab === 'usage' && (
+        days.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลการใช้งาน</p> : (
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {days.slice().reverse().slice(0, 14).map((d) => (
+              <div key={d} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs mb-1.5" style={{ color: C.blue }}>{d}</div>
+                {Object.entries(stats[d]).map(([em, v]) => (
+                  <div key={em} className="flex items-center justify-between gap-2 py-0.5">
+                    <span className="font-mono truncate" style={{ fontSize: 10, color: C.text }}>{em}</span>
+                    <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.muted }}>
+                      {v.total} · {Object.entries(v.actions).map(([a, n]) => `${a}:${n}`).join(' ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function TrashPanel({ trash, onRestore, onPurge, onEmpty }) {
   const items = (trash || []).filter((t) => Date.now() - t.at < TRASH_TTL_MS);
   return (
@@ -2745,7 +4021,7 @@ function HealthCheckPanel({ channels, tasks, history, futureTasks, loadOk }) {
   );
 }
 
-function SettingsPage({ user, accounts, backupData, onImportBackup, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
+function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refreshMe, showToast, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
   const [importMsg, setImportMsg] = useState('');
   const [importing, setImporting] = useState(false);
 
@@ -2790,6 +4066,9 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, trash, onRes
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
 
+      <OwnerConsole user={user} showToast={showToast} />
+      <TokenMeter tokens={tokens} />
+      <GeminiKeyPanel user={user} tokens={tokens} onSaved={refreshMe} showToast={showToast} />
       <HealthCheckPanel channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />
       <TrashPanel trash={trash} onRestore={onRestoreTrash} onPurge={onPurgeTrash} onEmpty={onEmptyTrash} />
 
@@ -4010,6 +5289,9 @@ export default function CompanyPortal() {
   const [trash, setTrash] = useState([]);       // ถังขยะ เก็บของที่ลบไว้ 30 วัน
   const [metrics, setMetrics] = useState([]);   // สถิติจริงที่อ่านมาจากภาพหน้าจอแพลตฟอร์ม
   const [plans, setPlans] = useState([]);       // แผนการเติบโตที่ AI วางให้
+  const [rivals, setRivals] = useState([]);     // คลังถอดสูตรคู่แข่ง
+  const [tokens, setTokens] = useState(null);   // สถานะโทเค็นของผู้ใช้คนนี้
+  const [ads, setAds] = useState([]);           // ข้อมูลแคมเปญโฆษณาที่อ่านมาจากภาพ
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -4074,8 +5356,9 @@ export default function CompanyPortal() {
   function handleLogin(account) {
     setAccounts((prev) => prev.map((a) => (a.email === account.email ? { ...a, lastLogin: account.lastLogin || Date.now() } : a)));
     // โทเค็นถูกบันทึกไว้แล้วตอนล็อกอินสำเร็จ (ในหน้า Terminal)
-    setUser({ name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt });
+    setUser({ name: account.name, clearance: account.clearance, email: account.email, isOwner: !!account.isOwner, otpExempt: !!account.otpExempt, hasGeminiKey: !!account.hasGeminiKey });
     setStage('daily');
+    setTimeout(refreshMe, 100);
   }
   async function updateAccountClearance(email, clearance) {
     setAccounts((prev) => prev.map((a) => (a.email === email ? { ...a, clearance } : a)));
@@ -4106,7 +5389,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -4116,6 +5399,8 @@ export default function CompanyPortal() {
           api('/api/store?key=trash'),
           api('/api/store?key=metrics'),
           api('/api/store?key=plans'),
+          api('/api/store?key=rivals'),
+          api('/api/store?key=ads'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -4126,6 +5411,8 @@ export default function CompanyPortal() {
         const trashData = trashRes.data;
         const metricData = metricRes.data;
         const planData = planRes.data;
+        const rivalData = rivalRes.data;
+        const adData = adRes.data;
 
         const rawChannels = Array.isArray(chData.value) ? chData.value : [];
         const rawTasks = Array.isArray(taskData.value) ? taskData.value : [];
@@ -4181,6 +5468,8 @@ export default function CompanyPortal() {
         setTrash(rawTrash.filter((t) => Date.now() - (t.at || 0) < 30 * 24 * 60 * 60 * 1000));
         setMetrics(Array.isArray(metricData.value) ? metricData.value : []);
         setPlans(Array.isArray(planData.value) ? planData.value : []);
+        setRivals(Array.isArray(rivalData.value) ? rivalData.value : []);
+        setAds(Array.isArray(adData.value) ? adData.value : []);
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -4225,6 +5514,14 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'plans', value: plans }).catch(() => {});
   }, [plans, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'rivals', value: rivals }).catch(() => {});
+  }, [rivals, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'ads', value: ads }).catch(() => {});
+  }, [ads, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -4264,6 +5561,24 @@ export default function CompanyPortal() {
     }));
   }
 
+  async function refreshMe() {
+    const { ok, data } = await apiPost('/api/auth', { action: 'me' });
+    if (ok && data.account) {
+      setUser((u) => ({ ...u, hasGeminiKey: !!data.account.hasGeminiKey, clearance: data.account.clearance, isOwner: !!data.account.isOwner }));
+      setTokens(data.tokens || null);
+      setAiGap(data.account.hasGeminiKey ? 1500 : 13000);
+    }
+  }
+  useEffect(() => {
+    function onTok(e) {
+      const left = e.detail?.left;
+      if (left == null) return;
+      setTokens((t) => (t ? { ...t, left: left === -1 ? Infinity : left, used: (t.used || 0) + (e.detail.cost || 0) } : t));
+    }
+    window.addEventListener('forge-tokens', onTok);
+    return () => window.removeEventListener('forge-tokens', onTok);
+  }, []);
+
   function logout() {
     clearSession();
     setUser(null); setStage('terminal'); setActiveDept(null);
@@ -4286,7 +5601,10 @@ export default function CompanyPortal() {
               clearance: data.account.clearance,
               isOwner: !!data.account.isOwner,
               otpExempt: !!data.account.otpExempt,
+              hasGeminiKey: !!data.account.hasGeminiKey,
             });
+            setTokens(data.tokens || null);
+            if (data.account.hasGeminiKey) setAiGap(1500);
             setStage('daily');
           } else {
             clearSession();
@@ -4377,7 +5695,7 @@ export default function CompanyPortal() {
 
       {stage !== 'terminal' && user && (
         <div className="flex">
-          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} />}
@@ -4385,10 +5703,9 @@ export default function CompanyPortal() {
             {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
-            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} />}
+            {stage === 'analytics' && <AnalyticsPage history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
-            {stage === 'strategy' && <StrategyPage metrics={metrics} plans={plans} setPlans={setPlans} channels={channels} tasks={tasks} setTasks={setTasks} showToast={showToast} />}
-            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
+            {stage === 'settings' && <SettingsPage user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} tokens={tokens} refreshMe={refreshMe} showToast={showToast} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && <SecurityProtocol user={user} onToggleOwnOtpExempt={toggleOwnOtpExempt} />}
           </div>
