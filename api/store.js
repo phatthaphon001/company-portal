@@ -1,12 +1,12 @@
-import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, autoBackup, logActivity } from './_lib.js';
+import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, autoBackup, logActivity, orgIdOf, roleLevel, isDev } from './_lib.js';
 
-// ข้อมูลส่วนตัวของแต่ละคน — เก็บแยกตามอีเมล ห้ามปนกันเด็ดขาด
-const USER_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptRecords', 'dayNotes'];
+// ข้อมูลที่ทั้งองค์กรใช้ร่วมกัน
+const ORG_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptData', 'company'];
+// ข้อมูลส่วนตัวของแต่ละคน — เพื่อนร่วมองค์กรก็ห้ามเห็น (เช่น การเงินส่วนบุคคล)
+const PRIVATE_KEYS = ['myFinance', 'myNotes'];
 
-// สร้างชื่อคีย์เฉพาะของผู้ใช้คนนั้น
-function scopedKey(key, email) {
-  return `u:${String(email).toLowerCase()}:${key}`;
-}
+const orgKey = (key, orgId) => `o:${orgId}:${key}`;
+const userKey = (key, email) => `u:${String(email).toLowerCase()}:${key}`;
 
 export default async function handler(req, res) {
   if (!redisReady()) {
@@ -21,20 +21,30 @@ export default async function handler(req, res) {
   const session = await requireUser(req);
   if (!session) return res.status(401).json({ error: 'กรุณาเข้าสู่ระบบใหม่' });
   const me = session.account;
-  const email = me.email;
+  const orgId = orgIdOf(me);
+
+  // ผู้พัฒนาสามารถระบุ orgId เพื่อดูข้อมูลขององค์กรลูกค้าได้ (สำหรับช่วยแก้ปัญหา)
+  const targetOrg = (isDev(me) && (req.query.orgId || req.body?.orgId)) ? String(req.query.orgId || req.body.orgId) : orgId;
+
+  function resolveKey(key) {
+    if (PRIVATE_KEYS.includes(key)) return userKey(key, me.email);
+    return orgKey(key, targetOrg);
+  }
+  const allowed = (key) => ORG_KEYS.includes(key) || PRIVATE_KEYS.includes(key);
 
   if (req.method === 'GET') {
     const key = req.query.key;
-    if (!USER_KEYS.includes(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
+    if (!allowed(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
     try {
-      let value = await redisGet(scopedKey(key, email));
+      let value = await redisGet(resolveKey(key));
 
-      // ---- ย้ายข้อมูลเดิม (สมัยยังใช้คนเดียว) เข้าบัญชีเจ้าของระบบครั้งเดียว ----
-      if (value == null && me.isOwner) {
-        const legacy = await redisGet(key);
+      // ---- ย้ายข้อมูลเดิมเข้าองค์กรครั้งเดียว (ของเจ้าขององค์กรเท่านั้น) ----
+      if (value == null && !PRIVATE_KEYS.includes(key) && targetOrg === orgId && me.isOwner) {
+        const legacyUser = await redisGet(userKey(key, me.email));
+        const legacy = legacyUser != null ? legacyUser : await redisGet(key);
         if (legacy != null) {
-          await redisSet(scopedKey(key, email), legacy);
-          await logActivity({ type: 'data_migrated', key, email });
+          await redisSet(orgKey(key, orgId), legacy);
+          await logActivity({ type: 'data_migrated_to_org', key, orgId, email: me.email });
           value = legacy;
         }
       }
@@ -46,13 +56,16 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     const { key, value } = req.body || {};
-    if (!USER_KEYS.includes(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
-    if (me.clearance < 2) return res.status(403).json({ error: 'สิทธิ์ของคุณแก้ไขข้อมูลนี้ไม่ได้' });
+    if (!allowed(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
+    // พนักงานทั่วไปแก้ข้อมูลส่วนตัวได้ แต่ข้อมูลกลางขององค์กรต้องระดับหัวหน้าขึ้นไป
+    if (!PRIVATE_KEYS.includes(key) && roleLevel(me) < 2 && me.clearance < 2) {
+      return res.status(403).json({ error: 'สิทธิ์ของคุณแก้ไขข้อมูลส่วนกลางไม่ได้' });
+    }
     try {
       if (key === 'channels' || key === 'tasks') {
-        autoBackup(new Date().toISOString().slice(0, 10), email).catch(() => {});
+        autoBackup(new Date().toISOString().slice(0, 10), targetOrg).catch(() => {});
       }
-      await redisSet(scopedKey(key, email), value);
+      await redisSet(resolveKey(key), value);
       return res.status(200).json({ ok: true });
     } catch (err) {
       return res.status(500).json({ error: 'บันทึกข้อมูลไม่สำเร็จ' });
