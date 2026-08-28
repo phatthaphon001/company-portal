@@ -1321,6 +1321,35 @@ function DeptTool({ tool, deptId, records, setRecords, showToast }) {
     setImgs((p) => [...p, ...out].slice(0, tool.images || 0));
   }
 
+  // ให้ AI อ่านรูปแล้วกรอกช่องข้อมูลให้อัตโนมัติ — ผิดตรงไหนค่อยแก้เอง
+  const [filling, setFilling] = useState(false);
+  async function autoFill() {
+    if (imgs.length === 0) { setErr('แนบรูปก่อน แล้วระบบจะกรอกให้อัตโนมัติ'); return; }
+    setFilling(true); setErr('');
+    const spec = (tool.fields || []).map((f) => `"${f.k}": "${f.label}${f.ph ? ` (ตัวอย่าง: ${f.ph})` : ''}"`).join(',\n ');
+    const sys = `คุณคือระบบอ่านข้อมูลจากภาพเอกสาร อ่านทุกอย่างที่เห็นในภาพที่แนบมา แล้วกรอกลงช่องข้อมูลให้ครบที่สุด
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ code fence
+รูปแบบ (key ต้องตรงเป๊ะ ค่าเป็นข้อความภาษาไทยหรือตัวเลข):
+{
+ ${spec}
+}
+กติกา: อ่านไม่เจอข้อมูลช่องไหนให้ใส่ "" · ห้ามเดาหรือแต่งข้อมูลขึ้นเอง · ถ้าเป็นวันที่ให้เขียนแบบ วว/ดด/ปปปป · ตัวเลขเงินไม่ต้องใส่หน่วย`;
+    try {
+      const text = await callClaude(sys, 'อ่านข้อมูลจากภาพที่แนบมาแล้วกรอกลงช่องให้ครบ',
+        imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })), 'metricRead');
+      const json = parseJsonLoose(text);
+      const next = { ...vals };
+      let n = 0;
+      (tool.fields || []).forEach((f) => {
+        const v = json[f.k];
+        if (v != null && String(v).trim() !== '') { next[f.k] = String(v); n++; }
+      });
+      setVals(next);
+      showToast(n > 0 ? `กรอกให้แล้ว ${n} ช่อง — ตรวจดูอีกทีแล้วแก้ตรงที่ผิดได้เลย` : 'อ่านข้อมูลจากรูปไม่ได้ ลองแนบรูปที่ชัดกว่านี้');
+    } catch (e) { setErr(`กรอกอัตโนมัติไม่สำเร็จ: ${e.message || ''}`); }
+    setFilling(false);
+  }
+
   async function run() {
     const missing = (tool.fields || []).filter((f) => f.required && !String(vals[f.k] || '').trim());
     if (missing.length) { setErr(`กรุณากรอก: ${missing.map((m) => m.label).join(', ')}`); return; }
@@ -1386,9 +1415,16 @@ function DeptTool({ tool, deptId, records, setRecords, showToast }) {
       </div>
 
       {err && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{err}</p>}
-      <button onClick={run} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: tool.color, color: '#111', opacity: busy ? 0.6 : 1 }}>
-        {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI วิเคราะห์
-      </button>
+      <div className="flex gap-1.5 flex-wrap">
+        {tool.images > 0 && (tool.fields || []).length > 0 && (
+          <button onClick={autoFill} disabled={filling || imgs.length === 0} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ border: `1px solid ${C.cyan}`, color: C.cyan, opacity: (filling || imgs.length === 0) ? 0.5 : 1 }}>
+            {filling ? <Loader2 size={12} className="animate-spin" /> : <Bot size={12} />} ให้ AI กรอกช่องให้จากรูป
+          </button>
+        )}
+        <button onClick={run} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: tool.color, color: '#111', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI วิเคราะห์
+        </button>
+      </div>
 
       {mine.length > 0 && (
         <>
@@ -2295,11 +2331,16 @@ function StatCard({ label, value, sub, color, Icon }) {
   );
 }
 
+const KPI_SYS = 'คุณคือที่ปรึกษาด้านประสิทธิภาพการทำงาน วิเคราะห์จากตัวชี้วัดจริงที่ให้มา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ code fence รูปแบบ: {"headline":"สรุปสถานการณ์ 1 ประโยค ตรงไปตรงมา","grade":"ต้องปรับปรุงด่วน|พอใช้|ดี|ดีเยี่ยม","strengths":["จุดแข็งที่เห็นจากตัวเลข"],"problems":[{"problem":"ปัญหา","evidence":"อ้างตัวเลขจริง","impact":"กระทบอะไร","fix":"แก้ยังไงให้เห็นผลใน 7 วัน"}],"channelAdvice":[{"channel":"ชื่อช่อง","status":"ดี|ต้องดู|วิกฤต","action":"ควรทำอะไรกับช่องนี้"}],"qualityVsQuantity":"ทำเยอะกับทำดีสมดุลกันไหม อธิบายจากตัวเลข","nextMonthTarget":{"completion":"เป้าอัตราทำเสร็จเดือนหน้า","quality":"เป้าคะแนนคุณภาพ","reasoning":"ตั้งเป้านี้เพราะอะไร"},"topPriority":"สิ่งเดียวที่ควรโฟกัสที่สุดตอนนี้"}';
+
 function KpiPage({ history, tasks, channels }) {
   const allDays = collectAllDays(history, tasks);
   const months = Array.from(new Set(allDays.map((d) => monthKey(d.date)))).sort().reverse();
   const [selMonth, setSelMonth] = useState(months[0] || monthKey(todayDateStr()));
   const [query, setQuery] = useState('');
+  const [kpiAi, setKpiAi] = useState(null);
+  const [kpiLoading, setKpiLoading] = useState(false);
+  const [kpiErr, setKpiErr] = useState('');
 
   const monthDays = allDays.filter((d) => monthKey(d.date) === selMonth);
   const totalTasks = monthDays.reduce((s, d) => s + d.total, 0);
@@ -2365,6 +2406,26 @@ function KpiPage({ history, tasks, channels }) {
       [t.titleTh, t.title, t.outline, t.captionTh, t.styleTemplate].filter(Boolean).join(' ').toLowerCase().includes(q)
     ).map((t) => ({ ...t, date: d.date, channelName: (channels.find((c) => c.id === t.channelId) || {}).name || '-' }))
   ).slice(0, 30);
+
+  async function runKpiAi() {
+    setKpiLoading(true); setKpiErr(''); setKpiAi(null);
+    const payload = {
+      เดือน: thaiMonthLabel(selMonth),
+      อัตราทำเสร็จ: `${completion}% (${doneTasks}/${totalTasks})`,
+      คะแนนคุณภาพเฉลี่ย: avgScore == null ? 'ยังไม่มีผลตรวจ' : avgScore.toFixed(1),
+      จำนวนคลิปที่ส่งตรวจ: scored.length,
+      วันทำครบติดกัน: streak,
+      วันที่ทำครบ: `${perfectDays}/${activeDays}`,
+      แนวโน้มรายวัน: dailyTrend,
+      แยกตามช่อง: byChannel,
+      เทียบรายเดือน: monthCompare,
+    };
+    try {
+      const text = await callClaude(KPI_SYS, `ตัวชี้วัดจริง:\n${JSON.stringify(payload, null, 1)}`, undefined, 'deepAnalysis');
+      setKpiAi(parseJsonLoose(text));
+    } catch (e) { setKpiErr(e.message || 'วิเคราะห์ไม่สำเร็จ'); }
+    setKpiLoading(false);
+  }
 
   const scoreColor = avgScore == null ? C.muted : avgScore >= 8 ? C.emerald : avgScore >= 5 ? C.orange : C.red;
   const compColor = completion >= 80 ? C.emerald : completion >= 50 ? C.orange : C.red;
@@ -2448,6 +2509,75 @@ function KpiPage({ history, tasks, channels }) {
                 </div>
               );
             })}
+          </div>
+        )}
+      </div>
+
+      {/* วิเคราะห์ด้วย AI */}
+      <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}44` }}>
+        <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+          <div className="flex items-center gap-2"><Sparkles size={14} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>AI วิเคราะห์ตัวชี้วัด</span></div>
+          <button onClick={runKpiAi} disabled={kpiLoading || totalTasks === 0} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff', opacity: (kpiLoading || totalTasks === 0) ? 0.5 : 1 }}>
+            {kpiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์เดือนนี้
+          </button>
+        </div>
+        {kpiErr && <p className="font-mono text-2xs mb-2" style={{ color: C.red }}>{kpiErr}</p>}
+        {!kpiAi && !kpiLoading && (
+          <p className="font-body text-xs" style={{ color: C.muted }}>
+            {totalTasks === 0 ? 'ยังไม่มีข้อมูลเดือนนี้ — เริ่มทำงานก่อนแล้วค่อยให้ AI วิเคราะห์' : 'AI จะดูตัวเลขทั้งหมดแล้วบอกว่าปัญหาอยู่ตรงไหน ต้องแก้อะไรก่อน และควรตั้งเป้าเดือนหน้าเท่าไหร่'}
+          </p>
+        )}
+        {kpiAi && (
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="font-mono text-2xs px-2.5 py-1 rounded-lg" style={{ color: /ดีเยี่ยม/.test(kpiAi.grade) ? C.emerald : /^ดี/.test(kpiAi.grade) ? C.cyan : /พอใช้/.test(kpiAi.grade) ? C.orange : C.red, border: `1px solid ${/ดีเยี่ยม/.test(kpiAi.grade) ? C.emerald : /^ดี/.test(kpiAi.grade) ? C.cyan : /พอใช้/.test(kpiAi.grade) ? C.orange : C.red}` }}>{kpiAi.grade}</span>
+              <p className="font-body text-sm flex-1 min-w-[180px]" style={{ color: C.text }}>{kpiAi.headline}</p>
+            </div>
+            {kpiAi.topPriority && (
+              <div className="p-2.5 rounded-xl" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}55` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>โฟกัสสิ่งนี้ก่อน</div>
+                <p className="font-body text-xs" style={{ color: C.text }}>{kpiAi.topPriority}</p>
+              </div>
+            )}
+            {Array.isArray(kpiAi.problems) && kpiAi.problems.length > 0 && (
+              <div className="space-y-1.5">
+                {kpiAi.problems.map((p, i) => (
+                  <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.red}`, border: `1px solid ${C.border}` }}>
+                    <div className="font-body text-xs" style={{ color: C.red }}>{p.problem}</div>
+                    <p className="font-body text-xs" style={{ color: C.muted }}>หลักฐาน: {p.evidence}</p>
+                    {p.impact && <p className="font-body text-xs" style={{ color: C.muted }}>กระทบ: {p.impact}</p>}
+                    <p className="font-body text-xs mt-0.5" style={{ color: C.emerald }}>แก้: {p.fix}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {Array.isArray(kpiAi.strengths) && kpiAi.strengths.length > 0 && (
+              <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>จุดแข็ง</div>
+                {kpiAi.strengths.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+              </div>
+            )}
+            {Array.isArray(kpiAi.channelAdvice) && kpiAi.channelAdvice.length > 0 && (
+              <div className="space-y-1">
+                {kpiAi.channelAdvice.map((c, i) => {
+                  const col = c.status === 'ดี' ? C.emerald : c.status === 'วิกฤต' ? C.red : C.orange;
+                  return (
+                    <div key={i} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: C.bgDeep }}>
+                      <span className="font-mono shrink-0 px-1.5 rounded" style={{ fontSize: 9, color: col, border: `1px solid ${col}` }}>{c.status}</span>
+                      <div className="min-w-0"><span className="font-body text-xs" style={{ color: C.text }}>{c.channel}: </span><span className="font-body text-xs" style={{ color: C.muted }}>{c.action}</span></div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {kpiAi.qualityVsQuantity && <p className="font-body text-xs p-2.5 rounded-xl" style={{ color: C.text, background: C.bgDeep }}><span style={{ color: C.cyan }}>ทำเยอะ vs ทำดี: </span>{kpiAi.qualityVsQuantity}</p>}
+            {kpiAi.nextMonthTarget && (
+              <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>เป้าเดือนหน้า</div>
+                <p className="font-body text-xs" style={{ color: C.text }}>ทำเสร็จ {kpiAi.nextMonthTarget.completion} · คุณภาพ {kpiAi.nextMonthTarget.quality}</p>
+                <p className="font-body text-xs" style={{ color: C.muted }}>{kpiAi.nextMonthTarget.reasoning}</p>
+              </div>
+            )}
           </div>
         )}
       </div>
