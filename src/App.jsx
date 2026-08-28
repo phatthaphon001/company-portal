@@ -679,6 +679,9 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [pendingAccount, setPendingAccount] = useState(null); // เก็บไว้แสดงชื่อระหว่างรอ OTP
   const [inviteCode, setInviteCode] = useState('');
   const [birthDate, setBirthDate] = useState('');
+  const [joinMode, setJoinMode] = useState('create'); // create = สร้างองค์กรใหม่, join = เข้าร่วมองค์กรเดิม
+  const [orgName, setOrgName] = useState('');
+  const [orgCode, setOrgCode] = useState('');
   const [gateMode, setGateMode] = useState(null);
   const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
@@ -749,9 +752,10 @@ function Terminal({ accounts, onSignup, onLogin }) {
     if (signupForm.password.length < 8) { setSignupError('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     if (!birthDate) { setSignupError('กรุณาระบุวันเกิดจริง (ใช้กับฟีเจอร์ในฝ่ายบุคคล)'); return; }
+    if (joinMode === 'join' && !orgCode.trim()) { setSignupError('กรุณากรอกรหัสองค์กรที่ได้รับจากผู้ดูแล'); return; }
     setSignupLoading(true);
     try {
-      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, birthDate, inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
+      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, birthDate, orgName: joinMode === 'create' ? orgName.trim() : '', orgCode: joinMode === 'join' ? orgCode.trim() : '', inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
       setSignupLoading(false);
       if (!ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
       if (data.token) saveSession(data.token);
@@ -787,6 +791,27 @@ function Terminal({ accounts, onSignup, onLogin }) {
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
             <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
             <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
+          {/* เข้าร่วมองค์กรเดิม หรือสร้างองค์กรใหม่ */}
+          <div className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>องค์กรของคุณ</div>
+            <div className="flex gap-1.5 mb-2">
+              {[{ k: 'create', l: 'สร้างองค์กรใหม่' }, { k: 'join', l: 'เข้าร่วมองค์กรเดิม' }].map((o) => (
+                <button key={o.k} type="button" onClick={() => setJoinMode(o.k)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex-1" style={{ background: joinMode === o.k ? BRAND : 'transparent', color: joinMode === o.k ? '#fff' : C.muted, border: `1px solid ${joinMode === o.k ? 'transparent' : C.border}` }}>{o.l}</button>
+              ))}
+            </div>
+            {joinMode === 'create' ? (
+              <>
+                <input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="ชื่อบริษัท/องค์กร (เว้นว่างได้)" className="w-full px-3 py-2 font-body text-sm outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }} />
+                <p className="font-mono text-2xs mt-1" style={{ color: C.muted, fontSize: 10 }}>* คุณจะเป็นผู้บริหารขององค์กรนี้ และได้รหัสไว้ชวนทีมเข้ามา</p>
+              </>
+            ) : (
+              <>
+                <input value={orgCode} onChange={(e) => setOrgCode(e.target.value.toUpperCase())} placeholder="รหัสองค์กร 6 ตัว เช่น A7K2QP" maxLength={6} className="w-full px-3 py-2 font-mono text-sm outline-none rounded-lg" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, letterSpacing: 2 }} />
+                <p className="font-mono text-2xs mt-1" style={{ color: C.muted, fontSize: 10 }}>* ขอรหัสจากผู้บริหาร/หัวหน้าขององค์กรคุณ</p>
+              </>
+            )}
+          </div>
+
           <div>
             <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>วันเดือนปีเกิด (จริง)</label>
             <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} required max={todayDateStr()} className="w-full px-3 py-2.5 font-body text-sm outline-none rounded-xl" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
@@ -4409,6 +4434,102 @@ function SupportPanel({ user, tokens, showToast }) {
   );
 }
 
+// ---------- ข้อมูลบริษัท/องค์กร + รหัสชวนทีม ----------
+function CompanyPanel({ user, showToast }) {
+  const [org, setOrg] = useState(null);
+  const [role, setRole] = useState('staff');
+  const [roles, setRoles] = useState({});
+  const [form, setForm] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const { ok, data } = await apiPost('/api/auth', { action: 'myOrg' });
+    if (ok) { setOrg(data.org); setRole(data.role); setRoles(data.roles || {}); setForm(data.org || {}); }
+  }
+  useEffect(() => { load(); }, []);
+  if (!org) return null;
+
+  const canEdit = role === 'exec' || role === 'dev';
+
+  async function save() {
+    setBusy(true);
+    const { ok, data } = await apiPost('/api/auth', { action: 'updateOrg', patch: form });
+    setBusy(false);
+    if (ok) { setOrg(data.org); showToast('บันทึกข้อมูลบริษัทแล้ว'); }
+  }
+  async function regen() {
+    if (!window.confirm('สร้างรหัสองค์กรใหม่? รหัสเดิมจะใช้ไม่ได้ทันที')) return;
+    const { ok, data } = await apiPost('/api/auth', { action: 'regenOrgCode' });
+    if (ok) { setOrg(data.org); showToast('สร้างรหัสใหม่แล้ว'); }
+  }
+
+  const F = [
+    { k: 'name', label: 'ชื่อบริษัท/องค์กร', ph: 'บริษัท ครีมมี่ คอสเมท จำกัด' },
+    { k: 'business', label: 'ทำธุรกิจอะไร (ยิ่งละเอียด AI ยิ่งช่วยได้ตรง)', ph: 'ผลิตและขายเครื่องสำอาง ทำคอนเทนต์ AI ลงโซเชียล มีทีม 5 คน', big: true },
+    { k: 'address', label: 'ที่อยู่', ph: '99/1 หมู่ 5 ต.คลองหนึ่ง' },
+    { k: 'province', label: 'อำเภอ/จังหวัด', ph: 'คลองหลวง ปทุมธานี' },
+    { k: 'phone', label: 'เบอร์ติดต่อ', ph: '08x-xxx-xxxx' },
+    { k: 'email', label: 'อีเมลบริษัท', ph: 'contact@company.com' },
+    { k: 'taxId', label: 'เลขผู้เสียภาษี', ph: '0-1234-56789-01-2' },
+    { k: 'website', label: 'เว็บไซต์/เพจ', ph: 'facebook.com/yourpage' },
+  ];
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.cyan}44` }}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Landmark size={14} style={{ color: C.cyan }} />
+          <span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>ข้อมูลบริษัท/องค์กร</span>
+        </div>
+        <span className="font-mono text-2xs px-2 py-0.5 rounded" style={{ color: C.violet, border: `1px solid ${C.violet}` }}>
+          สิทธิ์ของคุณ: {roles[role]?.label || role}
+        </span>
+      </div>
+
+      {/* รหัสชวนทีม */}
+      {(role === 'exec' || role === 'dev') && org.code && (
+        <div className="p-2.5 rounded-xl mb-3" style={{ background: C.bgDeep, border: `1px solid ${C.emerald}44` }}>
+          <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>รหัสชวนทีมเข้าองค์กรนี้</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-display text-xl font-bold" style={{ color: C.emerald, letterSpacing: 3 }}>{org.code}</span>
+            <button onClick={() => { copyText(org.code); showToast('คัดลอกรหัสแล้ว'); }} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.emerald}`, color: C.emerald }}>คัดลอก</button>
+            <button onClick={regen} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>สร้างรหัสใหม่</button>
+          </div>
+          <p className="font-mono text-2xs mt-1.5" style={{ color: C.muted, fontSize: 10 }}>ให้ทีมเลือก "เข้าร่วมองค์กรเดิม" ตอนสมัคร แล้วกรอกรหัสนี้ — ข้อมูลจะแชร์กันภายในองค์กรเท่านั้น</p>
+        </div>
+      )}
+
+      {canEdit ? (
+        <>
+          <div className="grid sm:grid-cols-2 gap-2 mb-2.5">
+            {F.map((f) => (
+              <div key={f.k} className={f.big ? 'sm:col-span-2' : ''}>
+                <label className="font-mono text-2xs block mb-1" style={{ color: C.muted }}>{f.label}</label>
+                {f.big
+                  ? <textarea value={form[f.k] || ''} onChange={(e) => setForm((v) => ({ ...v, [f.k]: e.target.value }))} rows={2} placeholder={f.ph} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg resize-y" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />
+                  : <input value={form[f.k] || ''} onChange={(e) => setForm((v) => ({ ...v, [f.k]: e.target.value }))} placeholder={f.ph} className="w-full px-2.5 py-2 font-body text-xs outline-none rounded-lg" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }} />}
+              </div>
+            ))}
+          </div>
+          <button onClick={save} disabled={busy} className="font-mono text-2xs px-4 py-2 rounded-lg flex items-center gap-1.5" style={{ background: C.cyan, color: '#022', opacity: busy ? 0.6 : 1 }}>
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} บันทึกข้อมูลบริษัท
+          </button>
+          <p className="font-mono text-2xs mt-2" style={{ color: C.muted, fontSize: 10 }}>* ข้อมูลนี้ AI จะใช้ประกอบทุกแผนก เช่น คำนวณเงินเดือนตามค่าครองชีพจังหวัด และคิดแคมเปญให้ตรงธุรกิจ</p>
+        </>
+      ) : (
+        <div className="space-y-1">
+          {F.filter((f) => org[f.k]).map((f) => (
+            <div key={f.k} className="font-body text-xs" style={{ color: C.text }}>
+              <span style={{ color: C.muted }}>{f.label}: </span>{org[f.k]}
+            </div>
+          ))}
+          <p className="font-mono text-2xs mt-2" style={{ color: C.muted, fontSize: 10 }}>* เฉพาะผู้บริหารขององค์กรเท่านั้นที่แก้ข้อมูลนี้ได้</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GeminiKeyPanel({ user, tokens, onSaved, showToast }) {
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -5216,6 +5337,7 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
 
       <OwnerConsole user={user} showToast={showToast} onFeaturesChanged={refreshMe} />
+      <CompanyPanel user={user} showToast={showToast} />
       <TokenMeter tokens={tokens} />
       <GeminiKeyPanel user={user} tokens={tokens} onSaved={refreshMe} showToast={showToast} />
       <HelpPanel tokens={tokens} showToast={showToast} />
@@ -6444,6 +6566,7 @@ export default function CompanyPortal() {
   const [ads, setAds] = useState([]);           // ข้อมูลแคมเปญโฆษณาที่อ่านมาจากภาพ
   const [features, setFeatures] = useState(null); // ฟีเจอร์ที่เจ้าของระบบเปิดให้ใช้
   const [deptData, setDeptData] = useState([]);   // ผลงานจากเครื่องมือ AI ของแต่ละแผนก
+  const [userRole, setUserRole] = useState('staff'); // staff | manager | exec | dev
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
   const [futureTasks, setFutureTasks] = useState({});
@@ -6743,6 +6866,7 @@ export default function CompanyPortal() {
       setUser((u) => ({ ...u, hasGeminiKey: !!data.account.hasGeminiKey, clearance: data.account.clearance, isOwner: !!data.account.isOwner }));
       setTokens(data.tokens || null);
       setFeatures(data.features || null);
+      setUserRole(data.role || 'staff');
       setAiGap(data.account.hasGeminiKey ? 1500 : 13000);
     }
   }
@@ -6782,6 +6906,7 @@ export default function CompanyPortal() {
             });
             setTokens(data.tokens || null);
             setFeatures(data.features || null);
+            setUserRole(data.role || 'staff');
             if (data.account.hasGeminiKey) setAiGap(1500);
             setStage('daily');
           } else {
