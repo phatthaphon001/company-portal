@@ -10,6 +10,8 @@ import {
   addTicket, listTickets, updateTicket,
   getFeatures, saveFeatures, FEATURE_DEFS,
   touchPresence, getPresence, pushFeed, getFeed,
+  ROLES, roleOf, roleLevel, isDev, isExec, isManager, orgIdOf,
+  getOrgs, getOrg, upsertOrg, makeOrgCode,
 } from './_lib.js';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
@@ -98,6 +100,21 @@ export default async function handler(req, res) {
       if (accounts.some((a) => a.email === email)) return res.status(400).json({ error: 'อีเมลนี้ถูกใช้แล้ว' });
       if (accounts.some((a) => a.username === username)) return res.status(400).json({ error: 'ชื่อผู้ใช้นี้ถูกใช้แล้ว' });
 
+      // ---- องค์กร: สร้างใหม่ หรือเข้าร่วมด้วยรหัสองค์กร ----
+      const joinCode = String(req.body.orgCode || '').trim().toUpperCase();
+      let orgId, orgRole, orgName;
+      if (joinCode) {
+        const orgs = await getOrgs();
+        const found = orgs.find((o) => o.code === joinCode);
+        if (!found) return res.status(400).json({ error: 'รหัสองค์กรไม่ถูกต้อง — ขอรหัสจากผู้ดูแลองค์กรของคุณ' });
+        orgId = found.id; orgName = found.name; orgRole = 'staff';
+      } else {
+        orgId = `org_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        orgName = String(req.body.orgName || '').trim() || `องค์กรของ ${name}`;
+        orgRole = 'exec'; // คนแรกขององค์กรเป็นผู้บริหาร
+        await upsertOrg({ id: orgId, name: orgName, code: makeOrgCode(), createdAt: Date.now(), createdBy: email });
+      }
+
       const { salt, hash } = hashPassword(password);
       const account = {
         name, username, email,
@@ -106,6 +123,8 @@ export default async function handler(req, res) {
         isOwner: accounts.length === 0,
         createdAt: Date.now(),
         lastLogin: Date.now(),
+        orgId, orgName, role: accounts.length === 0 ? 'dev' : orgRole,
+        isDeveloper: accounts.length === 0,
         plan: accounts.length === 0 ? 'owner' : 'trial',
         tokensUsed: 0,
         bonusTokens: 0,
@@ -199,6 +218,8 @@ export default async function handler(req, res) {
       return res.status(200).json({
         account: sanitize(me), tokens: tokenState(me), plans: PLANS, tokenCost: TOKEN_COST,
         features: await getFeatures(),
+        role: roleOf(me), roleLevel: roleLevel(me), roles: ROLES,
+        org: await getOrg(orgIdOf(me)),
       });
     }
 
@@ -229,8 +250,65 @@ export default async function handler(req, res) {
     }
 
     if (action === 'listAccounts') {
-      if (me.clearance !== 3) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูรายชื่อบัญชี' });
-      return res.status(200).json({ accounts: accounts.map(sanitize) });
+      if (!isManager(me)) return res.status(403).json({ error: 'ไม่มีสิทธิ์ดูรายชื่อบัญชี' });
+      const myOrg = orgIdOf(me);
+      // ผู้พัฒนาเห็นทุกองค์กร · คนอื่นเห็นเฉพาะองค์กรตัวเอง
+      const list = isDev(me) ? accounts : accounts.filter((a) => orgIdOf(a) === myOrg);
+      return res.status(200).json({ accounts: list.map((a) => ({ ...sanitize(a), role: roleOf(a) })) });
+    }
+
+    // ---------- องค์กร ----------
+    if (action === 'myOrg') {
+      return res.status(200).json({ org: await getOrg(orgIdOf(me)), role: roleOf(me), roles: ROLES });
+    }
+    if (action === 'updateOrg') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขององค์กรเท่านั้น' });
+      const cur = await getOrg(orgIdOf(me));
+      if (!cur) return res.status(404).json({ error: 'ไม่พบองค์กร' });
+      const p = req.body.patch || {};
+      const next = await upsertOrg({
+        id: cur.id,
+        name: p.name != null ? String(p.name).slice(0, 100) : cur.name,
+        address: p.address != null ? String(p.address).slice(0, 300) : cur.address,
+        province: p.province != null ? String(p.province).slice(0, 60) : cur.province,
+        phone: p.phone != null ? String(p.phone).slice(0, 40) : cur.phone,
+        email: p.email != null ? String(p.email).slice(0, 80) : cur.email,
+        taxId: p.taxId != null ? String(p.taxId).slice(0, 20) : cur.taxId,
+        business: p.business != null ? String(p.business).slice(0, 500) : cur.business,
+        website: p.website != null ? String(p.website).slice(0, 120) : cur.website,
+      });
+      await logActivity({ type: 'org_updated', orgId: cur.id, by: me.email });
+      return res.status(200).json({ org: next });
+    }
+    if (action === 'regenOrgCode') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขององค์กรเท่านั้น' });
+      const cur = await getOrg(orgIdOf(me));
+      const next = await upsertOrg({ id: cur.id, code: makeOrgCode() });
+      return res.status(200).json({ org: next });
+    }
+    if (action === 'setRole') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขึ้นไปเท่านั้น' });
+      const { email: t, role } = req.body;
+      if (!ROLES[role] || (role === 'dev' && !isDev(me))) return res.status(400).json({ error: 'ระดับสิทธิ์ไม่ถูกต้อง' });
+      const idx = accounts.findIndex((a) => a.email === t);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      if (!isDev(me) && orgIdOf(accounts[idx]) !== orgIdOf(me)) return res.status(403).json({ error: 'ปรับสิทธิ์คนนอกองค์กรไม่ได้' });
+      accounts[idx].role = role;
+      accounts[idx].clearance = ROLES[role].level >= 3 ? 3 : ROLES[role].level >= 2 ? 2 : 1;
+      await saveAccounts(accounts);
+      await logActivity({ type: 'role_changed', target: t, role, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+    if (action === 'devListOrgs') {
+      if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะผู้พัฒนาระบบเท่านั้น' });
+      const orgs = await getOrgs();
+      return res.status(200).json({
+        orgs: orgs.map((o) => ({
+          ...o,
+          members: accounts.filter((a) => orgIdOf(a) === o.id).length,
+          tokensUsed: accounts.filter((a) => orgIdOf(a) === o.id).reduce((s2, a) => s2 + (a.tokensUsed || 0), 0),
+        })),
+      });
     }
 
     if (action === 'getSecurity') {
@@ -409,18 +487,21 @@ export default async function handler(req, res) {
 
     // ---------- เจ้าของระบบ: จัดการผู้ใช้ / โทเค็น / งบการเงิน ----------
     if (action === 'adminUsers') {
-      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      if (!isManager(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const myOrg2 = orgIdOf(me);
+      const scoped = isDev(me) ? accounts : accounts.filter((a) => orgIdOf(a) === myOrg2);
       return res.status(200).json({
-        users: accounts.map((a) => ({
+        users: scoped.map((a) => ({
           ...sanitize(a),
+          role: roleOf(a),
           hasKey: !!(a.geminiKey && a.geminiKey.trim()),
           tokens: tokenState(a),
         })),
-        plans: PLANS,
+        plans: PLANS, isDev: isDev(me),
       });
     }
     if (action === 'adminGrantTokens') {
-      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
       const { email, amount } = req.body;
       const idx = accounts.findIndex((a) => a.email === email);
       if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
@@ -430,7 +511,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, tokens: tokenState(accounts[idx]) });
     }
     if (action === 'adminSetPlan') {
-      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
       const { email, plan } = req.body;
       if (!PLANS[plan]) return res.status(400).json({ error: 'แพ็กเกจไม่ถูกต้อง' });
       const idx = accounts.findIndex((a) => a.email === email);
