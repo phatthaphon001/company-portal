@@ -128,16 +128,16 @@ export async function rateLimit(bucketKey, maxHits, windowMs) {
 const BACKUP_KEYS = ['channels', 'tasks', 'history', 'futureTasks', 'lastActiveDate'];
 
 // สำรองข้อมูลแยกตามผู้ใช้ — ของใครของมัน ไม่ทับกัน
-export async function autoBackup(dateStr, email) {
-  if (!email) return { skipped: true, reason: 'no-email' };
-  const em = String(email).toLowerCase();
+export async function autoBackup(dateStr, scope) {
+  if (!scope) return { skipped: true, reason: 'no-scope' };
+  const em = String(scope).toLowerCase();
   const idxKey = `bk:${em}:index`;
   const index = (await redisGet(idxKey)) || [];
   if (index.includes(dateStr)) return { skipped: true };
 
   const snapshot = {};
   for (const k of BACKUP_KEYS) {
-    snapshot[k] = await redisGet(`u:${em}:${k}`);
+    snapshot[k] = await redisGet(`o:${em}:${k}`) ?? await redisGet(`u:${em}:${k}`);
   }
   // ไม่สำรองถ้าไม่มีข้อมูลจริง — กันชุดว่างทับชุดดี
   const hasData = Array.isArray(snapshot.channels) && snapshot.channels.length > 0;
@@ -154,14 +154,14 @@ export async function autoBackup(dateStr, email) {
   return { ok: true, kept: nextIndex };
 }
 
-export async function listBackups(email) {
-  if (!email) return [];
-  return (await redisGet(`bk:${String(email).toLowerCase()}:index`)) || [];
+export async function listBackups(scope) {
+  if (!scope) return [];
+  return (await redisGet(`bk:${String(scope).toLowerCase()}:index`)) || [];
 }
 
-export async function getBackup(dateStr, email) {
-  if (!email) return null;
-  return await redisGet(`bk:${String(email).toLowerCase()}:${dateStr}`);
+export async function getBackup(dateStr, scope) {
+  if (!scope) return null;
+  return await redisGet(`bk:${String(scope).toLowerCase()}:${dateStr}`);
 }
 
 // ---------- บันทึกกิจกรรม (Activity Log) ----------
@@ -490,3 +490,50 @@ export async function pushFeed(entry) {
   } catch (e) {}
 }
 export async function getFeed() { return (await redisGet('activity_feed')) || []; }
+
+// ---------- ระบบองค์กร (Multi-tenant) ----------
+// ลูกค้าแต่ละองค์กรใช้ข้อมูลร่วมกันภายในองค์กร แต่มองข้ามองค์กรไม่ได้เด็ดขาด
+export const ROLES = {
+  staff:   { label: 'ผู้ใช้/พนักงาน',        level: 1 },
+  manager: { label: 'หัวหน้า/ผู้จัดการแผนก', level: 2 },
+  exec:    { label: 'ผู้บริหาร/CEO',          level: 3 },
+  dev:     { label: 'ผู้พัฒนาระบบ',           level: 9 },
+};
+
+export function roleOf(account) {
+  if (!account) return 'staff';
+  if (account.isDeveloper) return 'dev';
+  return ROLES[account.role] ? account.role : (account.isOwner ? 'exec' : 'staff');
+}
+export function roleLevel(account) { return ROLES[roleOf(account)].level; }
+export const isDev = (a) => roleOf(a) === 'dev';
+export const isExec = (a) => roleLevel(a) >= 3;
+export const isManager = (a) => roleLevel(a) >= 2;
+
+export function orgIdOf(account) {
+  return account?.orgId || `org_${String(account?.email || '').toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+}
+
+export async function getOrgs() { return (await redisGet('orgs')) || []; }
+export async function saveOrgs(list) { await redisSet('orgs', list); }
+
+export async function getOrg(orgId) {
+  const list = await getOrgs();
+  return list.find((o) => o.id === orgId) || null;
+}
+
+export async function upsertOrg(org) {
+  const list = await getOrgs();
+  const idx = list.findIndex((o) => o.id === org.id);
+  if (idx === -1) list.push(org); else list[idx] = { ...list[idx], ...org };
+  await saveOrgs(list);
+  return list.find((o) => o.id === org.id);
+}
+
+// รหัสเข้าร่วมองค์กร — พนักงานใหม่ใช้รหัสนี้เพื่อเข้าองค์กรที่ถูกต้อง
+export function makeOrgCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
