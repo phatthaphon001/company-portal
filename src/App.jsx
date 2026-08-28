@@ -204,13 +204,22 @@ function callClaude(system, content, images, action) {
       await new Promise((r) => setTimeout(r, AI_MIN_GAP_MS - since));
     }
     aiLastCallAt = Date.now();
+    // ต้องแนบโทเค็นทุกครั้ง ไม่งั้นเซิร์ฟเวอร์จะปฏิเสธ (401)
+    const authToken = loadSession();
     const response = await fetch('/api/claude', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
       body: JSON.stringify({ system, content, images, action }),
     });
     const data = await response.json();
     aiLastCallAt = Date.now();
+    if (response.status === 401) {
+      clearSession();
+      window.dispatchEvent(new CustomEvent('forge-session-expired'));
+    }
     if (!response.ok || data?.error) {
       const e = new Error(data.error || 'เกิดข้อผิดพลาด');
       e.needKey = data.needKey; e.outOfTokens = data.outOfTokens; e.badKey = data.badKey;
@@ -1766,106 +1775,320 @@ function ReminderBanner({ reminder, onDismiss }) {
   );
 }
 
-function CalendarPage({ history, tasks, channels, onOpenDay }) {
+const CAL_SYS = `คุณคือผู้ช่วยวางแผนงานผลิตคอนเทนต์ วิเคราะห์จากประวัติการทำงานจริงที่ให้มา
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "headline":"สรุปพฤติกรรมการทำงานเดือนนี้ 1 ประโยค ตรงไปตรงมา",
+ "consistency":{"score":0-100,"comment":"ความสม่ำเสมอเป็นยังไง"},
+ "bestDays":["วันในสัปดาห์ที่ทำงานได้ดีที่สุด พร้อมเหตุผลจากข้อมูล"],
+ "worstDays":["วันที่มักหลุด พร้อมเหตุผล"],
+ "patterns":["รูปแบบที่สังเกตได้จากข้อมูลจริง เช่น มักหลุดช่วงปลายสัปดาห์"],
+ "risks":[{"risk":"ความเสี่ยงที่จะเกิดซ้ำ","fix":"วิธีแก้ที่ทำได้ทันที"}],
+ "planNextWeek":[{"day":"วัน","focus":"ควรโฟกัสอะไร","load":"เบา|ปกติ|หนัก","why":"เหตุผล"}],
+ "advice":"คำแนะนำหลัก 1 ข้อที่จะช่วยได้มากที่สุด"
+}
+กติกา: อ้างตัวเลขจริงเสมอ · ถ้าข้อมูลน้อยเกินไปให้บอกตรงๆ ใน headline`;
+
+const WEEKDAY_FULL = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+
+function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
   const todayStr = todayDateStr();
-  const [selectedDate, setSelectedDate] = useState(todayStr);
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [insight, setInsight] = useState(null);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [err, setErr] = useState('');
 
-  const historyByDate = {};
-  history.forEach((h) => { historyByDate[h.date] = h; });
+  // รวมข้อมูลทุกวัน: ประวัติ + วันนี้ + วันที่เตรียมล่วงหน้า
+  const dayMap = {};
+  history.forEach((h) => { dayMap[h.date] = { total: h.totalTasks || 0, done: h.doneTasks || 0, tasks: Array.isArray(h.tasks) ? h.tasks : [], missed: h.missed || [], kind: 'past' }; });
+  dayMap[todayStr] = { total: tasks.length, done: tasks.filter((t) => t.done).length, tasks, missed: tasks.filter((t) => !t.done).map((t) => ({ channelName: (channels.find((c) => c.id === t.channelId) || {}).name || '-', label: t.label })), kind: 'today' };
+  Object.entries(futureTasks || {}).forEach(([d, ts]) => {
+    if (d > todayStr && Array.isArray(ts) && ts.length) dayMap[d] = { total: ts.length, done: ts.filter((t) => t.done).length, tasks: ts, missed: [], kind: 'future' };
+  });
 
-  const todayDone = tasks.filter((t) => t.done).length;
-  const todayEntry = {
-    date: todayStr,
-    totalTasks: tasks.length,
-    doneTasks: todayDone,
-    missed: tasks.filter((t) => !t.done).map((t) => {
-      const ch = channels.find((c) => c.id === t.channelId);
-      return { channelName: ch ? ch.name : '-', label: t.label };
-    }),
-  };
-
-  function entryColor(entry) {
-    if (!entry || entry.totalTasks === 0) return C.border;
-    const pct = entry.doneTasks / entry.totalTasks;
-    if (pct >= 1) return C.emerald;
-    if (pct > 0) return C.orange;
-    return C.red;
-  }
-
+  const firstDay = new Date(ym.y, ym.m, 1).getDay();
+  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const dstr = (d) => `${ym.y}-${String(ym.m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-  const selectedEntry = selectedDate === todayStr ? todayEntry : historyByDate[selectedDate];
+  // ---- สถิติเดือนนี้ ----
+  const monthDays = Object.entries(dayMap).filter(([d]) => d.startsWith(`${ym.y}-${String(ym.m + 1).padStart(2, '0')}`));
+  const mTotal = monthDays.reduce((s, [, v]) => s + v.total, 0);
+  const mDone = monthDays.reduce((s, [, v]) => s + v.done, 0);
+  const mPct = mTotal ? Math.round((mDone / mTotal) * 100) : 0;
+  const perfect = monthDays.filter(([, v]) => v.total > 0 && v.done >= v.total).length;
+  const missedDays = monthDays.filter(([d, v]) => v.total > 0 && v.done < v.total && d < todayStr).length;
+
+  // ความสม่ำเสมอต่อเนื่อง
+  let streak = 0;
+  const sortedPast = Object.entries(dayMap).filter(([d, v]) => d <= todayStr && v.total > 0).sort((a, b) => b[0].localeCompare(a[0]));
+  for (const [, v] of sortedPast) { if (v.done >= v.total) streak++; else break; }
+
+  // แยกตามวันในสัปดาห์
+  const byWeekday = WEEKDAY_FULL.map((label, i) => {
+    const rows = Object.entries(dayMap).filter(([d, v]) => v.total > 0 && d <= todayStr && new Date(d + 'T00:00:00').getDay() === i);
+    const t = rows.reduce((s, [, v]) => s + v.total, 0);
+    const dn = rows.reduce((s, [, v]) => s + v.done, 0);
+    return { day: label.slice(0, 2), pct: t ? Math.round((dn / t) * 100) : 0, n: rows.length };
+  });
+
+  function heatColor(v) {
+    if (!v || v.total === 0) return null;
+    if (v.kind === 'future') return C.violet;
+    const p = v.done / v.total;
+    if (p >= 1) return C.emerald;
+    if (p >= 0.5) return C.orange;
+    return C.red;
+  }
+
+  async function runInsight() {
+    setLoadingAi(true); setErr('');
+    const payload = Object.entries(dayMap).filter(([d]) => d <= todayStr).sort().slice(-45)
+      .map(([d, v]) => ({ date: d, weekday: WEEKDAY_FULL[new Date(d + 'T00:00:00').getDay()], total: v.total, done: v.done, pct: v.total ? Math.round((v.done / v.total) * 100) : 0 }));
+    if (payload.length < 3) { setErr('ข้อมูลยังน้อยเกินไป — ใช้งานสัก 3-5 วันก่อนแล้วค่อยให้ AI วิเคราะห์'); setLoadingAi(false); return; }
+    try {
+      const text = await callClaude(CAL_SYS, `ประวัติการทำงานรายวัน (${payload.length} วัน):\n${JSON.stringify(payload)}\n\nช่องที่ดูแล: ${channels.map((c) => c.name).join(', ') || '-'}`, undefined, 'deepAnalysis');
+      setInsight(parseJsonLoose(text));
+    } catch (e) { setErr(e.message || 'วิเคราะห์ไม่สำเร็จ'); }
+    setLoadingAi(false);
+  }
+
+  const sel = dayMap[selectedDate];
+  const monthLabel = `${THAI_MONTHS[ym.m]} ${ym.y + 543}`;
+  function shiftMonth(n) {
+    setYm((p) => {
+      const d = new Date(p.y, p.m + n, 1);
+      return { y: d.getFullYear(), m: d.getMonth() };
+    });
+  }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><Calendar size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>CALENDAR</span></div>
-      <h2 className="font-body text-xl mb-6" style={{ color: C.text }}>ปฏิทิน / ประวัติย้อนหลัง</h2>
+      <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>ปฏิทินงาน</h2>
+      <p className="font-body text-xs mb-5" style={{ color: C.muted }}>ดูภาพรวมทั้งเดือน · ดับเบิลคลิกวันที่เพื่อเข้าไปทำ/แก้งานวันนั้น</p>
 
-      <div className="p-5 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-        <div className="font-body text-sm mb-3" style={{ color: C.text }}>{THAI_MONTHS[month]} {year + 543}</div>
-        <div className="grid grid-cols-7 gap-1 mb-2">
-          {WEEKDAY_LABELS.map((d) => <div key={d} className="font-mono text-2xs text-center" style={{ color: C.muted }}>{d}</div>)}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {cells.map((d, i) => {
-            if (!d) return <div key={i} />;
-            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-            const isToday = dateStr === todayStr;
-            const entry = isToday ? todayEntry : historyByDate[dateStr];
-            const hasData = isToday || !!historyByDate[dateStr];
-            const color = isToday ? C.blue : entryColor(entry);
-            return (
-              <button
-                key={i}
-                onClick={() => hasData && setSelectedDate(dateStr)}
-                onDoubleClick={() => onOpenDay && onOpenDay(dateStr)}
-                title="ดับเบิลคลิกเพื่อเปิดดู/แก้ไขงานของวันนี้"
-                className="aspect-square rounded-lg flex items-center justify-center font-mono text-2xs"
-                style={{
-                  background: dateStr === selectedDate && hasData ? `${color}33` : 'transparent',
-                  border: `1px solid ${hasData ? color : C.border}`,
-                  color: hasData ? C.text : C.muted,
-                  cursor: hasData ? 'pointer' : 'default',
-                }}
-              >
-                {d}
-              </button>
-            );
-          })}
-        </div>
+      {/* การ์ดสรุปเดือน */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
+        <StatCard label="ทำเสร็จเดือนนี้" value={`${mPct}%`} sub={`${mDone}/${mTotal} งาน`} color={mPct >= 80 ? C.emerald : mPct >= 50 ? C.orange : C.red} Icon={Gauge} />
+        <StatCard label="วันที่ทำครบ" value={perfect} sub="วัน" color={C.emerald} Icon={Award} />
+        <StatCard label="วันที่หลุดเป้า" value={missedDays} sub="วัน" color={missedDays === 0 ? C.emerald : C.red} Icon={AlertTriangle} />
+        <StatCard label="ทำครบติดกัน" value={streak} sub="วัน" color={C.violet} Icon={Flame} />
       </div>
 
-      {selectedEntry ? (
-        <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</span>
-            <button onClick={() => onOpenDay && onOpenDay(selectedDate)} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1 shrink-0" style={{ background: BRAND, color: '#fff' }}>เปิดดู/แก้ไขงานวันนี้</button>
-          </div>
-          <div style={{ width: '100%', height: 8, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
-            <div style={{ width: selectedEntry.totalTasks ? `${Math.round((selectedEntry.doneTasks / selectedEntry.totalTasks) * 100)}%` : '0%', height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
-          </div>
-          <div className="font-mono text-2xs mt-2 mb-3" style={{ color: C.muted }}>{selectedEntry.doneTasks}/{selectedEntry.totalTasks} งานเสร็จ</div>
-          {selectedEntry.missed.length > 0 ? (
-            <div>
-              <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>งานที่ยังไม่เสร็จ:</div>
-              <div className="space-y-1">
-                {selectedEntry.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.text }}>• {m.channelName} — {m.label}</div>)}
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] gap-4 items-start">
+        <div>
+          {/* ปฏิทิน */}
+          <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <button onClick={() => shiftMonth(-1)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>←</button>
+              <div className="text-center">
+                <div className="font-body text-sm" style={{ color: C.text }}>{monthLabel}</div>
+                <button onClick={() => { const n = new Date(); setYm({ y: n.getFullYear(), m: n.getMonth() }); setSelectedDate(todayStr); }} className="font-mono text-2xs" style={{ color: C.blue }}>กลับมาเดือนนี้</button>
               </div>
+              <button onClick={() => shiftMonth(1)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>→</button>
             </div>
-          ) : (
-            <p className="font-body text-xs" style={{ color: C.emerald }}>{selectedEntry.totalTasks > 0 ? 'ทำครบทุกงาน 🎉' : 'ไม่มีงานในวันนี้'}</p>
-          )}
+
+            <div className="grid grid-cols-7 gap-1.5 mb-1.5">
+              {WEEKDAY_LABELS.map((d) => <div key={d} className="font-mono text-2xs text-center" style={{ color: C.muted }}>{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7 gap-1.5">
+              {cells.map((d, i) => {
+                if (!d) return <div key={i} />;
+                const ds = dstr(d);
+                const v = dayMap[ds];
+                const col = heatColor(v);
+                const isToday = ds === todayStr;
+                const isSel = ds === selectedDate;
+                const pct = v && v.total ? v.done / v.total : 0;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedDate(ds)}
+                    onDoubleClick={() => onOpenDay && onOpenDay(ds)}
+                    title={v ? `${v.done}/${v.total} งาน — ดับเบิลคลิกเพื่อเปิด` : 'ดับเบิลคลิกเพื่อเปิด'}
+                    className="aspect-square rounded-lg flex flex-col items-center justify-center relative"
+                    style={{
+                      background: col ? `${col}${Math.round(18 + pct * 30).toString(16).padStart(2, '0')}` : 'transparent',
+                      border: `1.5px solid ${isSel ? C.blue : isToday ? C.cyan : col || C.border}`,
+                      color: v ? C.text : C.muted,
+                    }}
+                  >
+                    <span className="font-mono text-2xs">{d}</span>
+                    {v && v.total > 0 && (
+                      <span className="font-mono" style={{ fontSize: 8, color: col }}>{v.done}/{v.total}</span>
+                    )}
+                    {v?.kind === 'future' && <span className="absolute" style={{ top: 2, right: 3, width: 4, height: 4, borderRadius: 999, background: C.violet }} />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap gap-3 mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+              {[
+                { c: C.emerald, l: 'ทำครบ' }, { c: C.orange, l: 'ทำบางส่วน' },
+                { c: C.red, l: 'ยังไม่ได้ทำ' }, { c: C.violet, l: 'เตรียมล่วงหน้า' }, { c: C.cyan, l: 'วันนี้' },
+              ].map((x) => (
+                <span key={x.l} className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: C.muted }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: x.c }} /> {x.l}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* วันไหนทำได้ดี */}
+          <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ทำได้ดีแค่ไหนในแต่ละวันของสัปดาห์</div>
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={byWeekday}>
+                <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: C.muted, fontSize: 10 }} />
+                <YAxis domain={[0, 100]} tick={{ fill: C.muted, fontSize: 10 }} />
+                <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                <Bar dataKey="pct" name="ทำเสร็จ %" radius={[4, 4, 0, 0]}>
+                  {byWeekday.map((w, i) => <Cell key={i} fill={w.pct >= 80 ? C.emerald : w.pct >= 50 ? C.orange : w.n ? C.red : C.border} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* ผู้ช่วย AI */}
+          <div className="p-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}44` }}>
+            <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+              <div className="flex items-center gap-2"><Sparkles size={14} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>ผู้ช่วยวางแผนจากพฤติกรรมจริง</span></div>
+              <button onClick={runInsight} disabled={loadingAi} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff', opacity: loadingAi ? 0.6 : 1 }}>
+                {loadingAi ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์พฤติกรรม
+              </button>
+            </div>
+            {err && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{err}</p>}
+            {!insight && !loadingAi && !err && <p className="font-body text-xs" style={{ color: C.muted }}>AI จะดูว่าคุณมักทำงานเสร็จวันไหน หลุดวันไหน แล้ววางแผนสัปดาห์หน้าให้เหมาะกับจังหวะจริงของคุณ</p>}
+            {insight && (
+              <div className="space-y-2.5">
+                <p className="font-body text-sm" style={{ color: C.text }}>{insight.headline}</p>
+                {insight.consistency && (
+                  <div className="flex items-center gap-2.5">
+                    <div className="shrink-0 text-center px-2.5 py-1.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${insight.consistency.score >= 70 ? C.emerald : insight.consistency.score >= 40 ? C.orange : C.red}` }}>
+                      <div className="font-display text-lg font-bold leading-none" style={{ color: insight.consistency.score >= 70 ? C.emerald : insight.consistency.score >= 40 ? C.orange : C.red }}>{insight.consistency.score}</div>
+                      <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>สม่ำเสมอ</div>
+                    </div>
+                    <p className="font-body text-xs" style={{ color: C.muted }}>{insight.consistency.comment}</p>
+                  </div>
+                )}
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {Array.isArray(insight.bestDays) && insight.bestDays.length > 0 && (
+                    <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>วันที่ทำได้ดี</div>
+                      {insight.bestDays.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+                    </div>
+                  )}
+                  {Array.isArray(insight.worstDays) && insight.worstDays.length > 0 && (
+                    <div className="p-2.5 rounded-xl" style={{ background: `${C.red}12`, border: `1px solid ${C.red}44` }}>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>วันที่มักหลุด</div>
+                      {insight.worstDays.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+                    </div>
+                  )}
+                </div>
+                {Array.isArray(insight.patterns) && insight.patterns.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>รูปแบบที่สังเกตได้</div>
+                    {insight.patterns.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+                  </div>
+                )}
+                {Array.isArray(insight.risks) && insight.risks.length > 0 && (
+                  <div className="space-y-1.5">
+                    {insight.risks.map((r, i) => (
+                      <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.orange}`, border: `1px solid ${C.border}` }}>
+                        <div className="font-body text-xs" style={{ color: C.orange }}>{r.risk}</div>
+                        <div className="font-body text-xs" style={{ color: C.muted }}>→ {r.fix}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(insight.planNextWeek) && insight.planNextWeek.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.violet }}>แผนสัปดาห์หน้า</div>
+                    <div className="space-y-1">
+                      {insight.planNextWeek.map((p, i) => {
+                        const lc = p.load === 'หนัก' ? C.red : p.load === 'เบา' ? C.emerald : C.orange;
+                        return (
+                          <div key={i} className="flex items-start gap-2 p-2 rounded-lg" style={{ background: C.bgDeep }}>
+                            <span className="font-mono shrink-0" style={{ fontSize: 10, color: C.blue, width: 46 }}>{p.day}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-body text-xs" style={{ color: C.text }}>{p.focus}</div>
+                              {p.why && <div className="font-body text-xs" style={{ color: C.muted }}>{p.why}</div>}
+                            </div>
+                            <span className="font-mono shrink-0 px-1.5 rounded" style={{ fontSize: 9, color: lc, border: `1px solid ${lc}` }}>{p.load}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {insight.advice && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>คำแนะนำหลัก</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{insight.advice}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      ) : (
-        <p className="font-body text-sm text-center py-6" style={{ color: C.muted }}>เลือกวันที่มีข้อมูล (มีกรอบสี) เพื่อดูรายละเอียด — ดับเบิลคลิกวันที่ หรือกด "เปิดดู/แก้ไขงานวันนี้" เพื่อเข้าไปแก้ไขงานของวันนั้น</p>
-      )}
+
+        {/* แถบขวา: รายละเอียดวันที่เลือก */}
+        <div className="lg:sticky lg:top-6">
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div>
+                <div className="font-mono text-2xs" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</div>
+                <div className="font-body text-xs" style={{ color: C.muted }}>วัน{WEEKDAY_FULL[new Date(selectedDate + 'T00:00:00').getDay()]}</div>
+              </div>
+              <button onClick={() => onOpenDay && onOpenDay(selectedDate)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: BRAND, color: '#fff' }}>เปิดทำงานวันนี้</button>
+            </div>
+
+            {!sel || sel.total === 0 ? (
+              <p className="font-body text-xs" style={{ color: C.muted }}>ไม่มีงานในวันนี้ — กดปุ่มด้านบนเพื่อเข้าไปเพิ่มงาน</p>
+            ) : (
+              <>
+                <div style={{ width: '100%', height: 7, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ width: `${sel.total ? (sel.done / sel.total) * 100 : 0}%`, height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
+                </div>
+                <div className="font-mono text-2xs mt-1.5 mb-2.5" style={{ color: C.muted }}>{sel.done}/{sel.total} งานเสร็จ ({Math.round((sel.done / sel.total) * 100)}%)</div>
+
+                {sel.tasks.length > 0 ? (
+                  <div className="space-y-1 max-h-72 overflow-y-auto">
+                    {sel.tasks.map((t) => {
+                      const ch = channels.find((c) => c.id === t.channelId);
+                      return (
+                        <div key={t.id} className="flex items-center gap-1.5 py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          {t.done ? <CheckCircle2 size={12} style={{ color: C.emerald }} className="shrink-0" /> : <Square size={12} style={{ color: C.muted }} className="shrink-0" />}
+                          <span className="font-body text-xs truncate" style={{ color: t.done ? C.muted : C.text, textDecoration: t.done ? 'line-through' : 'none' }}>
+                            {ch ? `${ch.name} · ` : ''}{t.label}
+                          </span>
+                          {typeof t.reviewScore === 'number' && (
+                            <span className="font-mono shrink-0 ml-auto" style={{ fontSize: 9, color: t.reviewScore >= 8 ? C.emerald : t.reviewScore >= 5 ? C.orange : C.red }}>{t.reviewScore}/10</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  sel.missed.length > 0 && (
+                    <div>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>งานที่ยังไม่เสร็จ</div>
+                      {sel.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.text }}>• {m.channelName} — {m.label}</div>)}
+                    </div>
+                  )
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4729,7 +4952,12 @@ function HealthCheckPanel({ user, channels, tasks, history, futureTasks, loadOk,
     try {
       const { data } = await apiPost('/api/auth', { action: 'listBackups' });
       const n = (data.backups || []).length;
-      add('ชุดสำรองข้อมูล', n > 0, n > 0 ? `มี ${n} ชุด (ล่าสุด ${data.backups[data.backups.length - 1]})` : 'ยังไม่มีชุดสำรอง — กดปุ่ม "สำรองเดี๋ยวนี้" ด้านล่าง', null, n === 0 ? 'backup' : null);
+      const noData = channels.length === 0;
+      add('ชุดสำรองข้อมูล', n > 0 || noData,
+        n > 0 ? `มี ${n} ชุด (ล่าสุด ${data.backups[data.backups.length - 1]})`
+              : (noData ? 'ยังไม่มีข้อมูลให้สำรอง — สร้างช่องก่อน แล้วระบบจะสำรองให้เองทุกวัน' : 'ยังไม่มีชุดสำรอง — กดปุ่มด้านล่าง'),
+        noData && n === 0 ? 'ยังไม่มีข้อมูลให้สำรอง (ไม่ใช่ปัญหา)' : null,
+        (!noData && n === 0) ? 'backup' : null);
     } catch (e) { add('ชุดสำรองข้อมูล', false, 'ตรวจไม่สำเร็จ'); }
 
     // งานที่ไม่มีช่องรองรับ (ข้อมูลกำพร้า)
@@ -6521,7 +6749,7 @@ export default function CompanyPortal() {
             {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
-            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
+            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
