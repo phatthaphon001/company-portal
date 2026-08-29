@@ -26,6 +26,51 @@ export async function redisSet(key, value) {
   });
 }
 
+// ---------- รหัสยืนยันทางอีเมล (OTP) ----------
+// สำคัญ: รหัสต้องอยู่ที่เซิร์ฟเวอร์เท่านั้น ห้ามส่งกลับไปที่เบราว์เซอร์ไม่ว่ารูปแบบใด
+// เดิมระบบใส่รหัสไว้ในโทเค็นแบบ base64 ซึ่งใครก็ถอดอ่านได้ ทำให้ OTP ไม่มีความหมาย
+const OTP_TTL_MS = 5 * 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+
+export async function createOtp(email) {
+  // ตัวอ้างอิงแบบสุ่ม ไม่มีข้อมูลอะไรอยู่ข้างใน เดาไม่ได้
+  const ref = crypto.randomBytes(24).toString('hex');
+  const code = crypto.randomInt(100000, 1000000).toString();
+  // เก็บเป็นแฮชพร้อมเกลือ เผื่อฐานข้อมูลรั่วก็ยังย้อนกลับเป็นรหัสไม่ได้
+  const salt = crypto.randomBytes(12).toString('hex');
+  const codeHash = crypto.createHmac('sha256', SECRET).update(`${salt}:${code}`).digest('hex');
+  await redisSet(`otp_${ref}`, {
+    email: String(email).toLowerCase(),
+    salt, codeHash,
+    expiresAt: Date.now() + OTP_TTL_MS,
+    attempts: 0,
+  });
+  return { ref, code }; // code ใช้ส่งอีเมลเท่านั้น ห้ามส่งออก API
+}
+
+// ตรวจรหัส — ใช้ได้ครั้งเดียว ผิดเกินกำหนดถือว่าใช้ไม่ได้แล้ว
+export async function consumeOtp(ref, code) {
+  if (!ref || !code) return { ok: false, reason: 'ข้อมูลไม่ครบ' };
+  const key = `otp_${String(ref).replace(/[^a-f0-9]/gi, '').slice(0, 64)}`;
+  let rec = null;
+  try { rec = await redisGet(key); } catch (e) { return { ok: false, reason: 'ตรวจสอบรหัสไม่สำเร็จ' }; }
+  if (!rec) return { ok: false, reason: 'รหัสไม่ถูกต้องหรือหมดอายุแล้ว' };
+  if (Date.now() > rec.expiresAt) { await redisSet(key, null); return { ok: false, reason: 'รหัสหมดอายุแล้ว กรุณาขอรหัสใหม่' }; }
+  if ((rec.attempts || 0) >= OTP_MAX_ATTEMPTS) { await redisSet(key, null); return { ok: false, reason: 'ใส่รหัสผิดหลายครั้งเกินไป กรุณาขอรหัสใหม่' }; }
+
+  const expected = crypto.createHmac('sha256', SECRET).update(`${rec.salt}:${String(code)}`).digest('hex');
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(rec.codeHash));
+  const match = a.length === b.length && crypto.timingSafeEqual(a, b);
+  if (!match) {
+    await redisSet(key, { ...rec, attempts: (rec.attempts || 0) + 1 });
+    const left = OTP_MAX_ATTEMPTS - ((rec.attempts || 0) + 1);
+    return { ok: false, reason: left > 0 ? `รหัสไม่ถูกต้อง เหลืออีก ${left} ครั้ง` : 'ใส่รหัสผิดหลายครั้งเกินไป กรุณาขอรหัสใหม่' };
+  }
+  await redisSet(key, null); // ใช้แล้วทิ้งทันที กันเอาไปใช้ซ้ำ
+  return { ok: true, email: rec.email };
+}
+
 // ---------- รหัสผ่าน ----------
 // ใช้ scrypt ที่มากับ Node อยู่แล้ว ไม่ต้องติดตั้งอะไรเพิ่ม และไม่มีค่าใช้จ่าย
 export function hashPassword(password, existingSalt) {
