@@ -1,7 +1,7 @@
 import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, autoBackup, logActivity, orgIdOf, roleLevel, isDev } from './_lib.js';
 
 // ข้อมูลที่ทั้งองค์กรใช้ร่วมกัน
-const ORG_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptData', 'company'];
+const ORG_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptData', 'company', 'calendarNotes'];
 // ข้อมูลส่วนตัวของแต่ละคน — เพื่อนร่วมองค์กรก็ห้ามเห็น (เช่น การเงินส่วนบุคคล)
 const PRIVATE_KEYS = ['myFinance', 'myNotes'];
 
@@ -58,7 +58,8 @@ export default async function handler(req, res) {
     const { key, value } = req.body || {};
     if (!allowed(key)) return res.status(400).json({ error: 'key ไม่ถูกต้อง' });
     // พนักงานทั่วไปแก้ข้อมูลส่วนตัวได้ แต่ข้อมูลกลางขององค์กรต้องระดับหัวหน้าขึ้นไป
-    if (!PRIVATE_KEYS.includes(key) && roleLevel(me) < 2 && me.clearance < 2) {
+    // ยกเว้น calendarNotes — โน้ตธุระรายวัน พนักงานทุกคนต้องจดของตัวเองได้ ไม่งั้นระบบวางแผนล่วงหน้าจะไม่มีข้อมูล
+    if (!PRIVATE_KEYS.includes(key) && key !== 'calendarNotes' && roleLevel(me) < 2 && me.clearance < 2) {
       return res.status(403).json({ error: 'สิทธิ์ของคุณแก้ไขข้อมูลส่วนกลางไม่ได้' });
     }
     try {
