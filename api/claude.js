@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (!session) return res.status(401).json({ error: 'กรุณาเข้าสู่ระบบใหม่' });
   const me = session.account;
 
-  const { system, content, images, action } = req.body || {};
+  const { system, content, images, action, search } = req.body || {};
   if (!content) return res.status(400).json({ error: 'ต้องระบุ content' });
 
   // ---- คีย์ของผู้ใช้เองมาก่อนเสมอ ถ้าไม่มีค่อยใช้คีย์กลางของระบบ ----
@@ -63,16 +63,32 @@ export default async function handler(req, res) {
 
   try {
     let response; let data;
+    // เปิดการค้นเว็บให้ Gemini เมื่อคำขอต้องการข้อมูลปัจจุบันจริง
+    // ไม่ใช่ทุกคีย์/ทุกแพ็กจะรองรับ ถ้าไม่รองรับจะถอยไปเรียกแบบไม่ค้นเว็บให้อัตโนมัติ
+    let wantSearch = !!search;
+    let searchDisabledReason = null;
+
     for (let attempt = 0; attempt < 3; attempt++) {
+      const body = {
+        system_instruction: system ? { parts: [{ text: system }] } : undefined,
+        contents: [{ role: 'user', parts: [{ text: content }, ...imageParts] }],
+      };
+      if (wantSearch) body.tools = [{ google_search: {} }];
+
       response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          system_instruction: system ? { parts: [{ text: system }] } : undefined,
-          contents: [{ role: 'user', parts: [{ text: content }, ...imageParts] }],
-        }),
+        body: JSON.stringify(body),
       });
       data = await response.json();
+
+      // คีย์ไม่รองรับการค้นเว็บ — ลองใหม่แบบไม่ค้น แทนที่จะโยน error ใส่ผู้ใช้
+      const msg0 = String(data?.error?.message || '');
+      if (wantSearch && (response.status === 400 || response.status === 403) && /tool|google_search|not supported|permission|unsupported/i.test(msg0)) {
+        wantSearch = false;
+        searchDisabledReason = 'คีย์ Gemini ที่ใช้อยู่ยังไม่รองรับการค้นเว็บ ระบบจึงตอบจากความรู้เดิมแทน — ผลลัพธ์อาจไม่ใช่ข้อมูลล่าสุด';
+        continue;
+      }
       const rateLimited = response.status === 429 || /quota|rate limit/i.test(data?.error?.message || '');
       if (!rateLimited) break;
       if (attempt === 2) {
@@ -98,8 +114,22 @@ export default async function handler(req, res) {
 
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text).join('\n');
 
+    // ดึงแหล่งอ้างอิงที่ Gemini ค้นเจอ ส่งกลับให้ผู้ใช้ตรวจเองได้
+    // สำคัญ: ถ้าไม่ให้ผู้ใช้เห็นแหล่งที่มา การค้นเว็บก็เชื่อถือไม่ได้ต่างจากการเดา
+    let sources = [];
+    try {
+      const gm = data?.candidates?.[0]?.groundingMetadata;
+      const chunks = gm?.groundingChunks || [];
+      sources = chunks
+        .map((c) => ({ title: c?.web?.title || '', url: c?.web?.uri || '' }))
+        .filter((x) => x.url)
+        .slice(0, 10);
+      const seen = new Set();
+      sources = sources.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true)));
+    } catch (e) { sources = []; }
+
     // บันทึกว่าผู้ใช้ทำอะไร ให้เจ้าของระบบดูย้อนหลังได้
-    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', progressReview: 'ประเมินผลคลิป', holidayIdeas: 'คิดไอเดียวันสำคัญ', safeScript: 'ตรวจสินค้าอ่อนไหว', prodPack: 'สร้างชุด Prompt ผลิตคลิป', imageQC: 'ตรวจภาพ AI', finalQC: 'ตรวจก่อนโพสต์', backendRead: 'อ่านสถิติหลังบ้าน', crossCheck: 'ตรวจงานข้ามแผนก', protocolAnalysis: 'วิเคราะห์ปัญหาระบบ', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
+    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', progressReview: 'ประเมินผลคลิป', holidayIdeas: 'คิดไอเดียวันสำคัญ', safeScript: 'ตรวจสินค้าอ่อนไหว', prodPack: 'สร้างชุด Prompt ผลิตคลิป', imageQC: 'ตรวจภาพ AI', finalQC: 'ตรวจก่อนโพสต์', backendRead: 'อ่านสถิติหลังบ้าน', crossCheck: 'ตรวจงานข้ามแผนก', planSearch: 'วางแผน (ค้นเว็บ)', rivalSearch: 'วิเคราะห์คู่แข่ง (ค้นเว็บ)', protocolAnalysis: 'วิเคราะห์ปัญหาระบบ', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
     pushFeed({ email: me.email, what: ACT_LABEL[act] || act, action: act, cost: usingCentral ? cost : 0 }).catch(() => {});
     touchPresence(me.email, null, ACT_LABEL[act]).catch(() => {});
 
@@ -110,7 +140,7 @@ export default async function handler(req, res) {
       tokensLeft = spent.unlimited ? -1 : spent.left;
     }
 
-    return res.status(200).json({ text: text || '(ไม่มีคำตอบ)', tokensLeft, usedOwnKey: !usingCentral, cost: usingCentral ? cost : 0 });
+    return res.status(200).json({ text: text || '(ไม่มีคำตอบ)', tokensLeft, usedOwnKey: !usingCentral, cost: usingCentral ? cost : 0, sources, searchUsed: wantSearch, searchNote: searchDisabledReason });
   } catch (err) {
     return res.status(500).json({ error: 'เชื่อมต่อ Gemini API ไม่สำเร็จ' });
   }
