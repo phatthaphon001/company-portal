@@ -48,6 +48,9 @@ function checkPassword(account, password) {
   return false;
 }
 
+// รุ่นของเอกสารความยินยอม — ถ้าแก้ข้อความ PDPA/ข้อกำหนด ต้องขยับเลขนี้ เพื่อให้ผู้ใช้เดิมกดยอมรับใหม่
+const CONSENT_VERSION = 'v1-2026-08';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!redisReady()) {
@@ -341,11 +344,79 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // ---- บันทึกการยินยอม PDPA + ข้อมูลโปรไฟล์ตอนสมัคร ----
+    // แยกออกจาก updateProfile เพราะการยินยอมมีผลทางกฎหมาย ต้องบันทึกเวลาและ IP จากฝั่งเซิร์ฟเวอร์เป็นหลักฐาน
+    if (action === 'saveOnboarding') {
+      const { consent, profile } = req.body || {};
+      const c = consent || {};
+      if (!c.terms || !c.privacy || !c.aiTransfer) {
+        return res.status(400).json({ error: 'ต้องยอมรับเงื่อนไขให้ครบทั้ง 3 ข้อก่อนจึงจะใช้งานได้' });
+      }
+      const idx = accounts.findIndex((a) => a.email === me.email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+
+      const p = profile || {};
+      const str = (v, n = 200) => String(v == null ? '' : v).slice(0, n).trim();
+      const accountType = p.accountType === 'org' ? 'org' : 'personal';
+      const OCCUPATIONS = ['employee', 'student', 'freelancer', 'business_owner', 'other'];
+
+      const safeProfile = {
+        accountType,
+        occupation: OCCUPATIONS.includes(p.occupation) ? p.occupation : 'other',
+        birthDate: str(p.birthDate, 10) || accounts[idx].birthDate || null,
+        displayName: str(p.displayName, 120) || accounts[idx].name,
+        phone: str(p.phone, 40),
+      };
+      if (accountType === 'org') {
+        safeProfile.org = {
+          companyName: str(p.companyName, 200),
+          taxId: str(p.taxId, 30),
+          address: str(p.address, 500),
+          warehouse: str(p.warehouse, 300),
+          office: str(p.office, 300),
+          phone: str(p.orgPhone, 40),
+          email: str(p.orgEmail, 120),
+          facebook: str(p.facebook, 200),
+          line: str(p.line, 100),
+          website: str(p.website, 200),
+          businessDesc: str(p.businessDesc, 3000),
+          owners: Array.isArray(p.owners)
+            ? p.owners.slice(0, 10).map((o) => ({ name: str(o?.name, 120), birthDate: str(o?.birthDate, 10) })).filter((o) => o.name)
+            : [],
+        };
+      }
+
+      accounts[idx] = {
+        ...accounts[idx],
+        ...safeProfile,
+        consent: {
+          terms: true, privacy: true, aiTransfer: true,
+          marketing: !!c.marketing,           // ข้อนี้ไม่บังคับ
+          version: CONSENT_VERSION,
+          at: Date.now(),                      // เวลาจากเซิร์ฟเวอร์ ไม่เชื่อเวลาจากเครื่องผู้ใช้
+          ip,
+        },
+        onboardedAt: Date.now(),
+      };
+      await saveAccounts(accounts);
+      await logActivity({ type: 'consent_given', email: me.email, ip, version: CONSENT_VERSION });
+      return res.status(200).json({ account: sanitize(accounts[idx]) });
+    }
+
+    // ---- บันทึกว่าอ่านคู่มือแนะนำการใช้งานรุ่นไหนไปแล้ว ----
+    if (action === 'markTourSeen') {
+      const idx = accounts.findIndex((a) => a.email === me.email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      accounts[idx].tourSeen = String(req.body?.version || '').slice(0, 20);
+      await saveAccounts(accounts);
+      return res.status(200).json({ account: sanitize(accounts[idx]) });
+    }
+
     if (action === 'updateProfile') {
       const { patch } = req.body;
       const idx = accounts.findIndex((a) => a.email === me.email); // แก้ได้เฉพาะบัญชีตัวเอง
       const safePatch = { ...patch };
-      ['password', 'passwordHash', 'passwordSalt', 'email', 'isOwner', 'clearance', 'sessionsValidFrom', 'otpExempt'].forEach((k) => delete safePatch[k]);
+      ['password', 'passwordHash', 'passwordSalt', 'email', 'isOwner', 'clearance', 'sessionsValidFrom', 'otpExempt', 'consent', 'onboardedAt', 'tourSeen', 'plan', 'role', 'orgId', 'isDeveloper', 'tokensUsed', 'bonusTokens'].forEach((k) => delete safePatch[k]);
       accounts[idx] = { ...accounts[idx], ...safePatch };
       await saveAccounts(accounts);
       return res.status(200).json({ account: sanitize(accounts[idx]) });
