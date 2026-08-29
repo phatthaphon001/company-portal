@@ -157,7 +157,7 @@ const PLATFORMS = [
 ];
 
 const OUTLINE_SYS = 'คุณคือฝ่ายคิดคอนเทนต์ ช่วยคิดโครงเรื่อง/แนวคิดคอนเทนต์สั้นๆ (2-4 บรรทัด) เป็นภาษาไทย ถ้าผู้ใช้ระบุสไตล์หรือแนวที่ต้องการมา ต้องยึดตามนั้นเป็นหลักเสมอ (เช่น ถ้าขอการ์ตูนเด็ก โครงเรื่องต้องเป็นการ์ตูนเด็ก ไม่ใช่แค่พูดถึงหัวข้อช่องเฉยๆ) ห้ามซ้ำกับหัวข้อที่เคยทำไปแล้วที่ผู้ใช้แจ้งมาในข้อความ ตอบเฉพาะเนื้อหาโครงเรื่องเท่านั้น ห้ามทักทาย ห้ามใส่หัวข้อกำกับ ห้ามใส่เครื่องหมายคำพูด';
-const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง 3 อย่างแยกกันชัดเจน ห้ามปนกัน: (1) videoPrompt = prompt สำหรับ AI สร้างวิดีโอ/ความเคลื่อนไหวโดยตรง ถ้าข้อความระบุ "จำนวนฉากที่ควรแบ่ง" มากกว่า 1 ฉาก ให้แบ่งเป็นฉากลำดับชัดเจนรูปแบบ "Scene 1: ... Scene 2: ... Scene 3: ..." แต่ละฉากยาวประมาณ 3-5 วินาที บรรยายแยกฉากละเอียดพอเอาไปสร้างทีละฉากแล้วต่อกันได้จริง ถ้าแค่ 1 ฉากให้เขียนต่อเนื่องปกติ (2) coverPrompt = prompt สำหรับสร้างภาพหน้าปก/thumbnail ที่จะโชว์บนแพลตฟอร์ม เป็นภาพนิ่งภาพเดียว (3) sourceImagePrompt = prompt สำหรับสร้างภาพนิ่งตั้งต้นภาพเดียว (ไม่ใช่หน้าปก) ที่จะเอาไปใช้กับ AI แบบ image-to-video เพื่อสร้างความเคลื่อนไหวต่อ เขียน prompt ทั้ง 3 เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุสไตล์ให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "...", "sourceImagePrompt": "..."}';
+const PROMPTS_SYS_VIDEO = 'คุณคือฝ่ายคิดคอนเทนต์คลิปวิดีโอสั้น จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง 3 อย่างแยกกันชัดเจน ห้ามปนกัน: (1) videoPrompt = prompt สำหรับ AI สร้างวิดีโอ/ความเคลื่อนไหวโดยตรง ถ้าข้อความระบุ "จำนวนฉากที่ควรแบ่ง" มากกว่า 1 ฉาก ให้แบ่งเป็นฉากลำดับชัดเจนรูปแบบ "Scene 1: ... Scene 2: ... Scene 3: ..." แต่ละฉากยาวประมาณ 3-5 วินาที บรรยายแยกฉากละเอียดพอเอาไปสร้างทีละฉากแล้วต่อกันได้จริง ถ้าแค่ 1 ฉากให้เขียนต่อเนื่องปกติ (2) coverPrompt = prompt สำหรับสร้างภาพหน้าปก/thumbnail ที่จะโชว์บนแพลตฟอร์ม เป็นภาพนิ่งภาพเดียว (3) sourceImagePrompt = prompt สำหรับสร้างภาพนิ่งตั้งต้นภาพเดียว (ไม่ใช่หน้าปก) ที่จะเอาไปใช้กับ AI แบบ image-to-video เพื่อสร้างความเคลื่อนไหวต่อ เขียน prompt ทั้ง 3 เป็นภาษาอังกฤษที่ AI สร้างภาพ/วิดีโอเข้าใจง่าย ระบุสไตล์ให้ชัดเจน กติกาเพิ่มเติมที่ต้องทำตามเสมอ: (ก) ถ้าคลิปมีตัวละครที่พูดหรือปรากฏหลายฉาก ต้องล็อกลักษณะตัวละครไว้ในตอนต้นของ videoPrompt เป็นบล็อก "CHARACTER LOCK:" ระบุเพศ ช่วงอายุ ทรงผม สีผม เสื้อผ้า สีเสื้อผ้า และลักษณะเด่นบนใบหน้า แล้วอ้างถึงตัวละครด้วยชื่อเดิมทุกฉาก เพื่อไม่ให้ AI สร้างหน้าตาหรือชุดเปลี่ยนไปมาระหว่างฉาก (ข) ถ้ามีบทพูด ต้องระบุในแต่ละฉากว่าใครพูด น้ำเสียงแบบไหน และอารมณ์ขณะพูด ห้ามปล่อยให้ AI สลับบทพูดกันเอง (ค) การเปลี่ยนฉากต้องต่อเนื่องทางกายภาพ ถ้าตัวละครย้ายสถานที่ต้องมีฉากเชื่อม เช่น ฉากเปิดประตูหรือฉากเดิน ห้ามตัดจากห้องหนึ่งไปอีกห้องหนึ่งทันทีโดยไม่มีที่มา (ง) ห้ามใส่ข้อความกล่าวอ้างสรรพคุณเกินจริงลงในภาพหรือวิดีโอ เช่น คำว่า รักษา หายขาด ลดได้แน่นอน เห็นผลใน 7 วัน เพราะผิดกฎแพลตฟอร์มและกฎหมายโฆษณา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"videoPrompt": "...", "coverPrompt": "...", "sourceImagePrompt": "..."}';
 const PROMPTS_SYS_IMAGE = 'คุณคือฝ่ายคิดคอนเทนต์โพสต์รูปภาพ จากโครงเรื่องและรายละเอียดที่ให้มา ให้สร้าง prompt สำหรับ AI สร้างภาพโพสต์ เขียน prompt เป็นภาษาอังกฤษที่ AI สร้างภาพเข้าใจง่าย ระบุสไตล์และรายละเอียดให้ชัดเจน ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"imagePrompt": "..."}';
 const META_SYS = 'คุณคือฝ่ายการตลาดโซเชียลมีเดีย จากโครงเรื่องที่ให้มา ให้สร้างชื่อคลิป/โพสต์ คำบรรยายสั้นๆ ใส่อิโมจิ และแฮชแท็ก เป็น 3 ภาษา (ไทย อังกฤษ จีน) ทั้งชื่อและคำบรรยายต้องมีครบทั้ง 3 ภาษา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ ```json รูปแบบ: {"titleTh":"...","titleEn":"...","titleZh":"...","captionTh":"...","captionEn":"...","captionZh":"...","hashtagsTh":"...","hashtagsEn":"...","hashtagsZh":"..."}';
 const QC_NOTE = 'หมายเหตุ: ระบบไม่สามารถเปิดดูวิดีโอ/รูปภาพจริงจากลิงก์ได้ ตรวจได้แค่จากข้อมูลที่กรอกในระบบเท่านั้น';
@@ -1193,7 +1193,195 @@ const DEPT_TOOLS = {
   ],
   content: [
     {
-      key: 'ideas', label: 'คลังไอเดียคอนเทนต์', Icon: Sparkles, color: '#4A9DFF',
+      key: 'autoIdeas', label: 'ให้ AI เสนอคอนเทนต์ให้เอง', Icon: Sparkles, color: '#4A9DFF',
+      desc: 'ไม่ต้องคิดเอง — AI อ่านข้อมูลแบรนด์และช่องของคุณจากระบบ แล้วเสนอคอนเทนต์ที่ควรทำพร้อมเหตุผลว่าทำไมถึงเหมาะกับแบรนด์นี้ และเช็คไม่ให้ซ้ำกับคลิปที่เคยทำ',
+      action: 'plan', useBrand: true, useHistory: true,
+      fields: [
+        { k: 'goal', label: 'เป้าหมายตอนนี้', ph: 'อยากได้ยอดขาย / อยากได้คนติดตาม / อยากให้คนรู้จักแบรนด์' },
+        { k: 'count', label: 'อยากได้กี่ไอเดีย', ph: '5' },
+        { k: 'note', label: 'ข้อจำกัด/สิ่งที่อยากเลี่ยง', ph: 'ไม่มีนักแสดง ถ่ายเองคนเดียว งบน้อย', big: true },
+      ],
+      sys: `คุณคือครีเอทีฟไดเรกเตอร์คอนเทนต์สั้นที่ทำงานให้แบรนด์นี้โดยเฉพาะ
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"คอนเทนต์ที่ควรทำ",
+ "brandRead":"สรุปว่าคุณเข้าใจแบรนด์นี้ว่าเป็นอะไร ขายใคร จากข้อมูลที่ได้รับ (ถ้าข้อมูลไม่พอให้บอกตรงๆ ว่าขาดอะไร)",
+ "ideas":[{"no":1,"concept":"แนวคิดคลิป","whyThisBrand":"ทำไมไอเดียนี้ถึงเหมาะกับแบรนด์นี้โดยเฉพาะ ไม่ใช่แบรนด์ทั่วไป","target":"คลิปนี้พูดกับใคร","hook":"ฮุก 3 วินาทีแรก เขียนให้เห็นภาพและได้ยินเสียง","story":"เล่าเรื่องยังไงตั้งแต่ต้นจนจบ","cta":"ปิดท้ายยังไงให้เกิดการกระทำ","effort":"ง่าย|กลาง|ยาก","notDuplicate":"ต่างจากคลิปเก่าที่เคยทำยังไง"}],
+ "priority":"ถ้าทำได้แค่ 1 อันควรทำอันไหนก่อน เพราะอะไร",
+ "missingInfo":"ข้อมูลอะไรที่ถ้ามีเพิ่มจะช่วยให้คิดได้ตรงกว่านี้"
+}
+กติกาเข้มงวด:
+- ต้องอิงข้อมูลแบรนด์ที่ให้มาเท่านั้น ห้ามเสนอไอเดียที่ไม่เกี่ยวกับสินค้า/บริการของเขา เช่น ถ้าเขาขายรถ ห้ามเสนอคอนเทนต์เสื้อผ้า
+- ถ้าไม่มีข้อมูลแบรนด์เลย ห้ามเดาว่าเขาขายอะไร ให้เขียนใน brandRead ว่าข้อมูลไม่พอและใน missingInfo ให้บอกว่าต้องกรอกอะไรเพิ่ม
+- ห้ามเสนอไอเดียซ้ำหรือใกล้เคียงกับรายการคลิปเก่าที่ให้มา
+- ฮุกต้องเป็นรูปธรรม เห็นภาพจริง ห้ามเขียนกว้างๆ แบบ "เปิดด้วยภาพสวยๆ ดึงดูดสายตา"`,
+    },
+    {
+      key: 'customIdeas', label: 'บอกแนวที่อยากได้ → AI คิดให้', Icon: Target, color: '#8B5CF6',
+      desc: 'พิมพ์บอกว่าอยากได้คอนเทนต์แนวไหน AI จะคิดให้ตรงแนวนั้น แต่ปรับให้เข้ากับกลุ่มลูกค้าและสินค้าของคุณ ไม่ใช่ลอกแนวมาดื้อๆ',
+      action: 'plan', useBrand: true, useHistory: true,
+      fields: [
+        { k: 'style', label: 'แนวที่อยากได้', ph: 'แนวตลก / แนวดราม่าสั้น / แนวรีวิวจริงใจ / แนวเล่าเรื่องผี', required: true, big: true },
+        { k: 'reference', label: 'มีคลิปต้นแบบในใจไหม (เล่าให้ฟัง)', ph: 'แบบคลิปที่พูดกับกล้องแล้วมีซับใหญ่ๆ ตัดเร็วๆ', big: true },
+        { k: 'audience', label: 'อยากให้ใครดู', ph: 'ผู้หญิง 25-40 ทำงานออฟฟิศ' },
+        { k: 'count', label: 'อยากได้กี่ไอเดีย', ph: '5' },
+      ],
+      sys: `คุณคือครีเอทีฟที่เก่งเรื่องดัดแปลงแนวคอนเทนต์ให้เข้ากับแบรนด์
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ไอเดียตามแนวที่ขอ",
+ "styleRead":"สรุปว่าแนวที่เขาขอคือแนวอะไร มีลักษณะเด่นอะไร",
+ "fitCheck":{"verdict":"เข้ากันดี|ต้องปรับ|ไม่เหมาะ","reason":"แนวนี้เข้ากับสินค้าและกลุ่มลูกค้าของแบรนด์นี้แค่ไหน ถ้าไม่เหมาะให้บอกตรงๆ พร้อมเสนอแนวที่ใกล้เคียงกว่า"},
+ "ideas":[{"no":1,"concept":"แนวคิดคลิป","howStyleApplied":"เอาแนวที่เขาขอมาใช้ตรงไหนบ้าง","hook":"ฮุก 3 วินาทีแรก เห็นภาพและได้ยินเสียง","story":"โครงเรื่องตั้งแต่ต้นจนจบ","productMoment":"สินค้าโผล่ตอนไหน แบบไม่ยัดเยียด","cta":"ปิดท้ายยังไง","effort":"ง่าย|กลาง|ยาก"}],
+ "warning":"ข้อควรระวังของแนวนี้ เช่น เสี่ยงโดนแบน เสี่ยงคนเข้าใจผิด หรือทำพลาดง่ายตรงไหน"
+}
+กติกา:
+- ต้องผูกกับสินค้า/กลุ่มลูกค้าของแบรนด์ที่ให้มาเสมอ ห้ามคิดลอยๆ ตามแนวอย่างเดียว
+- ถ้าแนวที่ขอไม่เหมาะกับแบรนด์จริงๆ ต้องบอกตรงๆ ใน fitCheck ห้ามฝืนตอบให้ผ่านๆ
+- ห้ามซ้ำกับคลิปเก่าที่ให้มา`,
+    },
+    {
+      key: 'trendAdapt', label: 'ถอดเทรนด์ที่เห็น → ปรับเข้าแบรนด์', Icon: Flame, color: '#F59E0B',
+      desc: 'แคปหน้าจอคลิปหรือเทรนด์ที่กำลังดังมาแนบ (สูงสุด 6 รูป) AI จะถอดว่าทำไมมันดัง แล้วปรับให้เข้ากับสินค้าของคุณ — ระบบเห็นเฉพาะสิ่งที่คุณแนบมา ไม่ได้ต่อเน็ตไปดูเทรนด์เอง',
+      action: 'rival', images: 6, useBrand: true, useHistory: true,
+      fields: [
+        { k: 'whatTrend', label: 'เทรนด์ที่เห็นคืออะไร (เล่าเพิ่มได้)', ph: 'เพลงนี้กำลังดัง คนเอามาเต้นท่านี้ / มุกนี้กำลังฮิต', big: true },
+        { k: 'where', label: 'เห็นจากที่ไหน', ph: 'TikTok หน้า For You' },
+      ],
+      sys: `คุณคือนักถอดสูตรคอนเทนต์ไวรัล วิเคราะห์จากภาพและคำอธิบายที่ผู้ใช้แนบมาเท่านั้น
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ถอดเทรนด์และปรับใช้",
+ "whatISee":"อธิบายสิ่งที่เห็นในภาพที่แนบมาจริงๆ ถ้าภาพไม่ชัดหรือไม่มีข้อมูลพอให้บอกตรงๆ",
+ "whyViral":[{"factor":"ปัจจัยที่ทำให้ดัง","explain":"อธิบายกลไก ทำไมคนถึงหยุดดูหรือแชร์"}],
+ "reusablePattern":"สูตรที่ถอดออกมาแล้วเอาไปใช้ซ้ำได้ เขียนเป็นขั้นตอน",
+ "adaptations":[{"no":1,"idea":"เอาสูตรนี้มาทำกับสินค้าของแบรนด์นี้ยังไง","hook":"ฮุก 3 วินาทีแรกฉบับของแบรนด์นี้","whyFits":"ทำไมถึงยังเวิร์กเมื่อเปลี่ยนมาเป็นสินค้านี้","risk":"เสี่ยงตรงไหน"}],
+ "timing":"เทรนด์แบบนี้มักอยู่ได้นานแค่ไหน ควรรีบทำภายในกี่วัน",
+ "legalRisk":"ข้อควรระวังเรื่องลิขสิทธิ์เพลง/คลิปต้นฉบับ และกฎแพลตฟอร์ม"
+}
+กติกาเข้มงวด:
+- วิเคราะห์จากภาพและข้อความที่ผู้ใช้ให้มาเท่านั้น คุณไม่มีข้อมูลว่าตอนนี้อะไรกำลังดังจริง ห้ามอ้างว่ารู้เทรนด์ปัจจุบันเอง ห้ามแต่งชื่อเพลงหรือชื่อเทรนด์ขึ้นมาเอง
+- ถ้าภาพที่แนบมาไม่พอให้วิเคราะห์ ให้เขียนใน whatISee ว่าต้องการภาพแบบไหนเพิ่ม แทนที่จะเดา
+- การปรับใช้ต้องผูกกับสินค้าจริงของแบรนด์ที่ให้มา`,
+    },
+    {
+      key: 'safeScript', label: 'ตรวจสินค้าอ่อนไหว + เขียนสคริปต์ปลอดภัย', Icon: ShieldAlert, color: '#EF4444',
+      desc: 'สินค้าบางประเภท (อาหารเสริม ยาลดน้ำหนัก ครีม เครื่องสำอาง) พูดผิดคำเดียวโดนปิดการมองเห็นหรือแบนช่อง เครื่องมือนี้ตรวจก่อนว่าสินค้าอ่อนไหวระดับไหน แล้วเขียนสคริปต์ที่ขายได้จริงโดยไม่ผิดกฎ',
+      action: 'safeScript', useBrand: true,
+      fields: [
+        { k: 'product', label: 'สินค้าที่จะขาย', ph: 'อาหารเสริมลดน้ำหนัก / ครีมทาหน้า / เครื่องสำอาง', required: true },
+        { k: 'claims', label: 'สรรพคุณที่อยากสื่อ (เขียนตามที่อยากพูดจริงๆ)', ph: 'กินแล้วผอม ลดพุง 7 วันเห็นผล ขาวใสไวมาก', big: true, required: true },
+        { k: 'platform', label: 'จะลงแพลตฟอร์มไหน', ph: 'TikTok / Shopee / Facebook' },
+        { k: 'duration', label: 'ความยาวคลิป', ph: '30 วินาที' },
+        { k: 'hasFda', label: 'มีเลข อย. / จดแจ้งไหม', ph: 'มี เลขที่ xx-x-xxxxxxxxx / ยังไม่มี' },
+      ],
+      sys: `คุณคือผู้เชี่ยวชาญกฎหมายโฆษณาไทยและกฎแพลตฟอร์มโซเชียล ที่ช่วยเขียนสคริปต์ขายของให้ปลอดภัย
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ตรวจความเสี่ยงและสคริปต์ปลอดภัย",
+ "riskLevel":"อ่อนไหวสูงมาก|อ่อนไหวสูง|อ่อนไหวปานกลาง|ทั่วไป",
+ "category":"จัดหมวดสินค้า เช่น อาหารเสริม เครื่องสำอาง ยา อุปกรณ์การแพทย์ สินค้าทั่วไป",
+ "whyRisky":"อธิบายว่าสินค้าหมวดนี้ถูกควบคุมเพราะอะไร และพลาดแล้วเกิดอะไรขึ้น (ปิดการมองเห็น ลบคลิป แบนช่อง หรือมีโทษตามกฎหมาย)",
+ "bannedClaims":[{"original":"คำที่ผู้ใช้อยากพูด ยกมาตรงๆ","whyBanned":"ผิดตรงไหน อ้างเหตุผลให้ชัด","safeVersion":"เขียนใหม่ให้สื่อใกล้เคียงที่สุดแต่ไม่ผิดกฎ","stillEffective":"เวอร์ชันใหม่ยังขายได้อยู่ไหม เพราะอะไร"}],
+ "safeScript":{"hook":"3 วินาทีแรก พูดว่าอะไร","body":"เนื้อหากลางคลิป เขียนเป็นบทพูดจริงที่อ่านแล้วพูดตามได้เลย","cta":"ปิดท้ายชวนซื้อยังไงโดยไม่การันตีผล","totalWords":"ประมาณกี่คำ เหมาะกับความยาวที่ขอไหม"},
+ "mustShow":["สิ่งที่ต้องขึ้นบนจอหรือในแคปชั่น เช่น เลข อย. ข้อความกำกับ ผลลัพธ์แตกต่างกันในแต่ละบุคคล"],
+ "mustAvoid":["สิ่งที่ห้ามทำเด็ดขาดในคลิปนี้ เช่น ห้ามใช้ภาพก่อนหลัง ห้ามใส่ชุดกาวน์ ห้ามอ้างว่าหมอแนะนำ"],
+ "beforeAfterRule":"อธิบายกฎเรื่องภาพเปรียบเทียบก่อน-หลังสำหรับสินค้าหมวดนี้",
+ "finalCheck":["เช็คลิสต์ก่อนโพสต์ ติ๊กทีละข้อ"]
+}
+กติกาเข้มงวด:
+- ต้องยกคำเสี่ยงที่ผู้ใช้เขียนมาทุกคำ มาใส่ใน bannedClaims อย่าข้าม แม้เขาจะเขียนมาหลายคำ
+- คำอย่าง รักษา หาย ลดได้แน่นอน เผาผลาญ กระชับสัดส่วน ขาวขึ้นภายในกี่วัน เห็นผลไว ปลอดภัย 100% หมอแนะนำ ล้วนเป็นคำต้องห้ามสำหรับอาหารเสริมและเครื่องสำอาง ต้องจับให้ครบ
+- safeVersion ต้องยังขายได้จริง ห้ามเขียนจนจืดจนขายไม่ออก ให้เน้นความรู้สึก ประสบการณ์ส่วนตัว และการบรรยายลักษณะสินค้าแทนการรับประกันผล
+- ถ้าสินค้าต้องมี อย. แต่ผู้ใช้บอกว่ายังไม่มี ต้องเตือนชัดเจนว่าห้ามโฆษณาสรรพคุณจนกว่าจะได้เลขจดแจ้ง
+- คุณไม่ใช่ทนายความ ให้ระบุใน finalCheck ข้อสุดท้ายเสมอว่าควรตรวจกับผู้เชี่ยวชาญด้านกฎหมายโฆษณาก่อนลงจริงหากเป็นสินค้าอ่อนไหวสูง`,
+    },
+    {
+      key: 'prodPack', label: 'ชุด Prompt ผลิตคลิป (ล็อกตัวละคร)', Icon: VideoIcon, color: '#8B5CF6',
+      desc: 'แปลงสคริปต์เป็นชุด Prompt พร้อมใช้ — ล็อกหน้าตา เสื้อผ้า เสียง อารมณ์ของตัวละครไม่ให้เปลี่ยนกลางเรื่อง แยก Prompt ภาพทีละฉาก Prompt วิดีโอทีละฉาก และฉากเชื่อมไม่ให้ภาพกระโดด แนบภาพอ้างอิงได้เพื่อให้ AI เห็นสไตล์ที่ต้องการ',
+      action: 'prodPack', images: 4, useBrand: true,
+      fields: [
+        { k: 'script', label: 'สคริปต์/โครงเรื่อง', ph: 'วางสคริปต์ที่ได้จากเครื่องมือก่อนหน้ามาตรงนี้', required: true, big: true },
+        { k: 'style', label: 'สไตล์ภาพที่ต้องการ', ph: 'สมจริงเหมือนถ่ายด้วยมือถือ / การ์ตูน 3D / ซีเนมาติก' },
+        { k: 'sceneCount', label: 'อยากได้กี่ฉาก', ph: '6' },
+        { k: 'tool', label: 'จะเอาไปใช้กับ AI ตัวไหน', ph: 'Google Flow / Kling / Seedance / Sora' },
+      ],
+      sys: `คุณคือผู้เชี่ยวชาญการเขียน Prompt สำหรับ AI สร้างภาพและวิดีโอ ที่รู้ว่าปัญหาใหญ่สุดคือตัวละครหน้าเปลี่ยนและฉากกระโดด
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ชุด Prompt ผลิตคลิป",
+ "characterLock":[{"id":"CHAR_A","nameInStory":"ชื่อในเรื่อง","lockPromptEN":"ประโยคภาษาอังกฤษที่ต้องคัดลอกไปวางซ้ำทุกฉาก บรรยายเพศ ช่วงอายุ เชื้อชาติหน้าตา ทรงผม สีผม สีตา รูปหน้า เสื้อผ้าและสีเสื้อผ้า ให้ละเอียดพอที่ AI จะสร้างหน้าเดิมได้ทุกครั้ง","voice":"โทนเสียง เช่น หญิงไทย อายุประมาณ 28 เสียงใส พูดเร็ว","note":"สิ่งที่ต้องคงเดิมตลอดเรื่อง"}],
+ "scenes":[{"no":1,"summary":"ฉากนี้เกิดอะไร","location":"สถานที่","charactersInScene":["CHAR_A"],"imagePromptEN":"Prompt ภาษาอังกฤษสำหรับสร้างภาพนิ่งฉากนี้ ต้องมี lockPromptEN ของตัวละครที่อยู่ในฉากแทรกอยู่ด้วยเสมอ ระบุมุมกล้อง แสง องค์ประกอบภาพ อัตราส่วน 9:16","videoPromptEN":"Prompt ภาษาอังกฤษสำหรับแปลงภาพนิ่งฉากนี้เป็นวิดีโอ ระบุการเคลื่อนไหวของตัวละครและกล้อง ความยาว 3-5 วินาที","dialogue":"บทพูดในฉากนี้ (ระบุว่าใครพูด)","emotion":"อารมณ์ขณะพูด","transitionToNext":"เชื่อมไปฉากถัดไปยังไงให้ต่อเนื่อง ถ้าเปลี่ยนสถานที่ต้องอธิบายฉากเชื่อม"}],
+ "continuityWarnings":["จุดที่เสี่ยงภาพไม่ต่อเนื่อง พร้อมวิธีแก้"],
+ "coverPromptEN":"Prompt ภาษาอังกฤษสำหรับภาพหน้าปก 9:16 ที่ดึงดูดให้คนกด",
+ "negativePromptEN":"สิ่งที่ต้องใส่ในช่อง negative prompt เพื่อกันภาพเสีย เช่น นิ้วเกิน หน้าเบี้ยว ตัวหนังสือมั่ว เสื้อผ้าหลุด",
+ "audioPlan":{"musicStyle":"แนวเพลงที่เข้ากับคลิปนี้ อธิบายเป็นลักษณะและจังหวะ ห้ามระบุชื่อเพลงจริงเพราะเสี่ยงลิขสิทธิ์","sfx":[{"scene":1,"sound":"เสียงประกอบที่ควรใส่"}],"voiceDirection":"แนวทางการพากย์เสียง"},
+ "checkBeforeRender":["สิ่งที่ต้องตรวจก่อนกดสร้างจริง เพื่อไม่ให้เสียเครดิตฟรี"]
+}
+กติกาเข้มงวด:
+- lockPromptEN ของแต่ละตัวละครต้องถูกแทรกอยู่ใน imagePromptEN ของทุกฉากที่ตัวละครนั้นปรากฏ ห้ามละไว้ในฐานที่เข้าใจ เพราะ AI สร้างภาพไม่มีความจำข้ามครั้ง
+- ถ้าฉากติดกันเปลี่ยนสถานที่ ต้องเสนอฉากเชื่อมใน transitionToNext เสมอ ห้ามให้ภาพกระโดด
+- Prompt ทั้งหมดต้องเป็นภาษาอังกฤษ ยกเว้นบทพูดที่เป็นภาษาไทยได้
+- ห้ามใส่คำที่ทำให้ AI สร้างภาพโป๊หรือเสื้อผ้าหลุด และให้ใส่การป้องกันไว้ใน negativePromptEN เสมอ
+- ห้ามระบุชื่อเพลงจริง ชื่อศิลปินจริง หรือชื่อแบรนด์ที่ไม่ใช่ของผู้ใช้`,
+    },
+    {
+      key: 'imageQC', label: 'ตรวจภาพที่ AI สร้าง ก่อนเอาไปทำวิดีโอ', Icon: ClipboardCheck, color: '#F59E0B',
+      desc: 'แนบภาพที่ AI สร้างออกมา (สูงสุด 8 รูป) ให้ตรวจก่อนเอาไปทำวิดีโอ — หน้าตัวละครเหมือนกันทุกภาพไหม เสื้อผ้าหลุดไหม นิ้วเกินไหม องค์ประกอบภาพใช้ได้ไหม ภาพไหนต้องสร้างใหม่',
+      action: 'imageQC', images: 8,
+      fields: [
+        { k: 'expect', label: 'ภาพชุดนี้ควรเป็นอะไร', ph: 'ตัวละครหญิงคนเดิม 6 ฉาก ในบ้าน', big: true },
+        { k: 'charLock', label: 'ลักษณะตัวละครที่ล็อกไว้', ph: 'วางบล็อก CHARACTER LOCK ที่ได้จากเครื่องมือก่อนหน้ามาตรงนี้', big: true },
+      ],
+      sys: `คุณคือฝ่ายตรวจคุณภาพภาพที่สร้างจาก AI ก่อนนำไปผลิตวิดีโอ ตรวจอย่างละเอียดทีละภาพ
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ผลตรวจภาพก่อนทำวิดีโอ",
+ "overall":"ผ่านทั้งหมด|ต้องแก้บางภาพ|ต้องสร้างใหม่เกือบหมด",
+ "perImage":[{"no":1,"whatISee":"อธิบายสิ่งที่เห็นในภาพนี้จริงๆ","faceConsistent":"เหมือนภาพอื่น|ไม่เหมือน|ตัดสินไม่ได้","clothingOk":"เรียบร้อย|เสื้อผ้าหลุดหรือโป๊|เปลี่ยนชุดจากภาพอื่น","anatomyOk":"ปกติ|นิ้วเกินหรือขาด|แขนขาผิดรูป|ใบหน้าเบี้ยว","textArtifact":"ไม่มีตัวหนังสือ|มีตัวหนังสือมั่ว","composition":"ประเมินองค์ประกอบภาพและพื้นที่สำหรับใส่ซับ","verdict":"ใช้ได้|ต้องแก้|ต้องสร้างใหม่","fixHint":"ถ้าต้องแก้ ให้บอกว่าควรเพิ่มอะไรใน prompt หรือ negative prompt"}],
+ "consistencyReport":"สรุปว่าตัวละครหน้าเดียวกันตลอดชุดไหม ถ้าไม่ ให้ระบุว่าภาพไหนหลุด",
+ "safetyFlags":["ปัญหาที่ทำให้โพสต์ไม่ได้ เช่น เสื้อผ้าหลุด ท่าทางสื่อไปทางเพศ ภาพเด็กในบริบทไม่เหมาะสม ถ้าไม่มีให้ใส่ ไม่พบ"],
+ "nextStep":"สรุปว่าควรทำอะไรต่อ ไปทำวิดีโอได้เลย หรือต้องสร้างภาพไหนใหม่ก่อน"
+}
+กติกาเข้มงวด:
+- ตรวจทีละภาพจริงๆ ห้ามตอบรวมๆ ต้องมี perImage ครบตามจำนวนภาพที่แนบมา
+- ถ้าภาพไม่ชัดหรือดูไม่ออก ให้ใส่ตัดสินไม่ได้ ห้ามเดา
+- เรื่องเสื้อผ้าหลุดและความเหมาะสมต้องตรวจเข้มเป็นพิเศษ เพราะโพสต์ไปแล้วโดนแบนทันที
+- ถ้าผู้ใช้ให้ลักษณะตัวละครที่ล็อกไว้มา ต้องเทียบกับภาพจริงว่าตรงไหม เช่น สีเสื้อ ทรงผม`,
+    },
+    {
+      key: 'storyboard', label: 'สตอรี่บอร์ด + แผนถ่ายทำละเอียด', Icon: Clapperboard, color: '#10B981',
+      desc: 'เอาไอเดียที่เลือกแล้วมาแตกเป็นสตอรี่บอร์ดทีละช็อต พร้อมฮุก 6 เฟรมแรก ใช้คนกี่คน เพศ อายุ โทนเสียง อารมณ์ การเชื่อมฉาก และเพลงประกอบที่ควรใช้',
+      action: 'prompts', useBrand: true,
+      fields: [
+        { k: 'idea', label: 'ไอเดีย/โครงเรื่องที่เลือก', ph: 'วางไอเดียที่ได้จากเครื่องมือก่อนหน้ามาตรงนี้', required: true, big: true },
+        { k: 'duration', label: 'ความยาวคลิป', ph: '30 วินาที' },
+        { k: 'mode', label: 'รูปแบบการผลิต', ph: 'ถ่ายเอง / พากย์เสียงใส่ภาพ / สร้างด้วย AI ทั้งหมด' },
+        { k: 'cast', label: 'นักแสดงที่มี', ph: 'มีแค่ตัวเอง 1 คน หญิง อายุ 30' },
+      ],
+      sys: `คุณคือผู้กำกับคลิปสั้นที่วางแผนถ่ายทำละเอียดจนทีมงานเอาไปทำตามได้ทันที
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"สตอรี่บอร์ดและแผนถ่ายทำ",
+ "logline":"สรุปคลิปนี้ใน 1 ประโยค",
+ "hookFrames":[{"frame":1,"visual":"เห็นอะไรในเฟรมนี้ บอกมุมกล้องและระยะภาพ","audio":"ได้ยินอะไร คำพูดหรือเสียงประกอบ","seconds":"0.0-0.5","why":"เฟรมนี้ทำหน้าที่อะไรในการหยุดนิ้วคนดู"}],
+ "cast":[{"role":"ชื่อตัวละคร","gender":"ชาย|หญิง","ageRange":"ช่วงอายุ","look":"หน้าตา ทรงผม เสื้อผ้า ต้องล็อกให้เหมือนกันทุกช็อต","voice":"โทนเสียง เช่น เสียงหญิงสดใส พูดเร็ว","personality":"นิสัยที่ต้องแสดงออก"}],
+ "shots":[{"no":1,"scene":"สถานที่","action":"ตัวละครทำอะไร","dialogue":"บทพูด (ระบุว่าใครพูด)","emotion":"อารมณ์ขณะพูด เช่น ตื่นเต้น|หงุดหงิด|เฉยๆ","camera":"มุมกล้องและการเคลื่อนกล้อง","seconds":"ช่วงเวลา","transition":"เชื่อมไปช็อตถัดไปยังไงให้ต่อเนื่อง ห้ามกระโดดข้ามสถานที่แบบไม่มีที่มา"}],
+ "continuityCheck":["จุดที่ต้องระวังเรื่องความต่อเนื่อง เช่น เสื้อผ้าเปลี่ยน แสงเปลี่ยน ฉากกระโดด"],
+ "audio":{"musicStyle":"แนวเพลงที่เข้ากับคลิปนี้ อธิบายเป็นลักษณะ ไม่ต้องระบุชื่อเพลงจริง","sfx":["เสียงประกอบที่ควรมี"],"voiceNote":"ข้อแนะนำการพากย์"},
+ "production":{"peopleNeeded":"ใช้คนกี่คนหน้ากล้องและหลังกล้อง","equipment":"อุปกรณ์ขั้นต่ำที่ต้องมี","location":"สถานที่ถ่าย","estimatedTime":"ใช้เวลาถ่ายประมาณเท่าไหร่"},
+ "captionSuggestion":"แคปชั่นที่ควรใช้ตอนโพสต์",
+ "riskCheck":"ตรวจว่าบทนี้มีคำพูดที่เสี่ยงผิดกฎแพลตฟอร์มไหม โดยเฉพาะการกล่าวอ้างสรรพคุณเกินจริง ถ้ามีให้บอกว่าต้องแก้คำไหนเป็นคำไหน ถ้าไม่มีให้ใส่ ไม่พบความเสี่ยง"
+}
+กติกาเข้มงวด:
+- hookFrames ต้องมี 6 เฟรม ครอบคลุม 3 วินาทีแรก
+- ต้องล็อกหน้าตาและเสียงของตัวละครไว้ชัดเจนใน cast แล้วอ้างถึงตัวละครเดิมทุกช็อต ห้ามสลับบทพูดหรือเปลี่ยนหน้าตากลางเรื่อง
+- ทุกช็อตต้องระบุอารมณ์ของบทพูด และการเชื่อมฉากต้องต่อเนื่องทางกายภาพ ห้ามกระโดดจากห้องน้ำไปโต๊ะเครื่องแป้งโดยไม่มีช็อตเชื่อม
+- ห้ามระบุชื่อเพลงจริงหรือศิลปินจริง ให้บอกเป็นลักษณะเพลงแทน เพราะเสี่ยงลิขสิทธิ์
+- riskCheck ต้องตรวจจริงจัง โดยเฉพาะสินค้าอาหารเสริมและความงาม ห้ามใช้คำว่า รักษา หาย ลดได้แน่นอน`,
+    },
+    {
+      key: 'ideas', label: 'คลังไอเดียคอนเทนต์', Icon: Layers, color: '#06B6D4',
       desc: 'ระบุช่องและแนว → AI คิดไอเดียคอนเทนต์พร้อมฮุกและมุมเล่า เก็บไว้ใช้ทั้งเดือน',
       action: 'plan',
       fields: [
@@ -1303,7 +1491,7 @@ function AutoResult({ data }) {
   );
 }
 
-function DeptTool({ tool, deptId, records, setRecords, showToast }) {
+function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
   const [vals, setVals] = useState({});
   const [imgs, setImgs] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -1352,12 +1540,50 @@ function DeptTool({ tool, deptId, records, setRecords, showToast }) {
     setFilling(false);
   }
 
+  // สร้างบริบทของแบรนด์จากโปรไฟล์องค์กรของผู้ใช้เอง — ข้อมูลนี้มาจากบัญชีที่ล็อกอินอยู่เท่านั้น
+  // จึงเป็นของแต่ละองค์กรโดยอัตโนมัติ ไม่มีทางปนกับองค์กรอื่น
+  function brandContext() {
+    const u = ctx?.user || {};
+    const org = u.org || {};
+    const lines = [];
+    if (org.companyName) lines.push(`ชื่อกิจการ: ${org.companyName}`);
+    if (org.businessDesc) lines.push(`ธุรกิจทำอะไร: ${org.businessDesc}`);
+    if (org.website) lines.push(`เว็บไซต์: ${org.website}`);
+    const chs = (ctx?.channels || []).map((c) => `${c.name}${c.platform ? ` (${c.platform})` : ''}${c.niche ? ` แนว${c.niche}` : ''}`);
+    if (chs.length) lines.push(`ช่อง/เพจที่ดูแล: ${chs.join(' · ')}`);
+    return lines.length ? lines.join('\n') : null;
+  }
+
+  // ชื่อคลิปที่เคยทำจริง ใช้กันไม่ให้ AI เสนอไอเดียซ้ำของเดิม
+  function pastClips(limit = 40) {
+    const fromHistory = (ctx?.history || []).flatMap((h) => Array.isArray(h.tasks) ? h.tasks : []);
+    const all = [...fromHistory, ...(ctx?.tasks || [])]
+      .map((t) => String(t?.label || '').trim())
+      .filter(Boolean);
+    return [...new Set(all)].slice(-limit);
+  }
+
   async function run() {
     const missing = (tool.fields || []).filter((f) => f.required && !String(vals[f.k] || '').trim());
     if (missing.length) { setErr(`กรุณากรอก: ${missing.map((m) => m.label).join(', ')}`); return; }
     if (tool.images && imgs.length === 0 && (tool.fields || []).length === 0) { setErr('กรุณาแนบรูปอย่างน้อย 1 รูป'); return; }
     setBusy(true); setErr('');
-    const body = (tool.fields || []).map((f) => `${f.label}: ${vals[f.k] || '-'}`).join('\n');
+    const parts = [];
+    if (tool.useBrand) {
+      const bc = brandContext();
+      parts.push(bc
+        ? `[ข้อมูลแบรนด์ของผู้ใช้ — ต้องอิงข้อมูลนี้เท่านั้น ห้ามเสนอสิ่งที่ไม่เกี่ยวกับธุรกิจนี้]\n${bc}`
+        : '[ยังไม่มีข้อมูลแบรนด์ในระบบ — ให้ถามกลับว่าต้องการให้อิงอะไร แทนที่จะเดาเอง]');
+    }
+    if (tool.useHistory) {
+      const past = pastClips();
+      parts.push(past.length
+        ? `[คลิปที่เคยทำไปแล้ว — ห้ามเสนอซ้ำหรือใกล้เคียงของเดิม]\n${past.join(' | ')}`
+        : '[ยังไม่มีประวัติคลิปเก่าในระบบ]');
+    }
+    const fieldBody = (tool.fields || []).map((f) => `${f.label}: ${vals[f.k] || '-'}`).join('\n');
+    if (fieldBody) parts.push(fieldBody);
+    const body = parts.join('\n\n');
     try {
       const text = await callClaude(tool.sys, body || 'วิเคราะห์จากภาพที่แนบมา',
         imgs.length ? imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })) : undefined, tool.action);
@@ -1452,7 +1678,7 @@ function DeptTool({ tool, deptId, records, setRecords, showToast }) {
   );
 }
 
-function DeptWorkspace({ dept, records, setRecords, showToast }) {
+function DeptWorkspace({ dept, records, setRecords, showToast, ctx }) {
   const tools = DEPT_TOOLS[dept.id] || [];
   const [active, setActive] = useState(tools[0]?.key || null);
   if (tools.length === 0) {
@@ -1472,7 +1698,7 @@ function DeptWorkspace({ dept, records, setRecords, showToast }) {
         </div>
         {deptRecords.length > 0 && <span className="font-mono text-2xs" style={{ color: C.muted }}>บันทึกไว้ {deptRecords.length} รายการ</span>}
       </div>
-      <DeptTool tool={tool} deptId={dept.id} records={records} setRecords={setRecords} showToast={showToast} />
+      <DeptTool tool={tool} deptId={dept.id} records={records} setRecords={setRecords} showToast={showToast} ctx={ctx} />
     </div>
   );
 }
@@ -1498,7 +1724,7 @@ function RoleFile({ role, index, accent }) {
   );
 }
 
-function DepartmentView({ dept, onBack, records, setRecords, showToast }) {
+function DepartmentView({ dept, onBack, records, setRecords, showToast, ctx }) {
   const Icon = dept.icon;
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-stamp">
@@ -1509,7 +1735,7 @@ function DepartmentView({ dept, onBack, records, setRecords, showToast }) {
         <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}><Bot size={14} style={{ color: dept.accent }} /><span className="font-body text-xs" style={{ color: C.text }}>{dept.manager}</span><span className="font-mono text-2xs" style={{ color: C.muted }}>· ดำเนินการโดย AI ภายใต้การกำกับของคุณ</span></div>
       </div>
       {/* เครื่องมือ AI ของแผนกนี้ — ใช้งานได้จริง เก็บผลไว้ดูย้อนหลังได้ */}
-      <DeptWorkspace dept={dept} records={records} setRecords={setRecords} showToast={showToast} />
+      <DeptWorkspace dept={dept} records={records} setRecords={setRecords} showToast={showToast} ctx={ctx} />
 
       <details className="mb-6">
         <summary className="font-mono text-2xs cursor-pointer mb-2" style={{ color: C.muted }}>ดูโครงสร้างตำแหน่งงานในแผนกนี้ ({dept.roles.length})</summary>
@@ -2162,6 +2388,16 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
     setBusy(false);
   }
 
+  const isDevUser = !!(user.isDeveloper || user.isOwner || user.role === 'dev');
+
+  async function devSkip() {
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/auth', { action: 'devSkipOnboarding' });
+    if (r.ok) { onUpdateUser(r.data.account); showToast && showToast('ข้ามขั้นตอนแนะนำแล้ว'); }
+    else setErr(r.data.error || 'ข้ามไม่สำเร็จ');
+    setBusy(false);
+  }
+
   async function finishTour() {
     setBusy(true);
     const r = await apiPost('/api/auth', { action: 'markTourSeen', version: TOUR_VERSION });
@@ -2282,6 +2518,14 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} ยอมรับและไปต่อ
           </button>
           {!allTicked && <p className="font-body text-xs text-center mt-2" style={{ color: C.muted }}>ต้องติ๊กยอมรับข้อ 1-3 ให้ครบก่อนจึงจะกดต่อได้</p>}
+          {isDevUser && (
+            <div className="mt-3 pt-3 text-center" style={{ borderTop: `1px solid ${C.border}` }}>
+              <button onClick={devSkip} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5" style={{ border: `1px solid ${C.violet}`, color: C.violet, opacity: busy ? 0.5 : 1 }}>
+                <Zap size={11} /> ข้ามทั้งหมด (ผู้พัฒนา)
+              </button>
+              <p className="font-body mt-1.5" style={{ fontSize: 10, color: C.muted }}>ปุ่มนี้เห็นเฉพาะบัญชีผู้พัฒนา ระบบจะบันทึกว่าเป็นการข้ามโดยผู้พัฒนา ไม่นับเป็นการยินยอมจริง</p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -2318,6 +2562,13 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
         </div>
 
         {err && <p className="font-mono text-2xs mb-2 text-center" style={{ color: C.red }}>{err}</p>}
+        {isDevUser && (
+          <div className="text-center mb-2">
+            <button onClick={devSkip} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5" style={{ border: `1px solid ${C.violet}`, color: C.violet, opacity: busy ? 0.5 : 1 }}>
+              <Zap size={11} /> ข้ามคู่มือ (ผู้พัฒนา)
+            </button>
+          </div>
+        )}
         <div className="flex gap-2">
           {slide > 0 && (
             <button onClick={() => setSlide((v) => v - 1)} className="font-mono text-xs px-4 py-3 rounded-xl shrink-0" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ย้อนกลับ</button>
@@ -6855,6 +7106,37 @@ function HealthCheckPanel({ user, channels, tasks, history, futureTasks, loadOk,
   );
 }
 
+// แผงเครื่องมือผู้พัฒนา — ใช้ทดสอบ flow ที่ผู้ใช้ใหม่จะเจอ
+function DevOnboardingPanel({ user, showToast, refreshMe }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const isDevUser = !!(user.isDeveloper || user.isOwner || user.role === 'dev');
+  if (!isDevUser) return null;
+
+  async function replay() {
+    if (!window.confirm('จะกลับไปหน้ายินยอมและคู่มืออีกครั้ง เพื่อดูว่าผู้ใช้ใหม่เจออะไร — ยืนยันไหม')) return;
+    setBusy(true); setMsg('');
+    const r = await apiPost('/api/auth', { action: 'resetMyOnboarding' });
+    if (r.ok) { showToast && showToast('รีเซ็ตแล้ว กำลังพากลับไปหน้าแรกของ flow'); refreshMe && refreshMe(); }
+    else setMsg(r.data.error || 'รีเซ็ตไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  const c = user.consent || {};
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.violet}44` }}>
+      <div className="flex items-center gap-2 mb-2"><Zap size={14} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>เครื่องมือผู้พัฒนา · หน้าต้อนรับผู้ใช้ใหม่</span></div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+        สถานะของคุณ: {c.at ? (c.devBypass ? 'ข้ามด้วยสิทธิ์ผู้พัฒนา' : `ยินยอมแล้ว (รุ่น ${c.version || '-'})`) : 'ยังไม่ได้ยินยอม'} · คู่มือ: {user.tourSeen ? `อ่านรุ่น ${user.tourSeen} แล้ว` : 'ยังไม่ได้อ่าน'}
+      </p>
+      <button onClick={replay} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1.5" style={{ border: `1px solid ${C.violet}`, color: C.violet, opacity: busy ? 0.5 : 1 }}>
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} ดูหน้าต้อนรับใหม่ (ทดสอบมุมผู้ใช้)
+      </button>
+      {msg && <p className="font-mono text-2xs mt-2" style={{ color: C.orange }}>{msg}</p>}
+    </div>
+  );
+}
+
 function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refreshMe, showToast, onFixOrphans, onBackupNow, trash, onRestoreTrash, onPurgeTrash, onEmptyTrash, channels, tasks, history, futureTasks, loadOk }) {
   const [importMsg, setImportMsg] = useState('');
   const [importing, setImporting] = useState(false);
@@ -6900,6 +7182,7 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
 
+      <DevOnboardingPanel user={user} showToast={showToast} refreshMe={refreshMe} />
       <OwnerConsole user={user} showToast={showToast} onFeaturesChanged={refreshMe} />
       <CompanyPanel user={user} showToast={showToast} />
       <TokenMeter tokens={tokens} />
@@ -8618,7 +8901,7 @@ export default function CompanyPortal() {
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork user={user} channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
-            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
+            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} ctx={{ user, channels, tasks, history }} />}
             {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} progressLogs={progressLogs} setProgressLogs={setProgressLogs} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
