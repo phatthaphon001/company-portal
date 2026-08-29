@@ -1989,6 +1989,19 @@ const CAL_SYS = `คุณคือผู้ช่วยวางแผนงา
 }
 กติกา: อ้างตัวเลขจริงเสมอ · ถ้าข้อมูลน้อยเกินไปให้บอกตรงๆ ใน headline`;
 
+const PLAN_AHEAD_SYS = `คุณคือผู้ช่วยวางแผนงานล่วงหน้าของทีมผลิตคอนเทนต์ หน้าที่คือเตือนล่วงหน้าไม่ให้งานชนกับธุระที่จดไว้
+คุณจะได้รับ: งานที่ต้องทำในแต่ละวันข้างหน้า + โน้ตธุระที่ผู้ใช้จดไว้ + วันที่ทำเครื่องหมายว่า "ไม่ว่าง"
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "headline":"สรุปสถานการณ์ข้างหน้า 1 ประโยค ตรงไปตรงมา",
+ "riskLevel":"ปลอดภัย|ต้องระวัง|เสี่ยงสูง",
+ "conflicts":[{"date":"YYYY-MM-DD","what":"วันนั้นมีธุระอะไรชนกับงานอะไร","impact":"ถ้าไม่ทำอะไรจะเกิดอะไรขึ้น"}],
+ "actions":[{"when":"ควรทำเมื่อไหร่ เช่น วันนี้ / พรุ่งนี้ / ก่อนวันที่ X","do":"ทำอะไรให้ชัดเจนเป็นรูปธรรม","why":"ทำไมต้องทำตอนนั้น"}],
+ "lightDays":["วันที่งานเบา เหมาะเอาไว้ทำงานล่วงหน้า พร้อมเหตุผล"],
+ "advice":"คำแนะนำหลัก 1 ข้อที่สำคัญที่สุด"
+}
+กติกา: อ้างวันที่และจำนวนงานจริงจากข้อมูลที่ให้มาเสมอ ห้ามสมมติวันหรือธุระที่ไม่มีในข้อมูล · ถ้าไม่มีธุระชนกันเลยให้บอกตรงๆ ว่าปลอดภัย ไม่ต้องหาปัญหาให้ · เน้นบอกว่า "ควรดันงานวันไหนมาทำก่อน" เป็นรูปธรรม`;
+
 const WEEKDAY_FULL = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
 
 // ---------- นาฬิกาเวลาโลก + วิเคราะห์เวลาโพสต์ข้ามประเทศ ----------
@@ -2181,7 +2194,7 @@ function WorldClockPostAdvisor({ channels }) {
   );
 }
 
-function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }) {
+function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks, notes, setNotes }) {
   const todayStr = todayDateStr();
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
@@ -2189,6 +2202,35 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }
   const [insight, setInsight] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
   const [err, setErr] = useState('');
+  const [noteDraft, setNoteDraft] = useState('');
+  const [planAhead, setPlanAhead] = useState(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planErr, setPlanErr] = useState('');
+
+  const noteMap = notes || {};
+  // โหลดโน้ตของวันที่เลือกมาใส่ช่องแก้ไข เมื่อเปลี่ยนวัน
+  useEffect(() => { setNoteDraft((noteMap[selectedDate] || {}).text || ''); }, [selectedDate, notes]);
+
+  function saveNote(dateStr, text, busy) {
+    setNotes((prev) => {
+      const next = { ...(prev || {}) };
+      const trimmed = String(text || '').trim();
+      const wasBusy = busy != null ? busy : (next[dateStr] || {}).busy || false;
+      if (!trimmed && !wasBusy) delete next[dateStr];
+      else next[dateStr] = { text: trimmed, busy: wasBusy, at: Date.now() };
+      return next;
+    });
+  }
+  function toggleBusy(dateStr) {
+    setNotes((prev) => {
+      const next = { ...(prev || {}) };
+      const cur = next[dateStr] || { text: '', busy: false };
+      const nextBusy = !cur.busy;
+      if (!cur.text && !nextBusy) delete next[dateStr];
+      else next[dateStr] = { ...cur, busy: nextBusy, at: Date.now() };
+      return next;
+    });
+  }
 
   // รวมข้อมูลทุกวัน: ประวัติ + วันนี้ + วันที่เตรียมล่วงหน้า
   const dayMap = {};
@@ -2283,6 +2325,35 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }
     setLoadingAi(false);
   }
 
+  async function runPlanAhead() {
+    setPlanLoading(true); setPlanErr(''); setPlanAhead(null);
+    // มองไปข้างหน้า 14 วันจากวันนี้
+    const upcoming = [];
+    for (let i = 0; i < 14; i++) {
+      const d = shiftDateStr(todayStr, i);
+      const v = dayMap[d];
+      const n = noteMap[d];
+      upcoming.push({
+        วันที่: d,
+        วัน: WEEKDAY_FULL[new Date(d + 'T00:00:00').getDay()],
+        งานทั้งหมด: v ? v.total : 0,
+        ทำเสร็จแล้ว: v ? v.done : 0,
+        ธุระที่จดไว้: n && n.text ? n.text : null,
+        ทำเครื่องหมายว่าไม่ว่าง: !!(n && n.busy),
+      });
+    }
+    const hasAnyNote = upcoming.some((u) => u.ธุระที่จดไว้ || u.ทำเครื่องหมายว่าไม่ว่าง);
+    if (!hasAnyNote) {
+      setPlanErr('ยังไม่มีโน้ตธุระในช่วง 14 วันข้างหน้า — จดธุระในปฏิทินก่อน แล้ว AI จะช่วยคำนวณว่าควรดันงานวันไหนมาทำก่อน');
+      setPlanLoading(false); return;
+    }
+    try {
+      const text = await callClaude(PLAN_AHEAD_SYS, `วันนี้คือ ${todayStr}\nตารางงานและธุระ 14 วันข้างหน้า:\n${JSON.stringify(upcoming)}`, undefined, 'planAhead');
+      setPlanAhead(parseJsonLoose(text));
+    } catch (e) { setPlanErr(e.message || 'วางแผนล่วงหน้าไม่สำเร็จ'); }
+    setPlanLoading(false);
+  }
+
   const sel = dayMap[selectedDate];
   const monthLabel = `${THAI_MONTHS[ym.m]} ${ym.y + 543}`;
   function shiftMonth(n) {
@@ -2352,6 +2423,9 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }
                       <span className="font-mono" style={{ fontSize: 8, color: col }}>{v.done}/{v.total}</span>
                     )}
                     {v?.kind === 'future' && <span className="absolute" style={{ top: 2, right: 3, width: 4, height: 4, borderRadius: 999, background: C.violet }} />}
+                    {noteMap[ds] && (
+                      <span className="absolute" title={noteMap[ds].busy ? 'ไม่ว่าง' : 'มีโน้ต'} style={{ bottom: 2, left: 3, width: 5, height: 5, borderRadius: 999, background: noteMap[ds].busy ? C.red : C.orange }} />
+                    )}
                   </button>
                 );
               })}
@@ -2361,6 +2435,7 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }
               {[
                 { c: C.emerald, l: 'ทำครบ' }, { c: C.orange, l: 'ทำบางส่วน' },
                 { c: C.red, l: 'ยังไม่ได้ทำ' }, { c: C.violet, l: 'เตรียมล่วงหน้า' }, { c: C.cyan, l: 'วันนี้' },
+                { c: C.orange, l: 'มีโน้ต' },
               ].map((x) => (
                 <span key={x.l} className="font-mono flex items-center gap-1" style={{ fontSize: 10, color: C.muted }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: x.c }} /> {x.l}
@@ -2433,6 +2508,87 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }
                   )
                 )}
               </>
+            )}
+          </div>
+
+          {/* โน้ต/ธุระของวันที่เลือก */}
+          <div className="p-4 rounded-2xl mt-4" style={{ background: C.panel, border: `1px solid ${(noteMap[selectedDate] || {}).busy ? C.red : C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5"><FileText size={13} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>โน้ต / ธุระวันนี้</span></div>
+              <button onClick={() => toggleBusy(selectedDate)} className="font-mono text-2xs px-2 py-1 rounded-lg shrink-0" style={{ color: (noteMap[selectedDate] || {}).busy ? '#fff' : C.muted, background: (noteMap[selectedDate] || {}).busy ? C.red : 'transparent', border: `1px solid ${(noteMap[selectedDate] || {}).busy ? C.red : C.border}` }}>
+                {(noteMap[selectedDate] || {}).busy ? 'ไม่ว่างวันนี้' : 'ทำเครื่องหมายไม่ว่าง'}
+              </button>
+            </div>
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              onBlur={() => saveNote(selectedDate, noteDraft)}
+              placeholder="เช่น ติดประชุมทั้งบ่าย / ไปต่างจังหวัด / วันหยุดยาว — จดไว้แล้ว AI จะช่วยคำนวณให้ทำงานล่วงหน้า"
+              rows={3}
+              className="w-full font-body text-xs p-2.5 rounded-xl outline-none resize-none"
+              style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }}
+            />
+            <p className="font-mono mt-1" style={{ fontSize: 9, color: C.muted }}>บันทึกอัตโนมัติเมื่อคลิกออกจากช่อง</p>
+          </div>
+
+          {/* AI วางแผนล่วงหน้า กันงานชนธุระ */}
+          <div className="p-4 rounded-2xl mt-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.orange}44` }}>
+            <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+              <div className="flex items-center gap-2"><AlertTriangle size={14} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>AI เตือนล่วงหน้า 14 วัน</span></div>
+              <button onClick={runPlanAhead} disabled={planLoading} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.orange, color: '#0A0A0F', opacity: planLoading ? 0.6 : 1 }}>
+                {planLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} คำนวณ
+              </button>
+            </div>
+            {planErr && <p className="font-body text-xs mb-2" style={{ color: C.muted }}>{planErr}</p>}
+            {!planAhead && !planLoading && !planErr && (
+              <p className="font-body text-xs" style={{ color: C.muted }}>จดธุระในปฏิทินไว้ก่อน แล้วกดคำนวณ — AI จะดูว่าวันไหนงานจะชนธุระ แล้วบอกว่าควรดันงานวันไหนมาทำก่อน</p>
+            )}
+            {planAhead && (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {planAhead.riskLevel && (
+                    <span className="font-mono text-2xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: planAhead.riskLevel === 'ปลอดภัย' ? C.emerald : planAhead.riskLevel === 'ต้องระวัง' ? C.orange : C.red, border: `1px solid ${planAhead.riskLevel === 'ปลอดภัย' ? C.emerald : planAhead.riskLevel === 'ต้องระวัง' ? C.orange : C.red}` }}>{planAhead.riskLevel}</span>
+                  )}
+                  <p className="font-body text-xs flex-1 min-w-[150px]" style={{ color: C.text }}>{planAhead.headline}</p>
+                </div>
+                {Array.isArray(planAhead.conflicts) && planAhead.conflicts.length > 0 && (
+                  <div className="space-y-1.5">
+                    {planAhead.conflicts.map((c, i) => (
+                      <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.red}`, border: `1px solid ${C.border}` }}>
+                        <div className="font-mono text-2xs" style={{ color: C.red }}>{c.date}</div>
+                        <div className="font-body text-xs" style={{ color: C.text }}>{c.what}</div>
+                        {c.impact && <div className="font-body text-xs" style={{ color: C.muted }}>→ {c.impact}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(planAhead.actions) && planAhead.actions.length > 0 && (
+                  <div>
+                    <div className="font-mono text-2xs mb-1.5" style={{ color: C.emerald }}>ต้องทำอะไรบ้าง</div>
+                    <div className="space-y-1">
+                      {planAhead.actions.map((a, i) => (
+                        <div key={i} className="p-2 rounded-lg" style={{ background: C.bgDeep }}>
+                          <span className="font-mono" style={{ fontSize: 10, color: C.cyan }}>{a.when}</span>
+                          <div className="font-body text-xs" style={{ color: C.text }}>{a.do}</div>
+                          {a.why && <div className="font-body text-xs" style={{ color: C.muted }}>{a.why}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {Array.isArray(planAhead.lightDays) && planAhead.lightDays.length > 0 && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>วันที่ว่างพอจะทำงานล่วงหน้า</div>
+                    {planAhead.lightDays.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+                  </div>
+                )}
+                {planAhead.advice && (
+                  <div className="p-2.5 rounded-xl" style={{ background: `${C.orange}12`, border: `1px solid ${C.orange}44` }}>
+                    <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>คำแนะนำหลัก</div>
+                    <p className="font-body text-xs" style={{ color: C.text }}>{planAhead.advice}</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -7219,6 +7375,7 @@ export default function CompanyPortal() {
   const [ads, setAds] = useState([]);           // ข้อมูลแคมเปญโฆษณาที่อ่านมาจากภาพ
   const [features, setFeatures] = useState(null); // ฟีเจอร์ที่เจ้าของระบบเปิดให้ใช้
   const [deptData, setDeptData] = useState([]);   // ผลงานจากเครื่องมือ AI ของแต่ละแผนก
+  const [calendarNotes, setCalendarNotes] = useState({}); // โน้ต/ธุระรายวันในปฏิทิน { 'YYYY-MM-DD': { text, busy } }
   const [userRole, setUserRole] = useState('staff'); // staff | manager | exec | dev
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
@@ -7317,7 +7474,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes, noteRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -7330,6 +7487,7 @@ export default function CompanyPortal() {
           api('/api/store?key=rivals'),
           api('/api/store?key=ads'),
           api('/api/store?key=deptData'),
+          api('/api/store?key=calendarNotes'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -7401,6 +7559,8 @@ export default function CompanyPortal() {
         setRivals(Array.isArray(rivalData.value) ? rivalData.value : []);
         setAds(Array.isArray(adData.value) ? adData.value : []);
         setDeptData(Array.isArray(deptD.value) ? deptD.value : []);
+        const noteVal = noteRes.data;
+        setCalendarNotes((noteVal.value && typeof noteVal.value === 'object' && !Array.isArray(noteVal.value)) ? noteVal.value : {});
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -7457,6 +7617,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'deptData', value: deptData }).catch(() => {});
   }, [deptData, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'calendarNotes', value: calendarNotes }).catch(() => {});
+  }, [calendarNotes, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -7665,7 +7829,7 @@ export default function CompanyPortal() {
             {stage === 'daily' && <DailyWork user={user} channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
-            {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
+            {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
