@@ -9,6 +9,7 @@ import {
   X, Upload, PieChart as PieChartIcon, Download, Undo2, Redo2,
   Target, Trash, RotateCcw, Activity, Search, Flame, Award, Gauge,
   Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight, Clock,
+  Layers, Building2, Zap, Shield, Check,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -2019,7 +2020,556 @@ const PROGRESS_SYS = `คุณคือผู้ตรวจผลงานค�
 - ถ้าภาพที่แนบมาอ่านตัวเลขไม่ได้เลย หรือไม่ใช่ภาพสถิติ ให้ตอบ verdict เป็น "ต่ำกว่าเป้า" แล้วเขียน verdictReason ว่าอ่านภาพไม่ได้ ขอภาพที่ชัดกว่านี้ ห้ามเดาผลลัพธ์
 - ถ้ามีหลายคลิปในภาพ ให้แยกออกมาทีละคลิปใน readNumbers`;
 
+// ---------- Onboarding: ยินยอม PDPA → กรอกโปรไฟล์ → คู่มือแนะนำการใช้งาน ----------
+// ขยับเลขนี้เมื่อแก้ข้อความยินยอม เพื่อให้ผู้ใช้เดิมต้องกดยอมรับใหม่ (ต้องตรงกับ CONSENT_VERSION ใน api/auth.js)
+const CONSENT_VERSION = 'v1-2026-08';
+// ขยับเลขนี้เมื่อเพิ่มฟีเจอร์ใหม่ ผู้ใช้เดิมจะเห็นหน้า "มีอะไรใหม่" อัตโนมัติ
+const TOUR_VERSION = 'v1';
+
+const OCCUPATION_OPTIONS = [
+  { k: 'employee', label: 'พนักงานบริษัท' },
+  { k: 'student', label: 'นักเรียน / นักศึกษา' },
+  { k: 'freelancer', label: 'ฟรีแลนซ์' },
+  { k: 'business_owner', label: 'เจ้าของกิจการ' },
+  { k: 'other', label: 'อื่นๆ' },
+];
+
+// เนื้อหาคู่มือ — เพิ่มฟีเจอร์ใหม่ให้เพิ่มการ์ดตรงนี้ แล้วขยับ TOUR_VERSION
+const TOUR_SLIDES = [
+  {
+    icon: Layers, color: '#3B82F6', title: 'หน้างานประจำวัน',
+    body: 'ศูนย์กลางการทำงานทุกวัน สร้างช่อง/เพจที่ดูแล แล้วระบบจะสร้างงานประจำวันให้อัตโนมัติ ติ๊กเสร็จทีละงาน งานที่ทำไม่ทันจะถูกยกไปวันถัดไปให้เอง',
+    tips: ['กดปุ่ม AI ในแต่ละงานเพื่อให้ช่วยคิดโครงเรื่องและสร้าง Prompt', 'ติ๊กงานเสร็จแล้วระบบจะบันทึกว่าใครเป็นคนทำ'],
+  },
+  {
+    icon: Calendar, color: '#06B6D4', title: 'ปฏิทินงาน',
+    body: 'ดูภาพรวมทั้งเดือนว่าวันไหนทำครบ วันไหนหลุด พร้อมนาฬิกาเวลาโลกสำหรับวางแผนโพสต์ข้ามประเทศ และปฏิทินวันสำคัญไทย/สากลล่วงหน้า 90 วัน',
+    tips: ['จดธุระในปฏิทินไว้ แล้วกด "AI เตือนล่วงหน้า" จะช่วยคำนวณว่าควรดันงานวันไหนมาทำก่อน', 'แคปสถิติคลิปมาให้ AI อ่านเพื่อติดตามความคืบหน้าได้'],
+  },
+  {
+    icon: Building2, color: '#8B5CF6', title: 'แผนกต่างๆ',
+    body: 'เครื่องมือ AI แยกตามแผนก ทั้งคอนเทนต์ วิเคราะห์ข้อมูล การตลาด ฝ่ายขาย และตรวจสอบคุณภาพ แต่ละแผนกมีเครื่องมือเฉพาะทางของตัวเอง',
+    tips: ['สิทธิ์การเข้าถึงแต่ละแผนกขึ้นกับระดับบัญชีของคุณ'],
+  },
+  {
+    icon: Activity, color: '#10B981', title: 'วิเคราะห์และสถิติ',
+    body: 'แนบภาพหน้าจอสถิติจากหลังบ้านแพลตฟอร์มต่างๆ ให้ AI อ่านตัวเลขและวิเคราะห์ให้ พร้อมเปรียบเทียบคู่แข่งและวางแผนกลยุทธ์',
+    tips: ['ยิ่งแนบภาพที่ชัดและครบ ผลวิเคราะห์จะยิ่งแม่น'],
+  },
+  {
+    icon: Zap, color: '#F59E0B', title: 'ระบบโทเค็น',
+    body: 'ทุกครั้งที่เรียกใช้ AI จะหักโทเค็นตามความหนักของงาน ถ้าใส่คีย์ Gemini ของคุณเองในหน้าตั้งค่า จะใช้ได้ไม่จำกัดและไม่ต้องรอคิวร่วมกับคนอื่น',
+    tips: ['คีย์ Gemini ขอฟรีได้ ใช้เวลาประมาณ 2 นาที', 'ดูโทเค็นคงเหลือได้ที่แถบด้านซ้าย'],
+  },
+  {
+    icon: Shield, color: '#EF4444', title: 'ความปลอดภัยและข้อมูล',
+    body: 'ข้อมูลขององค์กรคุณถูกแยกออกจากองค์กรอื่นอย่างสมบูรณ์ เพื่อนร่วมองค์กรเห็นข้อมูลส่วนกลางร่วมกัน แต่คนนอกองค์กรเข้าถึงไม่ได้',
+    tips: ['อย่าแชร์รหัสผ่านกับใคร', 'ถ้าสงสัยว่าบัญชีถูกใช้งานผิดปกติ ให้เปลี่ยนรหัสผ่านทันที — ระบบจะเตะอุปกรณ์อื่นออกให้'],
+  },
+];
+
+function ConsentDoc() {
+  return (
+    <div className="space-y-3 font-body" style={{ fontSize: 12, color: C.muted, lineHeight: 1.75 }}>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>1. ผู้ให้บริการและผู้ควบคุมข้อมูลส่วนบุคคล</div>
+        <p>ระบบ FORGE เป็นเครื่องมือบริหารงานผลิตคอนเทนต์ ผู้ให้บริการทำหน้าที่เป็นผู้ควบคุมข้อมูลส่วนบุคคลตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (PDPA) หากคุณอยู่ในเขตเศรษฐกิจยุโรป ผู้ให้บริการจะดำเนินการตามหลักการของ GDPR ประกอบด้วย ช่องทางติดต่อเรื่องข้อมูลส่วนบุคคลอยู่ในหน้าตั้งค่าของระบบ</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>2. ข้อมูลที่เก็บรวบรวม</div>
+        <p>• ข้อมูลบัญชี: ชื่อ ชื่อผู้ใช้ อีเมล รหัสผ่านที่เข้ารหัสแล้ว วันเดือนปีเกิด อาชีพ เบอร์ติดต่อ<br />
+        • ข้อมูลองค์กร (เฉพาะผู้สมัครในนามนิติบุคคล): ชื่อบริษัท เลขประจำตัวผู้เสียภาษี ที่อยู่ ที่ตั้งสำนักงาน/โกดัง ช่องทางติดต่อ รายละเอียดธุรกิจ ชื่อและวันเกิดของเจ้าของกิจการ<br />
+        • ข้อมูลการใช้งาน: หมายเลข IP ลายนิ้วมืออุปกรณ์อย่างง่าย เวลาเข้าใช้งาน หน้าที่เปิด และประวัติการเรียกใช้ AI<br />
+        • เนื้อหาที่คุณสร้างหรืออัปโหลด: งาน ช่อง โน้ต รูปภาพหน้าจอ และข้อความที่ส่งให้ระบบ AI ประมวลผล</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>3. วัตถุประสงค์และฐานทางกฎหมาย</div>
+        <p>• เพื่อให้บริการตามสัญญาการใช้งาน (ฐานสัญญา): สร้างบัญชี ยืนยันตัวตน บันทึกงานและผลลัพธ์<br />
+        • เพื่อความปลอดภัยของระบบ (ฐานประโยชน์อันชอบด้วยกฎหมาย): ตรวจจับการใช้งานผิดปกติ จำกัดการเรียกใช้ที่ถี่ผิดปกติ และป้องกันการสมัครซ้ำเพื่อเลี่ยงข้อจำกัด<br />
+        • เพื่อประมวลผลด้วยปัญญาประดิษฐ์ (ฐานความยินยอม): ส่งเนื้อหาที่คุณกรอกหรืออัปโหลดไปยังผู้ให้บริการ AI เพื่อสร้างผลลัพธ์ให้คุณ<br />
+        • เพื่อสื่อสารเรื่องบริการและข่าวสาร (ฐานความยินยอม เฉพาะกรณีที่คุณเลือก)</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>4. การเปิดเผยและการส่งข้อมูลไปต่างประเทศ</div>
+        <p>เมื่อคุณกดใช้ฟังก์ชัน AI ระบบจะส่งข้อความและรูปภาพที่เกี่ยวข้องไปยัง Google (Gemini API) ซึ่งประมวลผลบนเซิร์ฟเวอร์ในต่างประเทศ ระบบยังใช้ผู้ให้บริการภายนอกสำหรับฐานข้อมูล การส่งอีเมลยืนยันตัวตน และการโฮสต์เว็บไซต์ ซึ่งอาจอยู่นอกประเทศไทย <span style={{ color: C.text }}>กรุณาหลีกเลี่ยงการอัปโหลดข้อมูลที่มีความอ่อนไหวสูง เช่น เลขบัตรประชาชน ข้อมูลสุขภาพ หรือข้อมูลทางการเงินของบุคคลอื่น</span></p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>5. ระยะเวลาการเก็บรักษา</div>
+        <p>ข้อมูลบัญชีและเนื้อหาจะถูกเก็บตลอดระยะเวลาที่บัญชียังใช้งานอยู่ บันทึกกิจกรรมและข้อมูลความปลอดภัยจะถูกเก็บเท่าที่จำเป็นตามวัตถุประสงค์ เมื่อคุณขอลบบัญชี ข้อมูลจะถูกลบหรือทำให้ไม่สามารถระบุตัวบุคคลได้ เว้นแต่มีหน้าที่ต้องเก็บตามกฎหมาย</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>6. สิทธิของเจ้าของข้อมูลส่วนบุคคล</div>
+        <p>คุณมีสิทธิขอเข้าถึงและขอสำเนาข้อมูล ขอแก้ไขให้ถูกต้อง ขอลบหรือทำลาย ขอให้ระงับการใช้ ขอให้โอนย้ายข้อมูล คัดค้านการประมวลผล และถอนความยินยอมได้ตลอดเวลา การถอนความยินยอมไม่กระทบการประมวลผลที่ทำไปแล้วโดยชอบ แต่อาจทำให้ใช้ฟังก์ชัน AI ต่อไม่ได้ หากเห็นว่าการประมวลผลไม่ชอบด้วยกฎหมาย คุณมีสิทธิร้องเรียนต่อสำนักงานคณะกรรมการคุ้มครองข้อมูลส่วนบุคคล</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>7. ข้อกำหนดการใช้บริการโดยสรุป</div>
+        <p>• ห้ามใช้ระบบเพื่อสร้างเนื้อหาที่ผิดกฎหมาย ละเมิดลิขสิทธิ์ หลอกลวง หรือสร้างความเสียหายแก่ผู้อื่น<br />
+        • คุณเป็นผู้รับผิดชอบเนื้อหาที่สร้างขึ้นและการนำไปเผยแพร่ รวมถึงการปฏิบัติตามกฎของแพลตฟอร์มปลายทางและกฎหมายโฆษณาที่เกี่ยวข้อง<br />
+        • ผลลัพธ์จาก AI อาจคลาดเคลื่อนได้ ควรตรวจสอบก่อนนำไปใช้จริงเสมอ โดยเฉพาะข้อมูลตัวเลข ข้อมูลทางการแพทย์ และคำกล่าวอ้างสรรพคุณสินค้า<br />
+        • ห้ามแบ่งปันบัญชีให้ผู้อื่น และห้ามพยายามเข้าถึงข้อมูลขององค์กรอื่น</p>
+      </div>
+      <div>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.orange }}>8. ผู้เยาว์</div>
+        <p>หากคุณอายุต่ำกว่า 20 ปีบริบูรณ์ การให้ความยินยอมอาจต้องได้รับความเห็นชอบจากผู้ปกครองตามที่กฎหมายกำหนด กรุณาแจ้งผู้ปกครองก่อนใช้งานต่อ</p>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingFlow({ user, onUpdateUser, showToast }) {
+  const needConsent = !user.consent || user.consent.version !== CONSENT_VERSION;
+  const needProfile = !user.onboardedAt;
+  const [step, setStep] = useState(needConsent || needProfile ? 0 : 1);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const [c, setC] = useState({ terms: false, privacy: false, aiTransfer: false, marketing: false });
+  const [p, setP] = useState({
+    accountType: 'personal', occupation: 'employee',
+    birthDate: user.birthDate || '', displayName: user.name || '', phone: '',
+    companyName: '', taxId: '', address: '', warehouse: '', office: '',
+    orgPhone: '', orgEmail: '', facebook: '', line: '', website: '', businessDesc: '',
+    owners: [{ name: '', birthDate: '' }],
+  });
+  const [polishing, setPolishing] = useState(false);
+  const [slide, setSlide] = useState(0);
+
+  const allTicked = c.terms && c.privacy && c.aiTransfer;
+  const set = (k, v) => setP((s) => ({ ...s, [k]: v }));
+
+  async function polishDesc() {
+    if (!String(p.businessDesc).trim()) { setErr('พิมพ์รายละเอียดธุรกิจคร่าวๆ ก่อน แล้วให้ AI ช่วยเรียบเรียง'); return; }
+    setPolishing(true); setErr('');
+    try {
+      const sys = `คุณคือผู้ช่วยเรียบเรียงข้อความแนะนำธุรกิจให้อ่านเข้าใจง่ายและเป็นมืออาชีพ
+เขียนใหม่จากข้อความที่ผู้ใช้ให้มาเท่านั้น ห้ามเพิ่มข้อมูลที่เขาไม่ได้บอก ห้ามแต่งตัวเลขหรือรางวัลขึ้นเอง
+ตอบกลับเป็นข้อความล้วนอย่างเดียว ไม่ต้องมีหัวข้อหรือเครื่องหมายคำพูด ความยาวไม่เกิน 4 ประโยค`;
+      const text = await callClaude(sys, `เรียบเรียงข้อความนี้ให้ดีขึ้น:\n${p.businessDesc}`, undefined, 'other');
+      set('businessDesc', String(text).trim());
+    } catch (e) { setErr(e.message || 'เรียบเรียงไม่สำเร็จ'); }
+    setPolishing(false);
+  }
+
+  async function submit() {
+    if (!allTicked) { setErr('ต้องติ๊กยอมรับให้ครบทั้ง 3 ข้อก่อน'); return; }
+    if (!String(p.displayName).trim()) { setErr('กรุณากรอกชื่อ-นามสกุล'); return; }
+    if (!p.birthDate) { setErr('กรุณากรอกวันเดือนปีเกิด'); return; }
+    if (p.accountType === 'org' && !String(p.companyName).trim()) { setErr('กรุณากรอกชื่อบริษัท/องค์กร'); return; }
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/auth', { action: 'saveOnboarding', consent: c, profile: p });
+    if (r.ok) { onUpdateUser(r.data.account); setStep(1); }
+    else setErr(r.data.error || 'บันทึกไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  async function finishTour() {
+    setBusy(true);
+    const r = await apiPost('/api/auth', { action: 'markTourSeen', version: TOUR_VERSION });
+    if (r.ok) { onUpdateUser(r.data.account); showToast && showToast('เริ่มใช้งานได้เลย'); }
+    else setErr(r.data.error || 'บันทึกไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  const inputCls = 'w-full font-body text-xs px-2.5 py-2 rounded-xl outline-none';
+  const inputSty = { background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text };
+  const Field = ({ label, k, ph, type = 'text', full }) => (
+    <div className={full ? 'sm:col-span-2' : ''}>
+      <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>{label}</label>
+      <input type={type} value={p[k]} onChange={(e) => set(k, e.target.value)} placeholder={ph} className={inputCls} style={inputSty} />
+    </div>
+  );
+
+  // ---------- ขั้นที่ 0: ยินยอม + โปรไฟล์ ----------
+  if (step === 0) {
+    return (
+      <div className="min-h-screen py-8 px-4" style={{ background: C.bg }}>
+        <div className="max-w-2xl mx-auto anim-fade">
+          <div className="flex items-center gap-2 mb-1"><Shield size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>ขั้นตอนที่ 1 จาก 2</span></div>
+          <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>ข้อกำหนดและข้อมูลของคุณ</h2>
+          <p className="font-body text-xs mb-5" style={{ color: C.muted }}>อ่านและยอมรับให้ครบ 3 ข้อ พร้อมกรอกข้อมูลเบื้องต้น จึงจะเริ่มใช้งานได้</p>
+
+          <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เอกสารข้อกำหนดและนโยบายความเป็นส่วนตัว</div>
+            <div className="p-3 rounded-xl" style={{ background: C.bgDeep, maxHeight: 260, overflowY: 'auto' }}>
+              <ConsentDoc />
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl mb-4 space-y-2.5" style={{ background: C.panel, border: `1px solid ${allTicked ? C.emerald : C.orange}44` }}>
+            {[
+              { k: 'terms', label: 'ฉันได้อ่านและยอมรับข้อกำหนดการใช้บริการ', req: true },
+              { k: 'privacy', label: 'ฉันรับทราบนโยบายความเป็นส่วนตัว และยินยอมให้เก็บรวบรวมและประมวลผลข้อมูลส่วนบุคคลของฉันตามวัตถุประสงค์ที่ระบุไว้', req: true },
+              { k: 'aiTransfer', label: 'ฉันยินยอมให้ส่งข้อความและรูปภาพที่ฉันกรอกหรืออัปโหลด ไปประมวลผลกับผู้ให้บริการ AI ซึ่งอยู่ในต่างประเทศ', req: true },
+              { k: 'marketing', label: 'ยินดีรับข่าวสารและอัปเดตฟีเจอร์ใหม่ทางอีเมล (ไม่บังคับ)', req: false },
+            ].map((row) => (
+              <label key={row.k} className="flex items-start gap-2.5 cursor-pointer">
+                <input type="checkbox" checked={c[row.k]} onChange={(e) => setC((s) => ({ ...s, [row.k]: e.target.checked }))} className="mt-0.5 shrink-0" style={{ accentColor: C.blue, width: 15, height: 15 }} />
+                <span className="font-body text-xs" style={{ color: c[row.k] ? C.text : C.muted }}>
+                  {row.label}{row.req && <span style={{ color: C.red }}> *</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>ข้อมูลของคุณ</div>
+            <div className="flex gap-1.5 mb-3">
+              {[{ k: 'personal', label: 'บุคคลธรรมดา' }, { k: 'org', label: 'นิติบุคคล / องค์กร' }].map((t) => (
+                <button key={t.k} onClick={() => set('accountType', t.k)} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ color: p.accountType === t.k ? '#0A0A0F' : C.muted, background: p.accountType === t.k ? C.blue : 'transparent', border: `1px solid ${p.accountType === t.k ? C.blue : C.border}` }}>{t.label}</button>
+              ))}
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2.5 mb-3">
+              <Field label="ชื่อ-นามสกุล *" k="displayName" ph="ชื่อจริงของคุณ" />
+              <Field label="วันเดือนปีเกิด *" k="birthDate" type="date" />
+              <Field label="เบอร์ติดต่อ" k="phone" ph="08x-xxx-xxxx" />
+              <div>
+                <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>อาชีพ</label>
+                <select value={p.occupation} onChange={(e) => set('occupation', e.target.value)} className={inputCls} style={inputSty}>
+                  {OCCUPATION_OPTIONS.map((o) => <option key={o.k} value={o.k}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {p.accountType === 'org' && (
+              <div className="pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+                <div className="font-mono text-2xs mb-2.5" style={{ color: C.violet }}>ข้อมูลองค์กร</div>
+                <div className="grid sm:grid-cols-2 gap-2.5 mb-2.5">
+                  <Field label="ชื่อบริษัท/องค์กร *" k="companyName" ph="บริษัท ตัวอย่าง จำกัด" />
+                  <Field label="เลขประจำตัวผู้เสียภาษี" k="taxId" ph="13 หลัก" />
+                  <Field label="ที่อยู่จดทะเบียน" k="address" ph="ที่อยู่ตามหนังสือรับรอง" full />
+                  <Field label="ที่ตั้งสำนักงาน" k="office" ph="ถ้ามี" />
+                  <Field label="ที่ตั้งโกดังสินค้า" k="warehouse" ph="ถ้ามี" />
+                  <Field label="เบอร์ติดต่อองค์กร" k="orgPhone" ph="02-xxx-xxxx" />
+                  <Field label="อีเมลองค์กร" k="orgEmail" ph="contact@example.com" />
+                  <Field label="เพจ Facebook" k="facebook" ph="ลิงก์เพจ" />
+                  <Field label="LINE" k="line" ph="@lineid" />
+                  <Field label="เว็บไซต์" k="website" ph="https://" full />
+                </div>
+
+                <div className="mb-2.5">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-mono" style={{ fontSize: 9, color: C.muted }}>ธุรกิจของคุณทำอะไร</label>
+                    <button onClick={polishDesc} disabled={polishing} className="font-mono px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ fontSize: 9, border: `1px solid ${C.violet}`, color: C.violet, opacity: polishing ? 0.5 : 1 }}>
+                      {polishing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} ให้ AI ช่วยเรียบเรียง
+                    </button>
+                  </div>
+                  <textarea value={p.businessDesc} onChange={(e) => set('businessDesc', e.target.value)} rows={3} placeholder="เขียนคร่าวๆ ก็ได้ เช่น ขายอาหารเสริมผ่านติ๊กต๊อกและช้อปปี้ กลุ่มลูกค้าผู้หญิงอายุ 25-40" className={inputCls + ' resize-none'} style={inputSty} />
+                </div>
+
+                <div>
+                  <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>เจ้าของกิจการ</label>
+                  {p.owners.map((o, i) => (
+                    <div key={i} className="flex gap-1.5 mb-1.5">
+                      <input value={o.name} onChange={(e) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], name: e.target.value }; return { ...s, owners: ow }; })} placeholder={`ชื่อเจ้าของคนที่ ${i + 1}`} className={inputCls} style={inputSty} />
+                      <input type="date" value={o.birthDate} onChange={(e) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], birthDate: e.target.value }; return { ...s, owners: ow }; })} className={inputCls} style={{ ...inputSty, maxWidth: 150 }} />
+                      {p.owners.length > 1 && (
+                        <button onClick={() => setP((s) => ({ ...s, owners: s.owners.filter((_, x) => x !== i) }))} className="px-2 rounded-xl shrink-0" style={{ border: `1px solid ${C.border}`, color: C.muted }}><X size={12} /></button>
+                      )}
+                    </div>
+                  ))}
+                  {p.owners.length < 10 && (
+                    <button onClick={() => setP((s) => ({ ...s, owners: [...s.owners, { name: '', birthDate: '' }] }))} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+                      <Plus size={10} /> เพิ่มเจ้าของ
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {err && <p className="font-mono text-2xs mb-3" style={{ color: C.red }}>{err}</p>}
+          <button onClick={submit} disabled={busy || !allTicked} className="w-full font-mono text-xs py-3 rounded-xl flex items-center justify-center gap-1.5" style={{ background: allTicked ? C.blue : C.border, color: allTicked ? '#0A0A0F' : C.muted, opacity: busy ? 0.6 : 1, cursor: allTicked ? 'pointer' : 'not-allowed' }}>
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} ยอมรับและไปต่อ
+          </button>
+          {!allTicked && <p className="font-body text-xs text-center mt-2" style={{ color: C.muted }}>ต้องติ๊กยอมรับข้อ 1-3 ให้ครบก่อนจึงจะกดต่อได้</p>}
+        </div>
+      </div>
+    );
+  }
+
+  // ---------- ขั้นที่ 1: คู่มือแนะนำการใช้งาน ----------
+  const isReturning = !!user.tourSeen && user.tourSeen !== TOUR_VERSION;
+  const s = TOUR_SLIDES[slide];
+  const last = slide >= TOUR_SLIDES.length - 1;
+  return (
+    <div className="min-h-screen py-8 px-4 flex items-center" style={{ background: C.bg }}>
+      <div className="max-w-lg mx-auto w-full anim-fade">
+        <div className="flex items-center gap-2 mb-1"><Compass size={18} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>{isReturning ? 'มีอะไรใหม่' : 'ขั้นตอนที่ 2 จาก 2'}</span></div>
+        <h2 className="font-body text-xl mb-4" style={{ color: C.text }}>{isReturning ? 'ระบบมีการอัปเดต' : 'แนะนำการใช้งาน'}</h2>
+
+        <div className="p-5 rounded-2xl mb-3" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${s.color}44`, minHeight: 250 }}>
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="p-2 rounded-xl shrink-0" style={{ background: `${s.color}18` }}><s.icon size={20} style={{ color: s.color }} /></div>
+            <div className="font-body text-base" style={{ color: C.text }}>{s.title}</div>
+          </div>
+          <p className="font-body text-xs mb-3 leading-relaxed" style={{ color: C.muted }}>{s.body}</p>
+          {s.tips.map((t, i) => (
+            <div key={i} className="flex items-start gap-1.5 mb-1.5">
+              <span className="shrink-0 mt-0.5" style={{ color: s.color }}>▸</span>
+              <span className="font-body text-xs" style={{ color: C.text }}>{t}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-center gap-1.5 mb-4">
+          {TOUR_SLIDES.map((_, i) => (
+            <button key={i} onClick={() => setSlide(i)} style={{ width: i === slide ? 18 : 6, height: 6, borderRadius: 999, background: i === slide ? C.violet : C.border, transition: 'width .2s' }} />
+          ))}
+        </div>
+
+        {err && <p className="font-mono text-2xs mb-2 text-center" style={{ color: C.red }}>{err}</p>}
+        <div className="flex gap-2">
+          {slide > 0 && (
+            <button onClick={() => setSlide((v) => v - 1)} className="font-mono text-xs px-4 py-3 rounded-xl shrink-0" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ย้อนกลับ</button>
+          )}
+          {!last ? (
+            <button onClick={() => setSlide((v) => v + 1)} className="flex-1 font-mono text-xs py-3 rounded-xl flex items-center justify-center gap-1.5" style={{ background: C.violet, color: '#fff' }}>
+              ถัดไป <ArrowRight size={13} />
+            </button>
+          ) : (
+            <button onClick={finishTour} disabled={busy} className="flex-1 font-mono text-xs py-3 rounded-xl flex items-center justify-center gap-1.5" style={{ background: C.emerald, color: '#0A0A0F', opacity: busy ? 0.6 : 1 }}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} เข้าใจแล้ว เริ่มใช้งาน
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const WEEKDAY_FULL = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+
+// ---------- ปฏิทินวันสำคัญ ไทย / สากล / อีคอมเมิร์ซ ----------
+// วันที่ตายตัวทุกปี — คำนวณได้แน่นอน ไม่มีวันคลาดเคลื่อน
+const FIXED_DAYS = [
+  // ไทย
+  { m: 1, d: 1, name: 'วันขึ้นปีใหม่', cat: 'th' },
+  { m: 1, d: 16, name: 'วันครู', cat: 'th' },
+  { m: 4, d: 6, name: 'วันจักรี', cat: 'th' },
+  { m: 4, d: 13, name: 'สงกรานต์ (วันที่ 1)', cat: 'th' },
+  { m: 4, d: 14, name: 'สงกรานต์ · วันครอบครัว', cat: 'th' },
+  { m: 4, d: 15, name: 'สงกรานต์ (วันสุดท้าย)', cat: 'th' },
+  { m: 5, d: 1, name: 'วันแรงงานแห่งชาติ', cat: 'th' },
+  { m: 5, d: 4, name: 'วันฉัตรมงคล', cat: 'th' },
+  { m: 6, d: 3, name: 'วันเฉลิมฯ สมเด็จพระนางเจ้าฯ พระบรมราชินี', cat: 'th' },
+  { m: 7, d: 28, name: 'วันเฉลิมพระชนมพรรษา ร.10', cat: 'th' },
+  { m: 8, d: 12, name: 'วันแม่แห่งชาติ', cat: 'th' },
+  { m: 10, d: 13, name: 'วันคล้ายวันสวรรคต ร.9', cat: 'th' },
+  { m: 10, d: 23, name: 'วันปิยมหาราช', cat: 'th' },
+  { m: 12, d: 5, name: 'วันพ่อแห่งชาติ · วันชาติ', cat: 'th' },
+  { m: 12, d: 10, name: 'วันรัฐธรรมนูญ', cat: 'th' },
+  { m: 12, d: 31, name: 'วันสิ้นปี', cat: 'th' },
+  // สากล
+  { m: 2, d: 14, name: 'วันวาเลนไทน์', cat: 'intl' },
+  { m: 3, d: 8, name: 'วันสตรีสากล', cat: 'intl' },
+  { m: 4, d: 1, name: 'April Fools', cat: 'intl' },
+  { m: 4, d: 22, name: 'วันคุ้มครองโลก (Earth Day)', cat: 'intl' },
+  { m: 6, d: 5, name: 'วันสิ่งแวดล้อมโลก', cat: 'intl' },
+  { m: 10, d: 31, name: 'ฮาโลวีน', cat: 'intl' },
+  { m: 11, d: 11, name: 'Singles Day (11.11)', cat: 'intl' },
+  { m: 12, d: 24, name: 'คริสต์มาสอีฟ', cat: 'intl' },
+  { m: 12, d: 25, name: 'วันคริสต์มาส', cat: 'intl' },
+];
+
+// วันตามปฏิทินจันทรคติ — คำนวณสูตรตายตัวไม่ได้ ต้องอ้างตารางรายปี
+// ⚠ ตรุษจีนคำนวณทางดาราศาสตร์ แม่นยำสูง · วันพระใหญ่ของไทยอิงประกาศทางการ ควรยืนยันอีกครั้งก่อนวางแผนจริง
+const LUNAR_DAYS = {
+  '2026-02-17': { name: 'ตรุษจีน (ปีมะเมีย)', cat: 'intl', verify: false },
+  '2027-02-06': { name: 'ตรุษจีน (ปีมะแม)', cat: 'intl', verify: false },
+  '2028-01-26': { name: 'ตรุษจีน (ปีวอก)', cat: 'intl', verify: false },
+  '2026-03-03': { name: 'วันมาฆบูชา', cat: 'th', verify: true },
+  '2026-05-31': { name: 'วันวิสาขบูชา', cat: 'th', verify: true },
+  '2026-07-29': { name: 'วันอาสาฬหบูชา', cat: 'th', verify: true },
+  '2026-07-30': { name: 'วันเข้าพรรษา', cat: 'th', verify: true },
+  '2026-10-26': { name: 'วันออกพรรษา', cat: 'th', verify: true },
+  '2026-11-24': { name: 'วันลอยกระทง', cat: 'th', verify: true },
+};
+
+// หาวันที่ n ของ weekday ในเดือนนั้น (n เริ่มที่ 1)
+function nthWeekday(year, month0, weekday, n) {
+  const first = new Date(year, month0, 1).getDay();
+  const day = 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
+  return day > new Date(year, month0 + 1, 0).getDate() ? null : day;
+}
+
+// วันสำคัญที่ต้องคำนวณจากลำดับวันในสัปดาห์
+function computedDays(year) {
+  const out = [];
+  const pad = (n) => String(n).padStart(2, '0');
+  const childrenDay = nthWeekday(year, 0, 6, 2);        // วันเด็ก = เสาร์ที่ 2 ของ ม.ค.
+  if (childrenDay) out.push({ date: `${year}-01-${pad(childrenDay)}`, name: 'วันเด็กแห่งชาติ', cat: 'th' });
+  const motherIntl = nthWeekday(year, 4, 0, 2);          // Mother's Day สากล = อาทิตย์ที่ 2 ของ พ.ค.
+  if (motherIntl) out.push({ date: `${year}-05-${pad(motherIntl)}`, name: "Mother's Day (สากล)", cat: 'intl' });
+  const fatherIntl = nthWeekday(year, 5, 0, 3);          // Father's Day สากล = อาทิตย์ที่ 3 ของ มิ.ย.
+  if (fatherIntl) out.push({ date: `${year}-06-${pad(fatherIntl)}`, name: "Father's Day (สากล)", cat: 'intl' });
+  const thanks = nthWeekday(year, 10, 4, 4);             // Thanksgiving = พฤหัสที่ 4 ของ พ.ย.
+  if (thanks) {
+    out.push({ date: `${year}-11-${pad(thanks)}`, name: 'Thanksgiving', cat: 'intl' });
+    const bf = thanks + 1;
+    if (bf <= 30) out.push({ date: `${year}-11-${pad(bf)}`, name: 'Black Friday', cat: 'ecom' });
+    const cm = thanks + 4;
+    if (cm <= 30) out.push({ date: `${year}-11-${pad(cm)}`, name: 'Cyber Monday', cat: 'ecom' });
+  }
+  return out;
+}
+
+// วันขายของอีคอมเมิร์ซ — เลขเบิ้ล / วันเงินเดือนออก / กลางเดือน
+function ecomDays(year, month1) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const out = [];
+  const lastDay = new Date(year, month1, 0).getDate();
+  if (month1 <= lastDay) out.push({ date: `${year}-${pad(month1)}-${pad(month1)}`, name: `Double Day ${month1}.${month1}`, cat: 'ecom' });
+  if (15 <= lastDay) out.push({ date: `${year}-${pad(month1)}-15`, name: 'Mid-Month Sale', cat: 'ecom' });
+  if (25 <= lastDay) out.push({ date: `${year}-${pad(month1)}-25`, name: 'Payday Sale (เงินเดือนออก)', cat: 'ecom' });
+  return out;
+}
+
+// รวมวันสำคัญทั้งหมดในช่วงวันที่ที่กำหนด
+function importantDaysBetween(fromStr, toStr) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const from = new Date(fromStr + 'T00:00:00');
+  const to = new Date(toStr + 'T00:00:00');
+  const map = {};
+  const push = (date, item) => {
+    if (date < fromStr || date > toStr) return;
+    if (!map[date]) map[date] = [];
+    if (!map[date].some((x) => x.name === item.name)) map[date].push(item);
+  };
+  const years = new Set([from.getFullYear(), to.getFullYear()]);
+  for (const y of years) {
+    FIXED_DAYS.forEach((h) => push(`${y}-${pad(h.m)}-${pad(h.d)}`, { name: h.name, cat: h.cat }));
+    computedDays(y).forEach((h) => push(h.date, { name: h.name, cat: h.cat }));
+    for (let m = 1; m <= 12; m++) ecomDays(y, m).forEach((h) => push(h.date, { name: h.name, cat: h.cat }));
+  }
+  Object.entries(LUNAR_DAYS).forEach(([date, h]) => push(date, { name: h.name, cat: h.cat, verify: h.verify }));
+  return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => ({ date, items }));
+}
+
+const HOLIDAY_IDEA_SYS = `คุณคือครีเอทีฟคอนเทนต์ที่คิดไอเดียคลิปสำหรับวันสำคัญ ให้ตรงกับช่องและสินค้าของผู้ใช้เท่านั้น
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "angle":"มุมที่ควรเล่นสำหรับวันนี้ อธิบายสั้นๆ ว่าทำไมถึงเหมาะกับช่องนี้",
+ "ideas":[{"title":"ชื่อคลิปที่ใช้ได้จริง","hook":"3 วินาทีแรกพูดหรือเห็นอะไร ต้องเจาะจงเป็นรูปธรรม","format":"รูปแบบคลิป เช่น พากย์เสียง/ถ่ายจริง/ตัดต่อภาพนิ่ง","why":"ทำไมไอเดียนี้ถึงเวิร์กกับวันนี้และกับช่องนี้"}],
+ "prepDays":"ควรเริ่มเตรียมกี่วันก่อนถึงวันจริง และเพราะอะไร",
+ "caution":"ข้อควรระวังสำหรับวันนี้ เช่น วันที่มีความอ่อนไหวทางศาสนาหรือการไว้อาลัย ห้ามเล่นมุกหรือขายของแบบไหน ถ้าไม่มีข้อควรระวังให้ใส่ -"
+}
+กติกา: คิดไอเดีย 3 อัน · ต้องอิงกับช่อง/สินค้าที่ให้มาเท่านั้น ห้ามเสนอไอเดียที่ไม่เกี่ยวกับสินค้าของเขา · ถ้าเป็นวันไว้อาลัยหรือวันทางศาสนาต้องเตือนเรื่องความเหมาะสมเสมอ ห้ามเสนอมุกตลกหรือการลดราคาแบบครึกครื้นในวันแบบนั้น`;
+
+function ImportantDaysPanel({ channels, notes }) {
+  const todayStr = todayDateStr();
+  const [filter, setFilter] = useState('all');
+  const [picked, setPicked] = useState(null);
+  const [ideas, setIdeas] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const rangeEnd = shiftDateStr(todayStr, 90);
+  const all = importantDaysBetween(todayStr, rangeEnd);
+  const rows = all
+    .map((r) => ({ ...r, items: r.items.filter((i) => filter === 'all' || i.cat === filter) }))
+    .filter((r) => r.items.length > 0)
+    .slice(0, 24);
+
+  const CATS = [
+    { k: 'all', label: 'ทั้งหมด', color: C.blue },
+    { k: 'th', label: 'ไทย', color: C.orange },
+    { k: 'intl', label: 'สากล', color: C.cyan },
+    { k: 'ecom', label: 'ขายของ', color: C.emerald },
+  ];
+  const catColor = (c) => c === 'th' ? C.orange : c === 'intl' ? C.cyan : C.emerald;
+
+  async function runIdeas(date, item) {
+    setBusy(true); setErr(''); setIdeas(null); setPicked(`${date}|${item.name}`);
+    const daysLeft = Math.round((new Date(date + 'T00:00:00') - new Date(todayStr + 'T00:00:00')) / 86400000);
+    const body = [
+      `วันสำคัญ: ${item.name}`,
+      `วันที่: ${date} (อีก ${daysLeft} วัน)`,
+      `ช่อง/เพจที่ดูแล: ${channels.map((c) => `${c.name}${c.niche ? ` (${c.niche})` : ''}`).join(', ') || 'ยังไม่ได้ตั้งค่าช่อง'}`,
+      `ธุระที่จดไว้ช่วงนั้น: ${(notes || {})[date]?.text || 'ไม่มี'}`,
+    ].join('\n');
+    try {
+      const text = await callClaude(HOLIDAY_IDEA_SYS, body, undefined, 'holidayIdeas');
+      setIdeas(parseJsonLoose(text));
+    } catch (e) { setErr(e.message || 'คิดไอเดียไม่สำเร็จ'); }
+    setBusy(false);
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.orange}44` }}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="flex items-center gap-2"><Award size={14} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>วันสำคัญ 90 วันข้างหน้า</span></div>
+        <div className="flex gap-1">
+          {CATS.map((c) => (
+            <button key={c.k} onClick={() => setFilter(c.k)} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ color: filter === c.k ? '#0A0A0F' : C.muted, background: filter === c.k ? c.color : 'transparent', border: `1px solid ${filter === c.k ? c.color : C.border}` }}>{c.label}</button>
+          ))}
+        </div>
+      </div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>กดปุ่ม AI ข้างวันที่ เพื่อให้ช่วยคิดไอเดียคลิปที่ตรงกับช่องของคุณสำหรับวันนั้น</p>
+
+      <div className="space-y-1.5 mb-3" style={{ maxHeight: 260, overflowY: 'auto' }}>
+        {rows.length === 0 && <p className="font-body text-xs" style={{ color: C.muted }}>ไม่มีวันสำคัญในหมวดนี้ช่วง 90 วันข้างหน้า</p>}
+        {rows.map((r) => {
+          const daysLeft = Math.round((new Date(r.date + 'T00:00:00') - new Date(todayStr + 'T00:00:00')) / 86400000);
+          return (
+            <div key={r.date} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="font-mono text-2xs shrink-0" style={{ color: C.blue }}>{r.date.slice(5)}</span>
+                <span className="font-mono shrink-0" style={{ fontSize: 9, color: daysLeft <= 7 ? C.orange : C.muted }}>
+                  {daysLeft === 0 ? 'วันนี้' : `อีก ${daysLeft} วัน`}
+                </span>
+              </div>
+              {r.items.map((it, i) => (
+                <div key={i} className="flex items-center gap-2 py-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: catColor(it.cat) }} />
+                  <span className="font-body text-xs flex-1 min-w-0" style={{ color: C.text }}>
+                    {it.name}
+                    {it.verify && <span title="วันตามปฏิทินจันทรคติ ควรตรวจสอบกับประกาศทางการอีกครั้ง" style={{ color: C.orange }}> ⚠</span>}
+                  </span>
+                  <button onClick={() => runIdeas(r.date, it)} disabled={busy} className="font-mono shrink-0 px-2 py-0.5 rounded-lg flex items-center gap-1" style={{ fontSize: 9, border: `1px solid ${C.violet}`, color: C.violet, opacity: busy ? 0.5 : 1 }}>
+                    {busy && picked === `${r.date}|${it.name}` ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} ไอเดีย
+                  </button>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="font-body mb-3" style={{ fontSize: 10, color: C.muted }}>
+        ⚠ วันที่มีเครื่องหมายเตือนคือวันตามปฏิทินจันทรคติ (วันพระใหญ่ ลอยกระทง) ระบบอ้างจากตารางที่ฝังไว้ ควรตรวจสอบกับประกาศทางการอีกครั้งก่อนวางแผนจริง · วันสำคัญแบบตายตัวและวันขายของคำนวณอัตโนมัติ ไม่คลาดเคลื่อน
+      </p>
+
+      {err && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{err}</p>}
+      {ideas && (
+        <div className="space-y-2.5 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs" style={{ color: C.violet }}>ไอเดียสำหรับ {String(picked || '').split('|')[1]}</div>
+          {ideas.angle && <p className="font-body text-xs" style={{ color: C.text }}>{ideas.angle}</p>}
+          {Array.isArray(ideas.ideas) && ideas.ideas.map((d, i) => (
+            <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+              <div className="font-body text-xs mb-1" style={{ color: C.text }}>{i + 1}. {d.title}</div>
+              <div className="font-body text-xs" style={{ color: C.cyan }}>ฮุก: <span style={{ color: C.muted }}>{d.hook}</span></div>
+              {d.format && <div className="font-body text-xs" style={{ color: C.muted }}>รูปแบบ: {d.format}</div>}
+              {d.why && <div className="font-body text-xs" style={{ color: C.muted }}>{d.why}</div>}
+            </div>
+          ))}
+          {ideas.prepDays && (
+            <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+              <span className="font-mono text-2xs" style={{ color: C.emerald }}>ควรเริ่มเตรียม: </span>
+              <span className="font-body text-xs" style={{ color: C.text }}>{ideas.prepDays}</span>
+            </div>
+          )}
+          {ideas.caution && ideas.caution !== '-' && (
+            <div className="p-2.5 rounded-xl" style={{ background: `${C.red}12`, border: `1px solid ${C.red}44` }}>
+              <span className="font-mono text-2xs" style={{ color: C.red }}>ข้อควรระวัง: </span>
+              <span className="font-body text-xs" style={{ color: C.text }}>{ideas.caution}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ---------- นาฬิกาเวลาโลก + วิเคราะห์เวลาโพสต์ข้ามประเทศ ----------
 const WORLD_CLOCK_COUNTRIES = [
@@ -2882,6 +3432,9 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks, 
 
       {/* ติดตามความคืบหน้า — ให้ AI อ่านสถิติคลิปจากภาพหน้าจอ */}
       <ProgressTracker dayMap={dayMap} channels={channels} logs={progressLogs} setLogs={setProgressLogs} user={user} />
+
+      {/* วันสำคัญไทย/สากล + AI คิดไอเดียคลิป */}
+      <ImportantDaysPanel channels={channels} notes={notes} />
 
       {/* แนวโน้มรายวันทั้งเดือน */}
       {dailyTrend.length > 1 && (
@@ -8015,6 +8568,29 @@ export default function CompanyPortal() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: C.bg }}>
         <Loader2 size={28} className="animate-spin" style={{ color: C.blue }} />
+      </div>
+    );
+  }
+
+  // ---- ต้องยินยอมและอ่านคู่มือก่อนถึงจะเข้าใช้งานได้ ----
+  // ถ้าขยับ CONSENT_VERSION หรือ TOUR_VERSION ผู้ใช้เดิมจะถูกพามาหน้านี้อีกครั้งโดยอัตโนมัติ
+  const needsOnboarding = user && (
+    !user.consent || user.consent.version !== CONSENT_VERSION || !user.onboardedAt || user.tourSeen !== TOUR_VERSION
+  );
+  if (user && dataLoaded && needsOnboarding) {
+    return (
+      <div className="min-h-screen font-body" style={{ background: C.bg }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+          .font-display{font-family:'Space Grotesk','IBM Plex Sans Thai',sans-serif;}
+          .font-body{font-family:'IBM Plex Sans Thai','Space Grotesk',sans-serif;}
+          .font-mono{font-family:'IBM Plex Mono',monospace;}
+          .text-2xs{font-size:10px; line-height:1rem;}
+          @keyframes fadeIn{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+          .anim-fade{animation:fadeIn 0.35s ease-out;}
+          @media (prefers-reduced-motion: reduce){ .anim-fade { animation: none; } }
+        `}</style>
+        <OnboardingFlow user={user} onUpdateUser={setUser} showToast={showToast} />
       </div>
     );
   }
