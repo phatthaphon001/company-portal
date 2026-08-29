@@ -2002,6 +2002,23 @@ const PLAN_AHEAD_SYS = `คุณคือผู้ช่วยวางแผ�
 }
 กติกา: อ้างวันที่และจำนวนงานจริงจากข้อมูลที่ให้มาเสมอ ห้ามสมมติวันหรือธุระที่ไม่มีในข้อมูล · ถ้าไม่มีธุระชนกันเลยให้บอกตรงๆ ว่าปลอดภัย ไม่ต้องหาปัญหาให้ · เน้นบอกว่า "ควรดันงานวันไหนมาทำก่อน" เป็นรูปธรรม`;
 
+const PROGRESS_SYS = `คุณคือผู้ตรวจผลงานคอนเทนต์ที่เข้มงวดและตรงไปตรงมา อ่านตัวเลขจากภาพหน้าจอสถิติที่แนบมา แล้วประเมินผลงานของวันนั้น
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "readNumbers":[{"clip":"ชื่อคลิปหรือคำอธิบายสั้นๆ ที่เห็นในภาพ","platform":"แพลตฟอร์มที่เห็นในภาพ ถ้าไม่เห็นให้ใส่ ไม่ระบุ","views":"ยอดวิวที่อ่านได้ ถ้าไม่เห็นใส่ -","likes":"-","comments":"-","shares":"-","watchTime":"เวลาดูเฉลี่ย/อัตราดูจบ ถ้าเห็น"}],
+ "verdict":"ดีมาก|ดี|พอใช้|ต่ำกว่าเป้า",
+ "verdictReason":"อธิบายด้วยตัวเลขจริงที่อ่านได้เท่านั้น ว่าทำไมถึงตัดสินแบบนี้",
+ "compareLast":"เทียบกับครั้งก่อนดีขึ้นหรือแย่ลงอย่างไร ใช้ตัวเลขเทียบ ถ้าไม่มีข้อมูลครั้งก่อนให้ใส่ ยังไม่มีข้อมูลเทียบ",
+ "whatWorked":["สิ่งที่ได้ผล อ้างตัวเลขประกอบ"],
+ "whatToFix":[{"issue":"ปัญหาที่เห็นจากตัวเลข","fix":"แก้ยังไงให้เป็นรูปธรรม ทำได้จริงพรุ่งนี้"}],
+ "nextAction":"สิ่งที่ควรทำต่อวันพรุ่งนี้ ชัดเจนเป็นรูปธรรม 1 อย่าง"
+}
+กติกาเข้มงวด:
+- ห้ามแต่งตัวเลขขึ้นเองเด็ดขาด อ่านได้เท่าไหร่ใส่เท่านั้น อ่านไม่ออกใส่ "-"
+- ห้ามเขียนคำแนะนำกว้างๆ แบบ "ควรทำคอนเทนต์ให้ดีขึ้น" หรือ "ควรโพสต์สม่ำเสมอ" — ต้องบอกเป็นรูปธรรมว่าทำอะไร เช่น "3 วินาทีแรกตอนนี้เป็นภาพนิ่ง ให้เปลี่ยนเป็นภาพเคลื่อนไหวหรือคำถาม"
+- ถ้าภาพที่แนบมาอ่านตัวเลขไม่ได้เลย หรือไม่ใช่ภาพสถิติ ให้ตอบ verdict เป็น "ต่ำกว่าเป้า" แล้วเขียน verdictReason ว่าอ่านภาพไม่ได้ ขอภาพที่ชัดกว่านี้ ห้ามเดาผลลัพธ์
+- ถ้ามีหลายคลิปในภาพ ให้แยกออกมาทีละคลิปใน readNumbers`;
+
 const WEEKDAY_FULL = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
 
 // ---------- นาฬิกาเวลาโลก + วิเคราะห์เวลาโพสต์ข้ามประเทศ ----------
@@ -2194,7 +2211,194 @@ function WorldClockPostAdvisor({ channels }) {
   );
 }
 
-function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks, notes, setNotes }) {
+// ---------- ติดตามความคืบหน้า: แคปสถิติคลิปมาให้ AI อ่านและประเมิน ----------
+function ProgressTracker({ dayMap, channels, logs, setLogs, user }) {
+  const todayStr = todayDateStr();
+  const [reviewDate, setReviewDate] = useState(shiftDateStr(todayStr, -1)); // ค่าเริ่มต้น = เมื่อวาน
+  const [imgs, setImgs] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [openId, setOpenId] = useState(null);
+
+  const allLogs = Array.isArray(logs) ? logs : [];
+  const dateLogs = allLogs.filter((l) => l.date === reviewDate).sort((a, b) => b.at - a.at);
+  const active = allLogs.find((l) => l.id === openId) || dateLogs[0] || null;
+  const recent = allLogs.slice().sort((a, b) => b.at - a.at).slice(0, 8);
+
+  async function addFiles(files) {
+    const arr = Array.from(files || []).filter((f) => f.type.startsWith('image/')).slice(0, 6);
+    if (arr.length === 0) return;
+    const out = await Promise.all(arr.map(async (f) => {
+      const base64 = await fileToBase64(f);
+      const mimeType = f.type || 'image/jpeg';
+      return { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, mimeType, base64, dataUrl: `data:${mimeType};base64,${base64}` };
+    }));
+    setImgs((p) => [...p, ...out].slice(0, 6));
+  }
+
+  async function runReview() {
+    if (imgs.length === 0) { setErr('แนบภาพหน้าจอสถิติของคลิปก่อน แล้วค่อยกดประเมิน'); return; }
+    setBusy(true); setErr('');
+    const v = dayMap[reviewDate];
+    const planned = v ? v.tasks.map((t) => ({
+      งาน: t.label,
+      ช่อง: (channels.find((c) => c.id === t.channelId) || {}).name || '-',
+      ทำเสร็จ: !!t.done,
+    })) : [];
+    // ผลครั้งก่อนของช่วงเดียวกัน ให้ AI เทียบว่าดีขึ้นหรือแย่ลง
+    const prev = allLogs.filter((l) => l.date < reviewDate).sort((a, b) => b.at - a.at)[0];
+    const prevSummary = prev ? { วันที่: prev.date, ผลตรวจ: prev.data?.verdict, ตัวเลขที่อ่านได้: prev.data?.readNumbers } : null;
+    const body = [
+      `วันที่ประเมิน: ${reviewDate} (${WEEKDAY_FULL[new Date(reviewDate + 'T00:00:00').getDay()]})`,
+      `งานที่วางไว้วันนั้น: ${planned.length ? JSON.stringify(planned) : 'ไม่มีบันทึกงานของวันนั้น'}`,
+      `ผลการประเมินครั้งก่อน: ${prevSummary ? JSON.stringify(prevSummary) : 'ยังไม่มี'}`,
+      'อ่านตัวเลขจากภาพหน้าจอที่แนบมาแล้วประเมินตามรูปแบบที่กำหนด',
+    ].join('\n');
+    try {
+      const text = await callClaude(PROGRESS_SYS, body, imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })), 'progressReview');
+      const data = parseJsonLoose(text);
+      // ไม่เก็บรูปลงฐานข้อมูล — เก็บแค่ผลที่อ่านได้ เพื่อไม่ให้ข้อมูลบวมจนบันทึกไม่ผ่าน
+      const rec = { id: `${Date.now()}`, at: Date.now(), date: reviewDate, imageCount: imgs.length, by: user?.email || '', data };
+      setLogs((prevLogs) => [...(Array.isArray(prevLogs) ? prevLogs : []), rec].slice(-120));
+      setOpenId(rec.id);
+      setImgs([]);
+    } catch (e) { setErr(e.message || 'ประเมินไม่สำเร็จ'); }
+    setBusy(false);
+  }
+
+  const vColor = (v) => v === 'ดีมาก' ? C.emerald : v === 'ดี' ? C.cyan : v === 'พอใช้' ? C.orange : C.red;
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.emerald}44` }}>
+      <div className="flex items-center gap-2 mb-1"><Activity size={14} style={{ color: C.emerald }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.emerald }}>ติดตามความคืบหน้า · ให้ AI อ่านสถิติคลิป</span></div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>แคปหน้าจอสถิติของคลิป (ยอดวิว ไลก์ คอมเมนต์ อัตราดูจบ) แล้วให้ AI อ่านตัวเลขจริงมาประเมินว่าวันนั้นเป็นยังไง ควรแก้อะไรต่อ</p>
+
+      <div className="flex flex-wrap items-end gap-2.5 mb-3">
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>ประเมินผลของวันที่</label>
+          <input type="date" value={reviewDate} max={todayStr} onChange={(e) => { setReviewDate(e.target.value); setOpenId(null); }} className="font-mono text-xs px-2 py-1.5 rounded-lg outline-none" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }} />
+        </div>
+        <div className="flex gap-1.5">
+          <button onClick={() => { setReviewDate(shiftDateStr(todayStr, -1)); setOpenId(null); }} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>เมื่อวาน</button>
+          <button onClick={() => { setReviewDate(todayStr); setOpenId(null); }} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>วันนี้</button>
+        </div>
+      </div>
+
+      <div
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+        className="p-3.5 rounded-xl mb-2.5 text-center"
+        style={{ background: C.bgDeep, border: `1.5px dashed ${C.border}` }}
+      >
+        <Upload size={18} style={{ color: C.muted }} className="mx-auto mb-1.5" />
+        <p className="font-body text-xs mb-2" style={{ color: C.muted }}>ลากภาพหน้าจอสถิติมาวาง หรือกดเลือก (สูงสุด 6 รูป)</p>
+        <label className="inline-flex font-mono text-2xs px-3 py-1.5 rounded-lg cursor-pointer items-center gap-1.5" style={{ background: C.emerald, color: '#0A0A0F' }}>
+          <Upload size={11} /> เลือกรูป
+          <input type="file" accept="image/*" multiple onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} className="hidden" />
+        </label>
+        {imgs.length > 0 && (
+          <div className="grid grid-cols-6 gap-1.5 mt-2.5">
+            {imgs.map((im) => (
+              <div key={im.id} className="relative rounded-lg overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                <img src={im.dataUrl} alt="" className="w-full object-cover" style={{ height: 46 }} />
+                <button onClick={() => setImgs((p) => p.filter((x) => x.id !== im.id))} className="absolute top-0.5 right-0.5 rounded-full p-0.5" style={{ background: 'rgba(0,0,0,.7)', color: '#fff' }}><X size={9} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <button onClick={runReview} disabled={busy} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1" style={{ background: C.emerald, color: '#0A0A0F', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} ให้ AI ประเมินผล
+        </button>
+        {dateLogs.length > 0 && <span className="font-mono text-2xs" style={{ color: C.muted }}>วันนี้ประเมินไปแล้ว {dateLogs.length} ครั้ง</span>}
+      </div>
+      {err && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{err}</p>}
+
+      {active && active.data && (
+        <div className="space-y-2.5 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-2xs px-2.5 py-1 rounded-lg shrink-0" style={{ color: vColor(active.data.verdict), border: `1px solid ${vColor(active.data.verdict)}` }}>{active.data.verdict}</span>
+            <span className="font-mono text-2xs" style={{ color: C.muted }}>ผลของ {active.date} · อ่านจาก {active.imageCount} รูป</span>
+          </div>
+          {active.data.verdictReason && <p className="font-body text-xs" style={{ color: C.text }}>{active.data.verdictReason}</p>}
+
+          {Array.isArray(active.data.readNumbers) && active.data.readNumbers.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full" style={{ fontSize: 11 }}>
+                <thead>
+                  <tr style={{ color: C.muted }}>
+                    <th className="font-mono text-left py-1 pr-2" style={{ fontWeight: 400 }}>คลิป</th>
+                    <th className="font-mono text-right py-1 px-1.5" style={{ fontWeight: 400 }}>วิว</th>
+                    <th className="font-mono text-right py-1 px-1.5" style={{ fontWeight: 400 }}>ไลก์</th>
+                    <th className="font-mono text-right py-1 px-1.5" style={{ fontWeight: 400 }}>คอมเมนต์</th>
+                    <th className="font-mono text-right py-1 pl-1.5" style={{ fontWeight: 400 }}>ดูจบ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {active.data.readNumbers.map((r, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
+                      <td className="font-body py-1.5 pr-2" style={{ color: C.text }}>{r.clip}{r.platform && r.platform !== 'ไม่ระบุ' ? <span style={{ color: C.muted }}> · {r.platform}</span> : null}</td>
+                      <td className="font-mono text-right py-1.5 px-1.5 tabular-nums" style={{ color: C.cyan }}>{r.views}</td>
+                      <td className="font-mono text-right py-1.5 px-1.5 tabular-nums" style={{ color: C.muted }}>{r.likes}</td>
+                      <td className="font-mono text-right py-1.5 px-1.5 tabular-nums" style={{ color: C.muted }}>{r.comments}</td>
+                      <td className="font-mono text-right py-1.5 pl-1.5 tabular-nums" style={{ color: C.muted }}>{r.watchTime || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {active.data.compareLast && (
+            <div className="p-2.5 rounded-xl" style={{ background: C.bgDeep }}>
+              <span className="font-mono text-2xs" style={{ color: C.violet }}>เทียบครั้งก่อน: </span>
+              <span className="font-body text-xs" style={{ color: C.text }}>{active.data.compareLast}</span>
+            </div>
+          )}
+          {Array.isArray(active.data.whatWorked) && active.data.whatWorked.length > 0 && (
+            <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+              <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>สิ่งที่ได้ผล</div>
+              {active.data.whatWorked.map((x, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {x}</p>)}
+            </div>
+          )}
+          {Array.isArray(active.data.whatToFix) && active.data.whatToFix.length > 0 && (
+            <div className="space-y-1.5">
+              {active.data.whatToFix.map((f, i) => (
+                <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.orange}`, border: `1px solid ${C.border}` }}>
+                  <div className="font-body text-xs" style={{ color: C.orange }}>{f.issue}</div>
+                  <div className="font-body text-xs" style={{ color: C.muted }}>→ {f.fix}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {active.data.nextAction && (
+            <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+              <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>ทำต่อพรุ่งนี้</div>
+              <p className="font-body text-xs" style={{ color: C.text }}>{active.data.nextAction}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {recent.length > 0 && (
+        <div className="pt-3 mt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>ประวัติการประเมินล่าสุด</div>
+          <div className="flex flex-wrap gap-1.5">
+            {recent.map((l) => (
+              <button key={l.id} onClick={() => { setOpenId(l.id); setReviewDate(l.date); }} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${active && active.id === l.id ? vColor(l.data?.verdict) : C.border}`, color: vColor(l.data?.verdict) }}>
+                {l.date.slice(5)} · {l.data?.verdict || '-'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks, notes, setNotes, progressLogs, setProgressLogs }) {
   const todayStr = todayDateStr();
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
@@ -2675,6 +2879,9 @@ function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks, 
           </div>
         </div>
       </div>
+
+      {/* ติดตามความคืบหน้า — ให้ AI อ่านสถิติคลิปจากภาพหน้าจอ */}
+      <ProgressTracker dayMap={dayMap} channels={channels} logs={progressLogs} setLogs={setProgressLogs} user={user} />
 
       {/* แนวโน้มรายวันทั้งเดือน */}
       {dailyTrend.length > 1 && (
@@ -7376,6 +7583,7 @@ export default function CompanyPortal() {
   const [features, setFeatures] = useState(null); // ฟีเจอร์ที่เจ้าของระบบเปิดให้ใช้
   const [deptData, setDeptData] = useState([]);   // ผลงานจากเครื่องมือ AI ของแต่ละแผนก
   const [calendarNotes, setCalendarNotes] = useState({}); // โน้ต/ธุระรายวันในปฏิทิน { 'YYYY-MM-DD': { text, busy } }
+  const [progressLogs, setProgressLogs] = useState([]); // ผลประเมินความคืบหน้ารายวันที่ AI อ่านจากภาพสถิติ
   const [userRole, setUserRole] = useState('staff'); // staff | manager | exec | dev
   const [loadError, setLoadError] = useState('');
   const [history, setHistory] = useState([]);
@@ -7474,7 +7682,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes, noteRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes, noteRes, progRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -7488,6 +7696,7 @@ export default function CompanyPortal() {
           api('/api/store?key=ads'),
           api('/api/store?key=deptData'),
           api('/api/store?key=calendarNotes'),
+          api('/api/store?key=progressLogs'),
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -7561,6 +7770,7 @@ export default function CompanyPortal() {
         setDeptData(Array.isArray(deptD.value) ? deptD.value : []);
         const noteVal = noteRes.data;
         setCalendarNotes((noteVal.value && typeof noteVal.value === 'object' && !Array.isArray(noteVal.value)) ? noteVal.value : {});
+        setProgressLogs(Array.isArray(progRes.data.value) ? progRes.data.value : []);
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
       } catch (err) {
@@ -7621,6 +7831,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'calendarNotes', value: calendarNotes }).catch(() => {});
   }, [calendarNotes, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'progressLogs', value: progressLogs }).catch(() => {});
+  }, [progressLogs, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -7829,7 +8043,7 @@ export default function CompanyPortal() {
             {stage === 'daily' && <DailyWork user={user} channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
-            {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
+            {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} progressLogs={progressLogs} setProgressLogs={setProgressLogs} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
