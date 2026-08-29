@@ -1,7 +1,7 @@
 import { redisReady, redisGet, redisSet, requireUser, isBanned, clientIp, autoBackup, logActivity, orgIdOf, roleLevel, isDev } from './_lib.js';
 
 // ข้อมูลที่ทั้งองค์กรใช้ร่วมกัน
-const ORG_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptData', 'company', 'calendarNotes'];
+const ORG_KEYS = ['channels', 'tasks', 'history', 'lastActiveDate', 'futureTasks', 'templates', 'trash', 'metrics', 'plans', 'rivals', 'ads', 'deptData', 'company', 'calendarNotes', 'progressLogs'];
 // ข้อมูลส่วนตัวของแต่ละคน — เพื่อนร่วมองค์กรก็ห้ามเห็น (เช่น การเงินส่วนบุคคล)
 const PRIVATE_KEYS = ['myFinance', 'myNotes'];
 
