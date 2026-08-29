@@ -26,6 +26,45 @@ export async function redisSet(key, value) {
   });
 }
 
+// ---------- แจ้งเตือนทางอีเมล ----------
+// ใช้ตอนมีเรื่องด่วนที่เจ้าของระบบต้องรู้ทันทีแม้ไม่ได้เปิดเว็บอยู่
+// ส่งแบบไม่ให้ล้มกระทบงานหลัก — ถ้าส่งไม่ได้ให้บันทึกไว้เฉยๆ
+export async function sendAlertEmail({ to, subject, title, lines, footer }) {
+  try {
+    if (!process.env.RESEND_API_KEY || !to) return { ok: false, reason: 'ยังไม่ได้ตั้งค่าอีเมล' };
+    const { Resend } = await import('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const body = (lines || []).map((l) => `<p style="margin:4px 0">${String(l)}</p>`).join('');
+    await resend.emails.send({
+      from: 'FORGE Alert <onboarding@resend.dev>',
+      to,
+      subject: String(subject || 'แจ้งเตือนจากระบบ').slice(0, 180),
+      html: `<div style="font-family:sans-serif;max-width:560px">
+        <h2 style="margin:0 0 8px">${String(title || subject || 'แจ้งเตือน')}</h2>
+        ${body}
+        <p style="color:#888;font-size:12px;margin-top:16px">${String(footer || 'อีเมลนี้ส่งอัตโนมัติจากระบบ FORGE')}</p>
+      </div>`,
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e?.message || 'ส่งอีเมลไม่สำเร็จ' };
+  }
+}
+
+// หาอีเมลผู้รับแจ้งเตือน — เจ้าของระบบ และผู้บริหารขององค์กรที่เกี่ยวข้อง
+export async function alertRecipients(orgId) {
+  const accounts = (await redisGet('accounts')) || [];
+  const owner = accounts.find((a) => a.isOwner);
+  const out = [];
+  if (owner?.email) out.push(owner.email);
+  if (orgId) {
+    accounts
+      .filter((a) => !a.isOwner && a.orgId === orgId && (a.role === 'exec' || a.clearance === 3))
+      .forEach((a) => { if (a.email && !out.includes(a.email)) out.push(a.email); });
+  }
+  return out;
+}
+
 // ---------- รหัสยืนยันทางอีเมล (OTP) ----------
 // สำคัญ: รหัสต้องอยู่ที่เซิร์ฟเวอร์เท่านั้น ห้ามส่งกลับไปที่เบราว์เซอร์ไม่ว่ารูปแบบใด
 // เดิมระบบใส่รหัสไว้ในโทเค็นแบบ base64 ซึ่งใครก็ถอดอ่านได้ ทำให้ OTP ไม่มีความหมาย
@@ -275,40 +314,78 @@ export function clientIp(req) {
 }
 
 // ---------- ระบบโทเค็นการใช้งาน (usage credits) ----------
-export const PLANS = {
-  trial:   { name: 'ทดลองใช้ฟรี', tokens: 300,   days: 7,   price: 0 },
-  starter: { name: 'Starter',     tokens: 1500,  days: 30,  price: 290 },
-  pro:     { name: 'Pro',         tokens: 5000,  days: 30,  price: 790 },
-  studio:  { name: 'Studio',      tokens: 15000, days: 30,  price: 1990 },
-  owner:   { name: 'เจ้าของระบบ',  tokens: -1,    days: 3650, price: 0 }, // -1 = ไม่จำกัด
+// ---------- ประเภทผู้ใช้ 4 กลุ่ม ----------
+// แยกขาดจากกัน: ฟีเจอร์และข้อมูลของแต่ละกลุ่มห้ามปนกัน
+export const TIERS = {
+  personal: { label: 'บุคคลธรรมดา',   desc: 'ฟรีแลนซ์ นักเรียน นักศึกษา ผู้ใช้ทั่วไป', seeTeam: false, maxSeats: 1 },
+  juristic: { label: 'นิติบุคคล',      desc: 'มีลูกน้องได้ ดูการทำงานของทีมได้',        seeTeam: true,  maxSeats: 5 },
+  company:  { label: 'บริษัท/องค์กร',  desc: 'ทีมใหญ่ ดูพนักงานและจัดการสิทธิ์ได้เต็ม',  seeTeam: true,  maxSeats: 25 },
+  dev:      { label: 'ผู้พัฒนาระบบ',   desc: 'ผู้ดูแลแพลตฟอร์ม',                        seeTeam: true,  maxSeats: 9999 },
 };
+
+export const PLANS = {
+  // --- บุคคลธรรมดา: โทเค็นเป็นของตัวเอง ไม่มีลูกทีม ---
+  trial:   { name: 'ทดลองใช้ฟรี', tier: 'personal', tokens: 300,   days: 7,    price: 0,    seats: 1 },
+  starter: { name: 'Starter',     tier: 'personal', tokens: 1500,  days: 30,   price: 290,  seats: 1 },
+  pro:     { name: 'Pro',         tier: 'personal', tokens: 5000,  days: 30,   price: 790,  seats: 1 },
+  // --- นิติบุคคล: โทเค็นเป็นกองกลาง ลูกทีมดึงจากกองเดียวกัน ---
+  biz:     { name: 'นิติบุคคล',    tier: 'juristic', tokens: 12000, days: 30,   price: 1990, seats: 5 },
+  // --- บริษัท/องค์กร ---
+  studio:  { name: 'Studio',      tier: 'company',  tokens: 15000, days: 30,   price: 1990, seats: 10 },
+  corp:    { name: 'องค์กร',       tier: 'company',  tokens: 40000, days: 30,   price: 5900, seats: 25 },
+  owner:   { name: 'ผู้พัฒนาระบบ', tier: 'dev',      tokens: -1,    days: 3650, price: 0,    seats: 9999 }, // -1 = ไม่จำกัด
+};
+
+// แพ็กที่ใช้โทเค็นกองกลางขององค์กร (พนักงานไม่มีโควตาแยกของตัวเอง)
+export function isPooledPlan(planKey) {
+  const p = PLANS[planKey];
+  return !!p && (p.tier === 'juristic' || p.tier === 'company');
+}
+
+// ประเภทของผู้ใช้ ดูจากแพ็กขององค์กรก่อน ถ้าไม่มีจึงดูของตัวเอง
+export function tierOf(account, org) {
+  if (!account) return 'personal';
+  if (account.isOwner || account.isDeveloper) return 'dev';
+  if (org && org.plan && PLANS[org.plan]) return PLANS[org.plan].tier;
+  const p = PLANS[account.plan];
+  return p ? p.tier : 'personal';
+}
 
 // ราคาโทเค็นต่อการกระทำ — สะท้อนต้นทุนจริงคร่าวๆ
 export const TOKEN_COST = {
   outline: 1, prompts: 2, meta: 2, review: 2,
-  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, safeScript: 5, prodPack: 8, imageQC: 6, plan: 6, rival: 8, productFit: 4,
+  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, safeScript: 5, prodPack: 8, imageQC: 6, finalQC: 6, backendRead: 7, crossCheck: 5, protocolAnalysis: 4, plan: 6, rival: 8, productFit: 4,
   other: 1,
 };
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
-export function planOf(account) {
+export function planOf(account, org) {
   if (!account) return PLANS.trial;
   if (account.isOwner) return PLANS.owner;
+  // ถ้าอยู่ในองค์กรที่ซื้อแพ็กแบบกองกลาง ให้ยึดแพ็กขององค์กรเป็นหลัก
+  // ไม่งั้นบริษัทจ่ายเงินแล้วพนักงานยังติดโควตาทดลองใช้ของตัวเอง
+  if (org && org.plan && isPooledPlan(org.plan)) return PLANS[org.plan];
   return PLANS[account.plan] || PLANS.trial;
 }
 
 // คืนสถานะโทเค็นปัจจุบัน พร้อมรีเซ็ตรอบใหม่อัตโนมัติเมื่อครบกำหนด
-export function tokenState(account) {
-  const plan = planOf(account);
+export function tokenState(account, org) {
+  const plan = planOf(account, org);
   const now = Date.now();
-  const cycleStart = account.cycleStart || account.createdAt || now;
+  // ถ้าเป็นแพ็กกองกลาง ตัวเลขทั้งหมดอ่านจากองค์กร ไม่ใช่จากบัญชีรายคน
+  const pooled = !!(org && org.plan && isPooledPlan(org.plan)) && !account.isOwner;
+  const holder = pooled ? org : account;
+  const cycleStart = holder.cycleStart || holder.createdAt || account.createdAt || now;
   const cycleLen = (plan.days || 30) * 24 * 60 * 60 * 1000;
   const expired = now - cycleStart > cycleLen;
-  const used = expired ? 0 : (account.tokensUsed || 0);
-  const quota = plan.tokens === -1 ? Infinity : (plan.tokens + (account.bonusTokens || 0));
+  const used = expired ? 0 : (holder.tokensUsed || 0);
+  const quota = plan.tokens === -1 ? Infinity : (plan.tokens + (holder.bonusTokens || 0));
   return {
-    plan, planKey: account.isOwner ? 'owner' : (account.plan || 'trial'),
+    plan,
+    planKey: account.isOwner ? 'owner' : (pooled ? org.plan : (account.plan || 'trial')),
+    tier: tierOf(account, org),
+    pooled,
     unlimited: plan.tokens === -1,
     quota, used, left: plan.tokens === -1 ? Infinity : Math.max(0, quota - used),
     cycleStart: expired ? now : cycleStart,
@@ -324,21 +401,50 @@ export async function spendTokens(email, action, amount) {
   const accounts = (await redisGet('accounts')) || [];
   const idx = accounts.findIndex((a) => a.email === email);
   if (idx === -1) return { ok: false, error: 'ไม่พบบัญชี' };
-  const st = tokenState(accounts[idx]);
+  const acc = accounts[idx];
+
+  // หาองค์กรก่อน เพื่อรู้ว่าต้องหักจากกองกลางหรือจากโควตาส่วนตัว
+  let org = null;
+  try { org = await getOrg(orgIdOf(acc)); } catch (e) { org = null; }
+  const st = tokenState(acc, org);
+
+  // บันทึกสถิติรายคนเสมอ แม้จะหักจากกองกลาง เพื่อให้รู้ว่าใครใช้ไปเท่าไหร่
+  const recordPerUser = async () => { try { await bumpUsageStat(email, action, cost); } catch (e) {} };
+
   if (st.unlimited) {
-    accounts[idx].tokensUsed = (st.expiredCycle ? 0 : (accounts[idx].tokensUsed || 0)) + cost;
-    accounts[idx].cycleStart = st.cycleStart;
-    accounts[idx].lastUsedAt = Date.now();
+    acc.tokensUsed = (st.expiredCycle ? 0 : (acc.tokensUsed || 0)) + cost;
+    acc.cycleStart = st.cycleStart;
+    acc.lastUsedAt = Date.now();
     await redisSet('accounts', accounts);
-    return { ok: true, left: Infinity, unlimited: true, spent: cost };
+    await recordPerUser();
+    return { ok: true, left: Infinity, unlimited: true, spent: cost, pooled: false };
   }
-  if (st.left < cost) return { ok: false, error: 'โทเค็นไม่พอ', left: st.left, needed: cost };
-  accounts[idx].tokensUsed = st.used + cost;
-  accounts[idx].cycleStart = st.cycleStart;
-  accounts[idx].lastUsedAt = Date.now();
+
+  if (st.left < cost) return { ok: false, error: 'โทเค็นไม่พอ', left: st.left, needed: cost, pooled: st.pooled };
+
+  if (st.pooled) {
+    // หักจากกองกลางขององค์กร — พนักงานทุกคนใช้ถังเดียวกัน
+    const nextOrg = {
+      id: org.id,
+      tokensUsed: st.used + cost,
+      cycleStart: st.cycleStart,
+      lastUsedAt: Date.now(),
+    };
+    await upsertOrg(nextOrg);
+    // ฝั่งบัญชีเก็บแค่ยอดสะสมไว้ดูว่าใครใช้เยอะ ไม่ได้เอาไปคิดโควตา
+    acc.pooledUsed = (acc.pooledUsed || 0) + cost;
+    acc.lastUsedAt = Date.now();
+    await redisSet('accounts', accounts);
+    await recordPerUser();
+    return { ok: true, left: st.left - cost, spent: cost, pooled: true };
+  }
+
+  acc.tokensUsed = st.used + cost;
+  acc.cycleStart = st.cycleStart;
+  acc.lastUsedAt = Date.now();
   await redisSet('accounts', accounts);
-  await bumpUsageStat(email, action, cost);
-  return { ok: true, left: st.left - cost, spent: cost };
+  await recordPerUser();
+  return { ok: true, left: st.left - cost, spent: cost, pooled: false };
 }
 
 // สถิติการใช้งานรายคน รายวัน (ให้เจ้าของระบบดูได้)
@@ -472,6 +578,7 @@ export const FEATURE_DEFS = {
     analytics: { label: 'ศูนย์วิเคราะห์', def: true },
     kpi:       { label: 'KPI / รายเดือน', def: true },
     security:  { label: 'Protocol (ความปลอดภัย)', def: false },
+    files:     { label: 'ไฟล์ & เชื่อมต่อ (Excel/Word)', def: true },
   },
   analyticsTabs: {
     stats:   { label: 'สถิติผลงาน', def: true },
