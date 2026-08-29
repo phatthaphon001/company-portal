@@ -255,10 +255,14 @@ function daysAgoLabel(ts) {
 // ผู้ใช้ที่ใส่คีย์ของตัวเองไม่ต้องแย่งคิวกับคนอื่น ลดเวลารอลงมาก
 export function setAiGap(ms) { AI_MIN_GAP_MS = ms; }
 let AI_MIN_GAP_MS = 13000; // เว้นห่างอย่างน้อย ~13 วิ ต่อคำขอ (ราว 4-5 ครั้ง/นาที)
+// ข้อมูลการค้นเว็บของคำขอล่าสุด — อ่านได้ทันทีหลัง callClaude คืนค่า
+let lastSearchInfo = { sources: [], searchUsed: false, searchNote: null };
+function getLastSearchInfo() { return lastSearchInfo; }
+
 let aiChain = Promise.resolve();
 let aiLastCallAt = 0;
 
-function callClaude(system, content, images, action) {
+function callClaude(system, content, images, action, opts) {
   // ต่อคิวไว้ท้ายแถว งานถัดไปจะเริ่มก็ต่อเมื่องานก่อนหน้าเสร็จและเว้นระยะครบแล้ว
   const run = aiChain.then(async () => {
     const since = Date.now() - aiLastCallAt;
@@ -274,7 +278,7 @@ function callClaude(system, content, images, action) {
         'Content-Type': 'application/json',
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
-      body: JSON.stringify({ system, content, images, action }),
+      body: JSON.stringify({ system, content, images, action, search: !!(opts && opts.search) }),
     });
     const data = await response.json();
     aiLastCallAt = Date.now();
@@ -289,6 +293,13 @@ function callClaude(system, content, images, action) {
     }
     // แจ้งยอดโทเค็นคงเหลือให้หน้าเว็บอัปเดต
     if (data.tokensLeft != null) window.dispatchEvent(new CustomEvent('forge-tokens', { detail: { left: data.tokensLeft, cost: data.cost } }));
+    // เก็บแหล่งอ้างอิงของการค้นเว็บครั้งล่าสุดไว้ต่างหาก
+    // คืนค่าเป็นข้อความธรรมดาเหมือนเดิม เพื่อไม่ให้โค้ดเดิมทุกจุดต้องแก้ตาม
+    lastSearchInfo = {
+      sources: Array.isArray(data.sources) ? data.sources : [],
+      searchUsed: !!data.searchUsed,
+      searchNote: data.searchNote || null,
+    };
     return data.text || '(ไม่มีคำตอบ)';
   });
   // กันไม่ให้คิวขาดเมื่อมีคำขอใดล้มเหลว
@@ -1260,7 +1271,7 @@ const DEPT_TOOLS = {
     {
       key: 'rivalDeep', label: 'เทียบคู่แข่ง + จับพิรุธรีวิวปลอม', Icon: Swords, color: '#F87171',
       desc: 'แนบรูปสินค้าคู่แข่ง รายละเอียด และรีวิวลูกค้า → เทียบกับสินค้าเรา พร้อมตรวจว่ารีวิวมีพิรุธปั่นยอดไหม',
-      action: 'rival', images: 10, useBrand: true,
+      action: 'rivalSearch', images: 10, useBrand: true, useSearch: true,
       fields: [
         { k: 'mine', label: 'สินค้าของเรา', ph: 'ชื่อ ราคา จุดขาย', required: true, big: true },
         { k: 'theirs', label: 'คู่แข่งที่จะเทียบ', ph: 'ชื่อแบรนด์ ราคา ที่เห็นในภาพ', big: true },
@@ -1282,7 +1293,7 @@ const DEPT_TOOLS = {
     {
       key: 'marketRecap', label: 'สรุปตลาด + ทิศทาง 5-10 ปี', Icon: Compass, color: '#22D3EE',
       desc: 'ภาพรวมตลาดที่เราอยู่ แนวโน้มระยะยาว และเราควรวางตัวยังไง — อิงจากข้อมูลที่คุณให้และความรู้ทั่วไป ไม่ใช่ข้อมูลสดจากอินเทอร์เน็ต',
-      action: 'plan', useBrand: true,
+      action: 'planSearch', useBrand: true, useSearch: true,
       fields: [
         { k: 'market', label: 'ตลาด/หมวดสินค้า', ph: 'อาหารเสริมผิวขาว ตลาดไทย', required: true },
         { k: 'observed', label: 'สิ่งที่คุณสังเกตเห็นเองตอนนี้', ph: 'คู่แข่งเยอะขึ้น ราคาตัดกันหนัก', big: true },
@@ -1298,14 +1309,14 @@ const DEPT_TOOLS = {
  "positioning":"เราควรวางตัวตรงไหนในตลาด",
  "caveat":"เตือนตรงๆ ว่านี่คือการประเมินจากความรู้ทั่วไปและข้อมูลที่ผู้ใช้ให้ ไม่ใช่ข้อมูลตลาดสดหรือรายงานวิจัย ควรตรวจกับข้อมูลจริงก่อนตัดสินใจลงทุน"
 }
-กติกา: คุณไม่ได้ต่ออินเทอร์เน็ต ห้ามอ้างตัวเลขตลาดหรือรายงานวิจัยว่าเป็นข้อมูลปัจจุบัน ห้ามอ้างชื่อบริษัทวิจัยหรือตัวเลขส่วนแบ่งตลาดที่ไม่ได้มาจากผู้ใช้ · ต้องใส่ caveat ทุกครั้ง`,
+กติกา: คุณค้นเว็บได้ ให้ค้นข้อมูลตลาดจริงมาประกอบ และอ้างเฉพาะตัวเลขที่ค้นเจอจริงพร้อมบอกว่ามาจากแหล่งไหน · ห้ามแต่งตัวเลขส่วนแบ่งตลาดหรือชื่อรายงานวิจัยที่ค้นไม่เจอ ถ้าหาไม่เจอให้บอกตรงๆ · การคาดการณ์ 5-10 ปีเป็นการประเมิน ไม่ใช่ข้อเท็จจริง ต้องระบุใน caveat เสมอว่าเป็นการคาดการณ์และควรตรวจกับข้อมูลจริงก่อนตัดสินใจลงทุน`,
     },
   ],
   marketing: [
     {
       key: 'campaignCal', label: 'ปฏิทินแคมเปญแพลตฟอร์ม', Icon: Calendar, color: '#FB923C',
       desc: 'แคมเปญใหญ่ของแต่ละแพลตฟอร์ม (Payday, Double Day, ครบรอบ) ที่กำลังจะมา พร้อมบอกว่าต้องเตรียมอะไรกี่วันก่อน',
-      action: 'plan', useBrand: true,
+      action: 'planSearch', useBrand: true, useSearch: true,
       fields: [
         { k: 'platforms', label: 'แพลตฟอร์มที่ขาย', ph: 'TikTok Shop, Shopee, Lazada', required: true },
         { k: 'month', label: 'เดือนที่จะวางแผน', ph: 'กันยายน 2569', required: true },
@@ -1321,7 +1332,7 @@ const DEPT_TOOLS = {
  "cautions":["ข้อควรระวัง เช่น ค่าโฆษณาแพงขึ้นช่วงไหน หรือกฎการร่วมแคมเปญ"],
  "note":"แคมเปญของแพลตฟอร์มเปลี่ยนได้ตลอด ให้ยืนยันวันที่จริงในหลังบ้านของแพลตฟอร์มก่อนวางแผนจริง"
 }
-กติกา: วันที่แบบเลขเบิ้ล (9.9 11.11 12.12) และวันเงินเดือนออกเป็นรูปแบบที่แน่นอนพอจะระบุได้ แต่แคมเปญเฉพาะกิจของแต่ละแพลตฟอร์มคุณไม่มีข้อมูลสด ห้ามแต่งชื่อแคมเปญหรือวันที่ขึ้นเอง ให้ระบุเฉพาะที่มั่นใจและใส่ note เตือนเสมอ`,
+กติกา: คุณค้นเว็บได้ ให้ค้นแคมเปญที่ประกาศจริงของแต่ละแพลตฟอร์มในช่วงเดือนที่ถาม · ห้ามแต่งชื่อแคมเปญหรือวันที่ที่ค้นไม่เจอ ถ้าไม่เจอให้ระบุเฉพาะวันที่เป็นรูปแบบแน่นอน (เลขเบิ้ล วันเงินเดือนออก) แล้วบอกว่าแคมเปญอื่นหาข้อมูลยืนยันไม่ได้ · ใส่ note เตือนให้ยืนยันในหลังบ้านแพลตฟอร์มเสมอ เพราะวันที่อาจเปลี่ยน`,
     },
     {
       key: 'wowCampaign', label: 'คิดแคมเปญที่คนพูดถึง', Icon: Flame, color: '#F472B6',
@@ -1488,7 +1499,7 @@ const DEPT_TOOLS = {
     {
       key: 'trendAdapt', label: 'ถอดเทรนด์ที่เห็น → ปรับเข้าแบรนด์', Icon: Flame, color: '#F59E0B',
       desc: 'แคปหน้าจอคลิปหรือเทรนด์ที่กำลังดังมาแนบ (สูงสุด 6 รูป) AI จะถอดว่าทำไมมันดัง แล้วปรับให้เข้ากับสินค้าของคุณ — ระบบเห็นเฉพาะสิ่งที่คุณแนบมา ไม่ได้ต่อเน็ตไปดูเทรนด์เอง',
-      action: 'rival', images: 6, useBrand: true, useHistory: true,
+      action: 'rivalSearch', images: 6, useBrand: true, useHistory: true, useSearch: true,
       fields: [
         { k: 'whatTrend', label: 'เทรนด์ที่เห็นคืออะไร (เล่าเพิ่มได้)', ph: 'เพลงนี้กำลังดัง คนเอามาเต้นท่านี้ / มุกนี้กำลังฮิต', big: true },
         { k: 'where', label: 'เห็นจากที่ไหน', ph: 'TikTok หน้า For You' },
@@ -1505,7 +1516,9 @@ const DEPT_TOOLS = {
  "legalRisk":"ข้อควรระวังเรื่องลิขสิทธิ์เพลง/คลิปต้นฉบับ และกฎแพลตฟอร์ม"
 }
 กติกาเข้มงวด:
-- วิเคราะห์จากภาพและข้อความที่ผู้ใช้ให้มาเท่านั้น คุณไม่มีข้อมูลว่าตอนนี้อะไรกำลังดังจริง ห้ามอ้างว่ารู้เทรนด์ปัจจุบันเอง ห้ามแต่งชื่อเพลงหรือชื่อเทรนด์ขึ้นมาเอง
+- คุณค้นเว็บได้ ให้ค้นหาว่าตอนนี้มีเทรนด์อะไรที่เกี่ยวข้องกับสิ่งที่ผู้ใช้แนบมาบ้าง แล้วอ้างอิงจากสิ่งที่ค้นเจอจริงเท่านั้น
+- ถ้าค้นแล้วไม่เจอข้อมูลยืนยัน ห้ามแต่งชื่อเพลง ชื่อเทรนด์ หรือตัวเลขยอดวิวขึ้นมาเอง ให้บอกตรงๆ ว่าหาข้อมูลยืนยันไม่ได้
+- แยกให้ชัดว่าข้อมูลส่วนไหนมาจากภาพที่ผู้ใช้แนบ ส่วนไหนมาจากการค้นเว็บ
 - ถ้าภาพที่แนบมาไม่พอให้วิเคราะห์ ให้เขียนใน whatISee ว่าต้องการภาพแบบไหนเพิ่ม แทนที่จะเดา
 - การปรับใช้ต้องผูกกับสินค้าจริงของแบรนด์ที่ให้มา`,
     },
@@ -1934,9 +1947,13 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
     const body = parts.join('\n\n');
     try {
       const text = await callClaude(tool.sys, body || 'วิเคราะห์จากภาพที่แนบมา',
-        imgs.length ? imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })) : undefined, tool.action);
+        imgs.length ? imgs.map((i) => ({ mimeType: i.mimeType, data: i.base64 })) : undefined, tool.action,
+        tool.useSearch ? { search: true } : undefined);
       const json = parseJsonLoose(text);
-      const rec = { id: `${Date.now()}`, at: Date.now(), date: todayDateStr(), dept: deptId, tool: tool.key, toolLabel: tool.label, input: { ...vals }, thumb: imgs[0]?.dataUrl || null, imageCount: imgs.length, data: json };
+      // เก็บแหล่งอ้างอิงจากการค้นเว็บไว้คู่กับผลลัพธ์ เพื่อให้ตรวจย้อนได้ว่าข้อมูลมาจากไหน
+      const si = tool.useSearch ? getLastSearchInfo() : null;
+      const rec = { id: `${Date.now()}`, at: Date.now(), date: todayDateStr(), dept: deptId, tool: tool.key, toolLabel: tool.label, input: { ...vals }, thumb: imgs[0]?.dataUrl || null, imageCount: imgs.length, data: json,
+        sources: si?.sources || [], searchUsed: !!si?.searchUsed, searchNote: si?.searchNote || null };
       setRecords([...(records || []), rec].slice(-300));
       setOpenId(rec.id);
       setVals({}); setImgs([]);
@@ -2014,10 +2031,36 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
           {active && (
             <div className="p-3 rounded-xl mt-1" style={{ background: C.panel, border: `1px solid ${tool.color}44` }}>
               <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="font-mono text-2xs" style={{ color: C.muted }}>บันทึกเมื่อ {new Date(active.at).toLocaleString('th-TH')}{active.imageCount ? ` · ${active.imageCount} รูป` : ''}</span>
+                <span className="font-mono text-2xs" style={{ color: C.muted }}>
+                  บันทึกเมื่อ {new Date(active.at).toLocaleString('th-TH')}{active.imageCount ? ` · ${active.imageCount} รูป` : ''}
+                  {active.searchUsed && <span style={{ color: C.emerald }}> · ค้นเว็บแล้ว</span>}
+                </span>
                 <button onClick={() => { setRecords((records || []).filter((x) => x.id !== active.id)); setOpenId(null); }} style={{ color: C.muted }}><Trash2 size={12} /></button>
               </div>
               <AutoResult data={active.data} />
+
+              {active.searchNote && (
+                <p className="font-body text-xs mt-2 p-2 rounded-lg" style={{ color: C.orange, background: `${C.orange}12` }}>{active.searchNote}</p>
+              )}
+              {Array.isArray(active.sources) && active.sources.length > 0 && (
+                <div className="mt-2.5 pt-2.5" style={{ borderTop: `1px solid ${C.border}` }}>
+                  <div className="font-mono text-2xs mb-1.5" style={{ color: C.emerald }}>แหล่งอ้างอิงจากการค้นเว็บ · กดเปิดเพื่อตรวจเองได้</div>
+                  <div className="space-y-1">
+                    {active.sources.slice(0, 8).map((src, i) => {
+                      const url = typeof src === 'string' ? src : (src.uri || src.url || '');
+                      const title = typeof src === 'string' ? src : (src.title || src.uri || src.url || 'แหล่งอ้างอิง');
+                      if (!url) return null;
+                      return (
+                        <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="font-body text-xs flex items-start gap-1.5" style={{ color: C.cyan }}>
+                          <ExternalLink size={10} className="shrink-0 mt-0.5" />
+                          <span className="break-all">{String(title).slice(0, 110)}</span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                  <p className="font-body mt-1.5" style={{ fontSize: 10, color: C.muted }}>AI สรุปจากหน้าเหล่านี้ ควรกดเข้าไปตรวจเองก่อนใช้ตัดสินใจจริง</p>
+                </div>
+              )}
             </div>
           )}
         </>
@@ -8089,6 +8132,175 @@ function AppearancePanel({ user, theme, onChangeTheme, company, setCompany, show
   );
 }
 
+// ---------- จัดการแพ็กองค์กร (เฉพาะผู้พัฒนา) + แผนกพนักงาน (ผู้บริหารองค์กร) ----------
+function OrgPlanPanel({ user, showToast }) {
+  const [orgs, setOrgs] = useState([]);
+  const [plans, setPlans] = useState({});
+  const [tiers, setTiers] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState('');
+  const isDevUser = !!(user.isDeveloper || user.isOwner || user.role === 'dev');
+
+  async function load() {
+    setLoading(true); setMsg('');
+    const [o, m] = await Promise.all([
+      apiPost('/api/auth', { action: 'devListOrgs' }),
+      apiPost('/api/auth', { action: 'me' }),
+    ]);
+    if (o.ok) setOrgs(o.data.orgs || []); else setMsg(o.data.error || 'โหลดรายชื่อองค์กรไม่สำเร็จ');
+    if (m.ok) { setPlans(m.data.plans || {}); setTiers(m.data.tiers || {}); }
+    setLoading(false);
+  }
+  useEffect(() => { if (isDevUser) load(); }, []);
+  if (!isDevUser) return null;
+
+  async function setPlan(orgId, plan) {
+    setSaving(orgId); setMsg('');
+    const r = await apiPost('/api/auth', { action: 'adminSetOrgPlan', orgId, plan });
+    if (r.ok) {
+      showToast && showToast('เปลี่ยนแพ็กแล้ว');
+      if (r.data.warning) setMsg(r.data.warning);
+      await load();
+    } else setMsg(r.data.error || 'เปลี่ยนแพ็กไม่สำเร็จ');
+    setSaving('');
+  }
+
+  // จัดกลุ่มแพ็กตามประเภทผู้ใช้ เพื่อไม่ให้เผลอให้แพ็กบุคคลกับองค์กรที่มีพนักงานหลายคน
+  const grouped = {};
+  Object.entries(plans).forEach(([k, p]) => {
+    const t = p.tier || 'personal';
+    if (!grouped[t]) grouped[t] = [];
+    grouped[t].push([k, p]);
+  });
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.violet}44` }}>
+      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+        <div className="flex items-center gap-2"><Building2 size={14} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>แพ็กขององค์กรลูกค้า</span></div>
+        <button onClick={load} disabled={loading} className="font-mono text-2xs px-2.5 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+          {loading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} รีเฟรช
+        </button>
+      </div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+        แพ็กนิติบุคคลและองค์กรใช้โทเค็นกองกลาง พนักงานทุกคนดึงจากถังเดียวกัน — ตั้งที่นี่เท่านั้น อย่าไปตั้งรายบุคคล
+      </p>
+
+      {msg && <p className="font-mono text-2xs mb-2 p-2 rounded-lg" style={{ color: C.orange, background: `${C.orange}12` }}>{msg}</p>}
+
+      {loading && orgs.length === 0 ? (
+        <p className="font-mono text-2xs" style={{ color: C.muted }}>กำลังโหลด...</p>
+      ) : orgs.length === 0 ? (
+        <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีองค์กรในระบบ</p>
+      ) : (
+        <div className="space-y-2">
+          {orgs.map((o) => {
+            const cur = plans[o.plan];
+            const seats = cur?.seats || 1;
+            const over = (o.members || 0) > seats;
+            return (
+              <div key={o.id} className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${over ? C.orange : C.border}` }}>
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className="font-body text-xs flex-1 min-w-[120px]" style={{ color: C.text }}>{o.name || o.id}</span>
+                  <span className="font-mono px-1.5 py-0.5 rounded shrink-0" style={{ fontSize: 9, color: over ? C.orange : C.muted, border: `1px solid ${over ? C.orange : C.border}` }}>
+                    {o.members || 0}/{seats} ที่นั่ง
+                  </span>
+                </div>
+                <div className="font-mono mb-2" style={{ fontSize: 9, color: C.muted }}>
+                  แพ็กปัจจุบัน: {cur ? `${cur.name} · ${(tiers[cur.tier] || {}).label || cur.tier}` : 'ยังไม่ได้ตั้ง (ใช้โควตารายคน)'}
+                  {o.tokensUsed != null && cur && cur.tokens > 0 ? ` · ใช้ไป ${o.tokensUsed}/${cur.tokens}` : ''}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <select
+                    value={o.plan || ''}
+                    onChange={(e) => e.target.value && setPlan(o.id, e.target.value)}
+                    disabled={saving === o.id}
+                    className="font-mono text-2xs px-2 py-1.5 rounded-lg outline-none"
+                    style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}
+                  >
+                    <option value="">— เลือกแพ็ก —</option>
+                    {Object.entries(grouped).map(([tier, list]) => (
+                      <optgroup key={tier} label={(tiers[tier] || {}).label || tier}>
+                        {list.map(([k, p]) => <option key={k} value={k}>{p.name} · {p.tokens === -1 ? 'ไม่จำกัด' : `${p.tokens.toLocaleString()} โทเค็น`} · {p.seats} ที่นั่ง</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {saving === o.id && <Loader2 size={12} className="animate-spin" style={{ color: C.violet }} />}
+                </div>
+                {over && <p className="font-body mt-1.5" style={{ fontSize: 10, color: C.orange }}>คนเกินที่นั่ง — คนเดิมยังใช้ได้ แต่เพิ่มคนใหม่ไม่ได้จนกว่าจะอัปเกรด</p>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="font-body mt-2" style={{ fontSize: 10, color: C.muted }}>เปลี่ยนแพ็กแล้วรอบการใช้งานจะเริ่มนับใหม่ทันที และโทเค็นที่ใช้ไปแล้วจะถูกล้างเป็นศูนย์</p>
+    </div>
+  );
+}
+
+function MemberDeptPanel({ user, accounts, showToast }) {
+  const [saving, setSaving] = useState('');
+  const [drafts, setDrafts] = useState({});
+  const [msg, setMsg] = useState('');
+  const canManage = user.clearance === 3 || ['exec', 'dev'].includes(user.role) || user.isOwner;
+  if (!canManage) return null;
+
+  const myOrg = user.orgId;
+  // ผู้พัฒนาเห็นทุกคน ผู้บริหารเห็นเฉพาะคนในองค์กรตัวเอง
+  const isDevUser = !!(user.isDeveloper || user.isOwner || user.role === 'dev');
+  const members = (accounts || []).filter((a) => (isDevUser || a.orgId === myOrg) && a.email !== user.email);
+
+  async function save(email) {
+    const dept = drafts[email] != null ? drafts[email] : '';
+    setSaving(email); setMsg('');
+    const r = await apiPost('/api/auth', { action: 'setMemberDept', email, dept });
+    if (r.ok) showToast && showToast('บันทึกแผนกแล้ว');
+    else setMsg(r.data.error || 'บันทึกไม่สำเร็จ');
+    setSaving('');
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-2 mb-1"><Users size={14} style={{ color: C.cyan }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>แผนกของพนักงาน</span></div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>ระบุแผนกให้พนักงานแต่ละคน เพื่อให้รู้ว่าใครดูแลงานส่วนไหน</p>
+      {msg && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{msg}</p>}
+      {members.length === 0 ? (
+        <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีพนักงานคนอื่นในองค์กร — ชวนเข้าร่วมด้วยรหัสองค์กรได้</p>
+      ) : (
+        <div className="space-y-1.5">
+          {members.map((m) => {
+            const val = drafts[m.email] != null ? drafts[m.email] : (m.dept || '');
+            const changed = val !== (m.dept || '');
+            return (
+              <div key={m.email} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="flex-1 min-w-[130px]">
+                  <div className="font-body text-xs truncate" style={{ color: C.text }}>{m.name || m.email}</div>
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>{(CLEARANCE[m.clearance] || {}).label || '-'}</div>
+                </div>
+                <input
+                  value={val}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [m.email]: e.target.value }))}
+                  placeholder="เช่น คอนเทนต์ / การตลาด"
+                  className="font-body text-xs px-2 py-1.5 rounded-lg outline-none shrink-0"
+                  style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text, width: 160 }}
+                />
+                <button
+                  onClick={() => save(m.email)}
+                  disabled={!changed || saving === m.email}
+                  className="font-mono text-2xs px-2.5 py-1.5 rounded-lg shrink-0 flex items-center gap-1"
+                  style={{ background: changed ? C.cyan : 'transparent', color: changed ? '#0A0A0F' : C.muted, border: `1px solid ${changed ? C.cyan : C.border}`, opacity: saving === m.email ? 0.6 : 1 }}
+                >
+                  {saving === m.email ? <Loader2 size={10} className="animate-spin" /> : <Check size={10} />} บันทึก
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // แผงเครื่องมือผู้พัฒนา — ใช้ทดสอบ flow ที่ผู้ใช้ใหม่จะเจอ
 function DevOnboardingPanel({ user, showToast, refreshMe }) {
   const [busy, setBusy] = useState(false);
@@ -8165,6 +8377,8 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>การตั้งค่า</h2>
       <p className="font-body text-xs mb-6" style={{ color: C.muted }}>ตั้งค่าและเครื่องมือดูแลระบบ</p>
 
+      <OrgPlanPanel user={user} showToast={showToast} />
+      <MemberDeptPanel user={user} accounts={accounts} showToast={showToast} />
       <AppearancePanel user={user} theme={theme} onChangeTheme={onChangeTheme} company={company} setCompany={setCompany} showToast={showToast} />
       <DevOnboardingPanel user={user} showToast={showToast} refreshMe={refreshMe} />
       <OwnerConsole user={user} showToast={showToast} onFeaturesChanged={refreshMe} />
