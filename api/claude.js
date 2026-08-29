@@ -96,7 +96,7 @@ export default async function handler(req, res) {
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text).join('\n');
 
     // บันทึกว่าผู้ใช้ทำอะไร ให้เจ้าของระบบดูย้อนหลังได้
-    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
+    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', progressReview: 'ประเมินผลคลิป', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
     pushFeed({ email: me.email, what: ACT_LABEL[act] || act, action: act, cost: usingCentral ? cost : 0 }).catch(() => {});
     touchPresence(me.email, null, ACT_LABEL[act]).catch(() => {});
 
