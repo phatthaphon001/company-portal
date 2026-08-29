@@ -8,7 +8,7 @@ import {
   CheckCircle2, XCircle, Users, Camera, Settings as SettingsIcon, Palette, Type,
   X, Upload, PieChart as PieChartIcon, Download, Undo2, Redo2,
   Target, Trash, RotateCcw, Activity, Search, Flame, Award, Gauge,
-  Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight,
+  Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight, Clock,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -360,6 +360,7 @@ function emptyTask(id, channelId, platform, type, label, date) {
     reviewSummary: '',       // สรุปสั้นๆ + สิ่งที่ควรแก้ครั้งหน้า
     reviewAt: null,          // เวลาที่วิเคราะห์
     templateLinks: [''], // ลิงก์วิดีโอ/รูปต้นแบบให้ AI ดูสไตล์ (เพิ่มได้หลายลิงก์)
+    assignedTo: null,        // อีเมลคนที่ติ๊กงานนี้ว่าเสร็จล่าสุด — ใช้ในระบบติดตามทีม (เริ่มเก็บนับจากตอนนี้เป็นต้นไป)
   };
 }
 
@@ -1990,7 +1991,197 @@ const CAL_SYS = `คุณคือผู้ช่วยวางแผนงา
 
 const WEEKDAY_FULL = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
 
-function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
+// ---------- นาฬิกาเวลาโลก + วิเคราะห์เวลาโพสต์ข้ามประเทศ ----------
+const WORLD_CLOCK_COUNTRIES = [
+  { code: 'TH', label: 'ไทย', flag: '🇹🇭', tz: 'Asia/Bangkok' },
+  { code: 'US_ET', label: 'สหรัฐฯ (ตะวันออก)', flag: '🇺🇸', tz: 'America/New_York' },
+  { code: 'US_PT', label: 'สหรัฐฯ (ตะวันตก)', flag: '🇺🇸', tz: 'America/Los_Angeles' },
+  { code: 'GB', label: 'อังกฤษ', flag: '🇬🇧', tz: 'Europe/London' },
+  { code: 'JP', label: 'ญี่ปุ่น', flag: '🇯🇵', tz: 'Asia/Tokyo' },
+  { code: 'KR', label: 'เกาหลีใต้', flag: '🇰🇷', tz: 'Asia/Seoul' },
+  { code: 'CN', label: 'จีน', flag: '🇨🇳', tz: 'Asia/Shanghai' },
+  { code: 'VN', label: 'เวียดนาม', flag: '🇻🇳', tz: 'Asia/Ho_Chi_Minh' },
+  { code: 'ID', label: 'อินโดนีเซีย', flag: '🇮🇩', tz: 'Asia/Jakarta' },
+  { code: 'PH', label: 'ฟิลิปปินส์', flag: '🇵🇭', tz: 'Asia/Manila' },
+  { code: 'IN', label: 'อินเดีย', flag: '🇮🇳', tz: 'Asia/Kolkata' },
+  { code: 'AU', label: 'ออสเตรเลีย', flag: '🇦🇺', tz: 'Australia/Sydney' },
+  { code: 'DE', label: 'เยอรมนี', flag: '🇩🇪', tz: 'Europe/Berlin' },
+  { code: 'FR', label: 'ฝรั่งเศส', flag: '🇫🇷', tz: 'Europe/Paris' },
+  { code: 'AE', label: 'สหรัฐอาหรับเอมิเรตส์', flag: '🇦🇪', tz: 'Asia/Dubai' },
+  { code: 'SG', label: 'สิงคโปร์', flag: '🇸🇬', tz: 'Asia/Singapore' },
+];
+
+const POST_TIME_SYS = `คุณคือที่ปรึกษาด้านจังหวะเวลาโพสต์คอนเทนต์โซเชียลมีเดียข้ามประเทศ
+คุณจะได้รับตัวเลขเวลาที่คำนวณไว้ให้แล้วอย่างแม่นยำ (ส่วนต่างเวลา, เวลาที่ตรงกับประเทศเป้าหมาย) ให้ใช้ตัวเลขนั้นตรงๆ ห้ามคำนวณเวลาใหม่เองเด็ดขาดเพราะอาจผิดพลาด
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "headline":"สรุปสถานการณ์ 1 ประโยค ตรงไปตรงมา",
+ "timeDiff":{"thTime":"เวลาไทยที่จะโพสต์ (คัดลอกจากข้อมูลที่ให้มา)","targetLabel":"ชื่อประเทศเป้าหมาย","targetTime":"เวลาที่ตรงกันในประเทศเป้าหมาย (คัดลอกจากข้อมูลที่ให้มา)"},
+ "verdict":"ดี|พอใช้|ควรปรับ",
+ "verdictReason":"อธิบายว่าเวลานั้นตกช่วงไหนของวันในประเทศเป้าหมาย (เช้า/บ่าย/เย็น/ดึก) และเหมาะกับพฤติกรรมเปิดโซเชียลทั่วไปของคนช่วงนั้นแค่ไหน",
+ "recommendation":"ถ้าควรปรับ ให้บอกว่าควรโพสต์เวลาไทยกี่โมงถึงจะตรงช่วงที่คนในประเทศเป้าหมายมักเล่นโซเชียล (เย็น-ค่ำตามเวลาท้องถิ่น) ถ้าเวลาปัจจุบันดีอยู่แล้วให้บอกว่าคงเดิมได้พร้อมเหตุผล",
+ "caveat":"เตือนตรงๆ ว่านี่คือแนวทางทั่วไปจากพฤติกรรมการใช้โซเชียลโดยเฉลี่ยเท่านั้น ไม่ใช่ข้อมูลอัลกอริทึมจริงของแพลตฟอร์ม (ซึ่งไม่มีใครรู้แน่ชัดจากภายนอก) แนะนำให้เทียบกับสถิติจริงที่หน้าวิเคราะห์เพื่อความแม่นยำ"
+}
+กติกา: ห้ามอ้างว่ารู้อัลกอริทึมจริงของ TikTok/Facebook/YouTube ว่าดันฟีดตามประเทศต้นทางหรือประเทศผู้ชม ให้พูดในเชิงพฤติกรรมผู้ใช้ทั่วไปเท่านั้นอย่างตรงไปตรงมา`;
+
+function WorldClockPostAdvisor({ channels }) {
+  const [now, setNow] = useState(new Date());
+  const [selected, setSelected] = useState(['TH']);
+  const [showPicker, setShowPicker] = useState(false);
+  const [targetCode, setTargetCode] = useState('US_ET');
+  const [postHour, setPostHour] = useState(new Date().getHours());
+  const [postMinute, setPostMinute] = useState(new Date().getMinutes());
+  const [advice, setAdvice] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiErr, setAiErr] = useState('');
+
+  // นาฬิกาจริง อัปเดตทุกวินาที
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  function timeInTz(tz) {
+    return new Intl.DateTimeFormat('th-TH', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
+  }
+  function dateInTz(tz) {
+    return new Intl.DateTimeFormat('th-TH', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short' }).format(now);
+  }
+  // ส่วนต่างชั่วโมงจริง คำนวณจาก Intl ไม่ใช้ตารางที่จำไว้เอง (กันพลาดเรื่อง DST)
+  function hourDiff(tz) {
+    const thH = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Bangkok', hour: 'numeric', hour12: false }).format(now)) % 24;
+    const tgH = Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(now)) % 24;
+    let diff = tgH - thH;
+    if (diff > 12) diff -= 24;
+    if (diff < -12) diff += 24;
+    return diff;
+  }
+
+  function addCountry(code) { if (!selected.includes(code)) setSelected((s) => [...s, code]); setShowPicker(false); }
+  function removeCountry(code) { if (code !== 'TH') setSelected((s) => s.filter((c) => c !== code)); }
+
+  async function runAdvice() {
+    setAiLoading(true); setAiErr(''); setAdvice(null);
+    const target = WORLD_CLOCK_COUNTRIES.find((c) => c.code === targetCode);
+    const diff = hourDiff(target.tz);
+    const thTimeStr = `${String(postHour).padStart(2, '0')}:${String(postMinute).padStart(2, '0')}`;
+    let targetHour = postHour + diff;
+    let dayShift = 0;
+    if (targetHour >= 24) { targetHour -= 24; dayShift = 1; }
+    if (targetHour < 0) { targetHour += 24; dayShift = -1; }
+    const targetTimeStr = `${String(targetHour).padStart(2, '0')}:${String(postMinute).padStart(2, '0')}${dayShift === 1 ? ' (วันถัดไป)' : dayShift === -1 ? ' (วันก่อนหน้า)' : ''}`;
+    const payload = {
+      เวลาไทยที่จะโพสต์: thTimeStr,
+      ประเทศเป้าหมาย: target.label,
+      ส่วนต่างเวลาจากไทย_ชั่วโมง: diff,
+      เวลาที่ตรงกันในประเทศเป้าหมาย: targetTimeStr,
+      ช่องที่เกี่ยวข้อง: channels.map((c) => c.name).join(', ') || '-',
+    };
+    try {
+      const text = await callClaude(POST_TIME_SYS, `ข้อมูลที่คำนวณมาแล้วอย่างแม่นยำ (ใช้ตัวเลขนี้เป๊ะๆ ห้ามคำนวณเอง):\n${JSON.stringify(payload)}`, undefined, 'postTimeAdvice');
+      setAdvice(parseJsonLoose(text));
+    } catch (e) { setAiErr(e.message || 'วิเคราะห์ไม่สำเร็จ'); }
+    setAiLoading(false);
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.cyan}44` }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-center gap-2"><Clock size={14} style={{ color: C.cyan }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>นาฬิกาเวลาโลก · วิเคราะห์เวลาโพสต์</span></div>
+        <div className="relative">
+          <button onClick={() => setShowPicker((s) => !s)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+            <Plus size={11} /> เพิ่มประเทศ
+          </button>
+          {showPicker && (
+            <div className="absolute right-0 mt-1 p-1.5 rounded-xl z-10 max-h-64 overflow-y-auto" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, minWidth: 190 }}>
+              {WORLD_CLOCK_COUNTRIES.filter((c) => !selected.includes(c.code)).map((c) => (
+                <button key={c.code} onClick={() => addCountry(c.code)} className="w-full text-left px-2.5 py-1.5 rounded-lg font-body text-xs flex items-center gap-1.5" style={{ color: C.text }}>
+                  <span>{c.flag}</span>{c.label}
+                </button>
+              ))}
+              {WORLD_CLOCK_COUNTRIES.every((c) => selected.includes(c.code)) && <p className="font-mono text-2xs px-2.5 py-1.5" style={{ color: C.muted }}>เพิ่มครบทุกประเทศแล้ว</p>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2.5 mb-4">
+        {selected.map((code) => {
+          const c = WORLD_CLOCK_COUNTRIES.find((x) => x.code === code);
+          if (!c) return null;
+          return (
+            <div key={code} className="px-3 py-2.5 rounded-xl relative" style={{ background: C.bgDeep, border: `1px solid ${code === 'TH' ? C.cyan : C.border}`, minWidth: 118 }}>
+              {code !== 'TH' && (
+                <button onClick={() => removeCountry(code)} className="absolute top-1 right-1" style={{ color: C.muted }}><X size={11} /></button>
+              )}
+              <div className="font-body text-xs flex items-center gap-1 mb-0.5" style={{ color: C.muted }}><span>{c.flag}</span>{c.label}</div>
+              <div className="font-display text-lg font-bold tabular-nums" style={{ color: code === 'TH' ? C.cyan : C.text }}>{timeInTz(c.tz)}</div>
+              <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>{dateInTz(c.tz)}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* วิเคราะห์เวลาโพสต์ */}
+      <div className="pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>วิเคราะห์เวลาโพสต์ให้ตรงกลุ่มเป้าหมาย</div>
+        <div className="flex flex-wrap items-end gap-2.5 mb-3">
+          <div>
+            <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>โพสต์เวลา (ไทย)</label>
+            <div className="flex items-center gap-1">
+              <input type="number" min={0} max={23} value={postHour} onChange={(e) => setPostHour(Math.max(0, Math.min(23, Number(e.target.value) || 0)))} className="w-14 font-mono text-xs px-2 py-1.5 rounded-lg outline-none" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }} />
+              <span style={{ color: C.muted }}>:</span>
+              <input type="number" min={0} max={59} value={postMinute} onChange={(e) => setPostMinute(Math.max(0, Math.min(59, Number(e.target.value) || 0)))} className="w-14 font-mono text-xs px-2 py-1.5 rounded-lg outline-none" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }} />
+            </div>
+          </div>
+          <div>
+            <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>กลุ่มเป้าหมาย</label>
+            <select value={targetCode} onChange={(e) => setTargetCode(e.target.value)} className="font-mono text-xs px-2 py-1.5 rounded-lg outline-none" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }}>
+              {WORLD_CLOCK_COUNTRIES.filter((c) => c.code !== 'TH').map((c) => <option key={c.code} value={c.code}>{c.flag} {c.label}</option>)}
+            </select>
+          </div>
+          <button onClick={runAdvice} disabled={aiLoading} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1" style={{ background: C.cyan, color: '#0A0A0F', opacity: aiLoading ? 0.6 : 1 }}>
+            {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} วิเคราะห์
+          </button>
+        </div>
+        {aiErr && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{aiErr}</p>}
+        {advice && (
+          <div className="space-y-2.5">
+            <p className="font-body text-sm" style={{ color: C.text }}>{advice.headline}</p>
+            {advice.timeDiff && (
+              <div className="p-2.5 rounded-xl flex items-center gap-3" style={{ background: C.bgDeep }}>
+                <div className="text-center">
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>ไทย</div>
+                  <div className="font-display text-sm font-bold" style={{ color: C.cyan }}>{advice.timeDiff.thTime}</div>
+                </div>
+                <ArrowRight size={14} style={{ color: C.muted }} />
+                <div className="text-center">
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>{advice.timeDiff.targetLabel}</div>
+                  <div className="font-display text-sm font-bold" style={{ color: C.violet }}>{advice.timeDiff.targetTime}</div>
+                </div>
+              </div>
+            )}
+            {advice.verdict && (
+              <div className="p-2.5 rounded-xl" style={{ background: `${advice.verdict === 'ดี' ? C.emerald : advice.verdict === 'พอใช้' ? C.orange : C.red}12`, border: `1px solid ${(advice.verdict === 'ดี' ? C.emerald : advice.verdict === 'พอใช้' ? C.orange : C.red)}44` }}>
+                <span className="font-mono text-2xs" style={{ color: advice.verdict === 'ดี' ? C.emerald : advice.verdict === 'พอใช้' ? C.orange : C.red }}>{advice.verdict}</span>
+                <p className="font-body text-xs mt-1" style={{ color: C.text }}>{advice.verdictReason}</p>
+              </div>
+            )}
+            {advice.recommendation && (
+              <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>คำแนะนำ</div>
+                <p className="font-body text-xs" style={{ color: C.text }}>{advice.recommendation}</p>
+              </div>
+            )}
+            {advice.caveat && <p className="font-body text-xs" style={{ color: C.muted }}>⚠ {advice.caveat}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalendarPage({ user, history, tasks, channels, onOpenDay, futureTasks }) {
   const todayStr = todayDateStr();
   const now = new Date();
   const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() });
@@ -2035,6 +2226,42 @@ function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
     return { day: label.slice(0, 2), pct: t ? Math.round((dn / t) * 100) : 0, n: rows.length };
   });
 
+  // ---- แนวโน้มรายวันทั้งเดือน (ทำเสร็จ % + คะแนนคุณภาพเฉลี่ย x10 ให้สเกลใกล้กัน) ----
+  const dailyTrend = monthDays.slice().sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => {
+    const scored = v.tasks.filter((t) => typeof t.reviewScore === 'number');
+    return {
+      date: d.slice(8),
+      pct: v.total ? Math.round((v.done / v.total) * 100) : 0,
+      score: scored.length ? Math.round((scored.reduce((a, t) => a + t.reviewScore, 0) / scored.length) * 10) : null,
+    };
+  });
+
+  // ---- เทียบผลงานรายช่องในเดือนนี้ ----
+  const byChannelMonth = channels.map((c) => {
+    const ts = monthDays.flatMap(([, v]) => v.tasks.filter((t) => t.channelId === c.id));
+    return { name: c.name, color: c.color, total: ts.length, done: ts.filter((t) => t.done).length };
+  }).filter((c) => c.total > 0);
+
+  // ---- สัดส่วนงาน: เสร็จแล้ว / กำลังทำ (มีเนื้อหาแล้วแต่ยังไม่ติ๊ก) / ยังไม่เริ่ม ----
+  const allMonthTasks = monthDays.flatMap(([, v]) => v.tasks);
+  const doneCount = allMonthTasks.filter((t) => t.done).length;
+  const inProgressCount = allMonthTasks.filter((t) => !t.done && (t.outline || t.videoPrompt || t.imagePrompt)).length;
+  const notStartedCount = Math.max(0, allMonthTasks.length - doneCount - inProgressCount);
+  const statusPie = [
+    { name: 'เสร็จแล้ว', value: doneCount, color: C.emerald },
+    { name: 'กำลังทำ', value: inProgressCount, color: C.orange },
+    { name: 'ยังไม่เริ่ม', value: notStartedCount, color: C.red },
+  ].filter((s) => s.value > 0);
+
+  // ---- เทียบเดือนนี้กับเดือนก่อน ----
+  const prevYm = ym.m === 0 ? { y: ym.y - 1, m: 11 } : { y: ym.y, m: ym.m - 1 };
+  const prevPrefix = `${prevYm.y}-${String(prevYm.m + 1).padStart(2, '0')}`;
+  const prevMonthDays = Object.entries(dayMap).filter(([d]) => d.startsWith(prevPrefix));
+  const prevTotal = prevMonthDays.reduce((s, [, v]) => s + v.total, 0);
+  const prevDone = prevMonthDays.reduce((s, [, v]) => s + v.done, 0);
+  const prevPct = prevTotal ? Math.round((prevDone / prevTotal) * 100) : null;
+  const monthDelta = prevPct == null ? null : mPct - prevPct;
+
   function heatColor(v) {
     if (!v || v.total === 0) return null;
     if (v.kind === 'future') return C.violet;
@@ -2078,6 +2305,9 @@ function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
         <StatCard label="วันที่หลุดเป้า" value={missedDays} sub="วัน" color={missedDays === 0 ? C.emerald : C.red} Icon={AlertTriangle} />
         <StatCard label="ทำครบติดกัน" value={streak} sub="วัน" color={C.violet} Icon={Flame} />
       </div>
+
+      {/* นาฬิกาเวลาโลก + วิเคราะห์เวลาโพสต์ */}
+      <WorldClockPostAdvisor channels={channels} />
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px] gap-4 items-start">
         <div>
@@ -2155,8 +2385,59 @@ function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
             </ResponsiveContainer>
           </div>
 
-          {/* ผู้ช่วย AI */}
-          <div className="p-4 rounded-2xl" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}44` }}>
+        </div>
+
+        {/* แถบขวา: รายละเอียดวันที่เลือก */}
+        <div className="lg:sticky lg:top-6">
+          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div>
+                <div className="font-mono text-2xs" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</div>
+                <div className="font-body text-xs" style={{ color: C.muted }}>วัน{WEEKDAY_FULL[new Date(selectedDate + 'T00:00:00').getDay()]}</div>
+              </div>
+              <button onClick={() => onOpenDay && onOpenDay(selectedDate)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: BRAND, color: '#fff' }}>เปิดทำงานวันนี้</button>
+            </div>
+
+            {!sel || sel.total === 0 ? (
+              <p className="font-body text-xs" style={{ color: C.muted }}>ไม่มีงานในวันนี้ — กดปุ่มด้านบนเพื่อเข้าไปเพิ่มงาน</p>
+            ) : (
+              <>
+                <div style={{ width: '100%', height: 7, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ width: `${sel.total ? (sel.done / sel.total) * 100 : 0}%`, height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
+                </div>
+                <div className="font-mono text-2xs mt-1.5 mb-2.5" style={{ color: C.muted }}>{sel.done}/{sel.total} งานเสร็จ ({Math.round((sel.done / sel.total) * 100)}%)</div>
+
+                {sel.tasks.length > 0 ? (
+                  <div className="space-y-1 max-h-72 overflow-y-auto">
+                    {sel.tasks.map((t) => {
+                      const ch = channels.find((c) => c.id === t.channelId);
+                      return (
+                        <div key={t.id} className="flex items-center gap-1.5 py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          {t.done ? <CheckCircle2 size={12} style={{ color: C.emerald }} className="shrink-0" /> : <Square size={12} style={{ color: C.muted }} className="shrink-0" />}
+                          <span className="font-body text-xs truncate" style={{ color: t.done ? C.muted : C.text, textDecoration: t.done ? 'line-through' : 'none' }}>
+                            {ch ? `${ch.name} · ` : ''}{t.label}
+                          </span>
+                          {typeof t.reviewScore === 'number' && (
+                            <span className="font-mono shrink-0 ml-auto" style={{ fontSize: 9, color: t.reviewScore >= 8 ? C.emerald : t.reviewScore >= 5 ? C.orange : C.red }}>{t.reviewScore}/10</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  sel.missed.length > 0 && (
+                    <div>
+                      <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>งานที่ยังไม่เสร็จ</div>
+                      {sel.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.text }}>• {m.channelName} — {m.label}</div>)}
+                    </div>
+                  )
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ผู้ช่วย AI — ย้ายมาไว้ต่อจากกล่องรายละเอียดวันที่เลือก */}
+          <div className="p-4 rounded-2xl mt-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.violet}44` }}>
             <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
               <div className="flex items-center gap-2"><Sparkles size={14} style={{ color: C.violet }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.violet }}>ผู้ช่วยวางแผนจากพฤติกรรมจริง</span></div>
               <button onClick={runInsight} disabled={loadingAi} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.violet, color: '#fff', opacity: loadingAi ? 0.6 : 1 }}>
@@ -2237,57 +2518,294 @@ function CalendarPage({ history, tasks, channels, onOpenDay, futureTasks }) {
             )}
           </div>
         </div>
+      </div>
 
-        {/* แถบขวา: รายละเอียดวันที่เลือก */}
-        <div className="lg:sticky lg:top-6">
-          <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <div>
-                <div className="font-mono text-2xs" style={{ color: C.blue }}>{selectedDate}{selectedDate === todayStr ? ' (วันนี้)' : ''}</div>
-                <div className="font-body text-xs" style={{ color: C.muted }}>วัน{WEEKDAY_FULL[new Date(selectedDate + 'T00:00:00').getDay()]}</div>
-              </div>
-              <button onClick={() => onOpenDay && onOpenDay(selectedDate)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg shrink-0" style={{ background: BRAND, color: '#fff' }}>เปิดทำงานวันนี้</button>
-            </div>
+      {/* แนวโน้มรายวันทั้งเดือน */}
+      {dailyTrend.length > 1 && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>แนวโน้มรายวันทั้งเดือน</div>
+          <ResponsiveContainer width="100%" height={190}>
+            <LineChart data={dailyTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+              <XAxis dataKey="date" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis yAxisId="l" domain={[0, 100]} tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis yAxisId="r" orientation="right" domain={[0, 100]} tick={{ fill: C.muted, fontSize: 10 }} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line yAxisId="l" type="monotone" dataKey="pct" name="ทำเสร็จ %" stroke={C.emerald} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+              <Line yAxisId="r" type="monotone" dataKey="score" name="คะแนนคุณภาพ (x10)" stroke={C.violet} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-            {!sel || sel.total === 0 ? (
-              <p className="font-body text-xs" style={{ color: C.muted }}>ไม่มีงานในวันนี้ — กดปุ่มด้านบนเพื่อเข้าไปเพิ่มงาน</p>
-            ) : (
-              <>
-                <div style={{ width: '100%', height: 7, background: C.bgDeep, borderRadius: 999, overflow: 'hidden' }}>
-                  <div style={{ width: `${sel.total ? (sel.done / sel.total) * 100 : 0}%`, height: '100%', background: `linear-gradient(90deg, ${C.emerald}, ${C.cyan})` }} />
-                </div>
-                <div className="font-mono text-2xs mt-1.5 mb-2.5" style={{ color: C.muted }}>{sel.done}/{sel.total} งานเสร็จ ({Math.round((sel.done / sel.total) * 100)}%)</div>
+      {/* เทียบผลงานรายช่องในเดือนนี้ */}
+      {byChannelMonth.length > 0 && (
+        <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เทียบผลงานรายช่องในเดือนนี้</div>
+          <ResponsiveContainer width="100%" height={Math.max(140, byChannelMonth.length * 40)}>
+            <BarChart data={byChannelMonth} layout="vertical" margin={{ left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
+              <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} />
+              <YAxis type="category" dataKey="name" width={90} tick={{ fill: C.muted, fontSize: 10 }} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="total" name="งานทั้งหมด" fill={C.border} radius={[0, 4, 4, 0]} />
+              <Bar dataKey="done" name="ทำเสร็จ" radius={[0, 4, 4, 0]}>
+                {byChannelMonth.map((c, i) => <Cell key={i} fill={c.color || C.emerald} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
-                {sel.tasks.length > 0 ? (
-                  <div className="space-y-1 max-h-72 overflow-y-auto">
-                    {sel.tasks.map((t) => {
-                      const ch = channels.find((c) => c.id === t.channelId);
-                      return (
-                        <div key={t.id} className="flex items-center gap-1.5 py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
-                          {t.done ? <CheckCircle2 size={12} style={{ color: C.emerald }} className="shrink-0" /> : <Square size={12} style={{ color: C.muted }} className="shrink-0" />}
-                          <span className="font-body text-xs truncate" style={{ color: t.done ? C.muted : C.text, textDecoration: t.done ? 'line-through' : 'none' }}>
-                            {ch ? `${ch.name} · ` : ''}{t.label}
-                          </span>
-                          {typeof t.reviewScore === 'number' && (
-                            <span className="font-mono shrink-0 ml-auto" style={{ fontSize: 9, color: t.reviewScore >= 8 ? C.emerald : t.reviewScore >= 5 ? C.orange : C.red }}>{t.reviewScore}/10</span>
-                          )}
-                        </div>
-                      );
-                    })}
+      <div className="grid sm:grid-cols-2 gap-4 mb-4">
+        {/* สัดส่วนงานเดือนนี้ */}
+        <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>สัดส่วนงานเดือนนี้</div>
+          {statusPie.length === 0 ? <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลเดือนนี้</p> : (
+            <div className="flex items-center gap-4">
+              <ResponsiveContainer width={110} height={110}>
+                <PieChart>
+                  <Pie data={statusPie} dataKey="value" innerRadius={30} outerRadius={50} stroke="none">
+                    {statusPie.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-1.5">
+                {statusPie.map((d) => (
+                  <div key={d.name} className="flex items-center gap-1.5">
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: d.color }} />
+                    <span className="font-body text-xs" style={{ color: C.text }}>{d.name}</span>
+                    <span className="font-mono text-2xs" style={{ color: C.muted }}>({d.value})</span>
                   </div>
-                ) : (
-                  sel.missed.length > 0 && (
-                    <div>
-                      <div className="font-mono text-2xs mb-1" style={{ color: C.red }}>งานที่ยังไม่เสร็จ</div>
-                      {sel.missed.map((m, i) => <div key={i} className="font-body text-xs" style={{ color: C.text }}>• {m.channelName} — {m.label}</div>)}
-                    </div>
-                  )
-                )}
-              </>
-            )}
-          </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* เทียบเดือนนี้กับเดือนก่อน */}
+        <div className="p-4 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs tracking-widest mb-3" style={{ color: C.blue }}>เทียบกับเดือนก่อน</div>
+          {prevPct == null ? (
+            <p className="font-body text-xs" style={{ color: C.muted }}>ยังไม่มีข้อมูลเดือนก่อนให้เทียบ</p>
+          ) : (
+            <div className="flex items-center gap-4">
+              <div className="flex-1 text-center">
+                <div className="font-mono text-2xs mb-1" style={{ color: C.muted }}>เดือนก่อน</div>
+                <div className="font-display text-2xl font-bold" style={{ color: C.text }}>{prevPct}%</div>
+              </div>
+              <ArrowRight size={16} style={{ color: C.muted }} className="shrink-0" />
+              <div className="flex-1 text-center">
+                <div className="font-mono text-2xs mb-1" style={{ color: C.muted }}>เดือนนี้</div>
+                <div className="font-display text-2xl font-bold" style={{ color: mPct >= prevPct ? C.emerald : C.red }}>{mPct}%</div>
+              </div>
+              <div className="shrink-0 px-2.5 py-1 rounded-lg font-mono text-2xs" style={{ color: monthDelta >= 0 ? C.emerald : C.red, border: `1px solid ${monthDelta >= 0 ? C.emerald : C.red}` }}>
+                {monthDelta >= 0 ? '+' : ''}{monthDelta}%
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* ระบบติดตามทีม — เห็นเฉพาะเจ้าของระบบ/ผู้บริหาร */}
+      {user && user.clearance === 3 && <TeamTrackingPanel user={user} tasks={tasks} history={history} />}
+    </div>
+  );
+}
+
+const TEAM_SYS = `คุณคือหัวหน้าฝ่ายบุคคลที่ดูแลทีมผลิตคอนเทนต์ วิเคราะห์จากข้อมูลกิจกรรมจริงของทีมที่ให้มา
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ \`\`\`json
+{
+ "headline":"สรุปภาพรวมทีม 1 ประโยค ตรงไปตรงมา",
+ "teamScore":{"score":0-100,"comment":"ทีมโดยรวมทำงานดีแค่ไหน"},
+ "standouts":[{"name":"ชื่อหรืออีเมลที่ปรากฏในข้อมูลเท่านั้น","why":"ทำไมควรได้รับคำชม อ้างตัวเลขจริง"}],
+ "needsSupport":[{"name":"ชื่อหรืออีเมลที่ปรากฏในข้อมูลเท่านั้น","issue":"ปัญหาที่สังเกตได้จากตัวเลข","suggestion":"ควรช่วยยังไง"}],
+ "workloadAdvice":"ควรจัดสรรงานใหม่ยังไงให้สมดุลขึ้น",
+ "advice":"คำแนะนำหลัก 1 ข้อสำหรับหัวหน้าทีม"
+}
+กติกา: ใช้เฉพาะชื่อ/อีเมลที่มีอยู่ในข้อมูลจริงเท่านั้น ห้ามเดาหรือสมมติคนขึ้นมา · อ้างตัวเลขจริงเสมอ · ถ้าข้อมูลยังน้อยเกินไปให้บอกตรงๆ ใน headline`;
+
+// แปลงเวลาล่าสุดเป็นข้อความแบบละเอียด (นาที/ชม./วัน) — ใช้ในระบบติดตามทีม
+function lastSeenLabel(ts) {
+  if (!ts) return 'ไม่เคยใช้งาน';
+  const diffMin = Math.floor((Date.now() - ts) / 60000);
+  if (diffMin < 3) return 'ออนไลน์ตอนนี้';
+  if (diffMin < 60) return `${diffMin} นาทีที่แล้ว`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} ชม.ที่แล้ว`;
+  return `${Math.floor(diffHr / 24)} วันที่แล้ว`;
+}
+
+// ---------- ระบบติดตามทีม (เห็นเฉพาะเจ้าของระบบ/ผู้บริหาร — ฝังอยู่ท้ายหน้าปฏิทิน) ----------
+function TeamTrackingPanel({ user, tasks, history }) {
+  const [accounts, setAccounts] = useState([]);
+  const [presence, setPresence] = useState({});
+  const [feed, setFeed] = useState([]);
+  const [stats, setStats] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [aiResult, setAiResult] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiErr, setAiErr] = useState('');
+
+  async function load() {
+    setLoading(true); setErr('');
+    const [au, pr, us] = await Promise.all([
+      apiPost('/api/auth', { action: 'adminUsers' }),
+      apiPost('/api/auth', { action: 'adminPresence' }),
+      apiPost('/api/auth', { action: 'adminUsage' }),
+    ]);
+    if (au.ok) setAccounts(au.data.users || []); else setErr(au.data.error || 'โหลดรายชื่อทีมไม่สำเร็จ');
+    if (pr.ok) { setPresence(pr.data.presence || {}); setFeed(pr.data.feed || []); }
+    if (us.ok) setStats(us.data.stats || {});
+    setLoading(false);
+  }
+  useEffect(() => { load(); const id = setInterval(load, 30000); return () => clearInterval(id); }, []);
+
+  const members = accounts.filter((a) => a.email !== user.email);
+
+  // งานที่มีข้อมูล assignedTo — เก็บนับตั้งแต่อัปเดตนี้เป็นต้นไป งานเก่ายังไม่มีข้อมูลนี้
+  const allDays = collectAllDays(history, tasks);
+  const allTasksFlat = allDays.flatMap((d) => d.tasks);
+
+  const days30 = Object.keys(stats).sort().slice(-30);
+  const days7 = days30.slice(-7);
+
+  const rows = members.map((m) => {
+    const p = presence[m.email];
+    const tokens7 = days7.reduce((s, d) => s + (stats[d]?.[m.email]?.total || 0), 0);
+    const actions7 = feed.filter((f) => f.email === m.email && Date.now() - f.at < 7 * 24 * 3600 * 1000).length;
+    const myTasks = allTasksFlat.filter((t) => t.assignedTo === m.email);
+    return {
+      email: m.email, name: m.name || m.email, clearance: m.clearance,
+      lastAt: p ? p.at : (m.lastLogin || null),
+      lastPage: p ? p.page : null,
+      online: p ? Date.now() - p.at < 3 * 60 * 1000 : false,
+      tokens7, actions7,
+      assignedDone: myTasks.filter((t) => t.done).length, assignedTotal: myTasks.length,
+      inactive: !p || Date.now() - p.at > 7 * 24 * 3600 * 1000,
+    };
+  }).sort((a, b) => b.tokens7 - a.tokens7);
+
+  const chartData = rows.map((r) => ({ name: r.name.split(' ')[0] || r.email.split('@')[0], โทเค็น: r.tokens7 }));
+
+  async function runTeamAi() {
+    setAiLoading(true); setAiErr(''); setAiResult(null);
+    const payload = rows.map((r) => ({
+      ชื่อ: r.name, อีเมล: r.email, ระดับ: (CLEARANCE[r.clearance] || {}).label || '-',
+      ออนไลน์ตอนนี้: r.online, ใช้งานล่าสุด: lastSeenLabel(r.lastAt),
+      โทเค็นที่ใช้7วันล่าสุด: r.tokens7, จำนวนครั้งที่ใช้AI7วันล่าสุด: r.actions7,
+      งานที่ติ๊กเสร็จ_มีข้อมูลตั้งแต่วันนี้เท่านั้น: r.assignedDone,
+    }));
+    try {
+      const text = await callClaude(TEAM_SYS, `ข้อมูลกิจกรรมทีม (ไม่รวมตัวเอง):\n${JSON.stringify(payload)}`, undefined, 'teamAnalysis');
+      setAiResult(parseJsonLoose(text));
+    } catch (e) { setAiErr(e.message || 'วิเคราะห์ทีมไม่สำเร็จ'); }
+    setAiLoading(false);
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.red}33` }}>
+      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+        <div className="flex items-center gap-2"><Users size={14} style={{ color: C.red }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.red }}>ระบบติดตามทีม · เห็นเฉพาะเจ้าของ/ผู้บริหาร</span></div>
+        <button onClick={runTeamAi} disabled={aiLoading || members.length === 0} className="font-mono text-2xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background: C.red, color: '#fff', opacity: (aiLoading || members.length === 0) ? 0.5 : 1 }}>
+          {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} AI วิเคราะห์ทีม
+        </button>
+      </div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+        "ติ๊กเสร็จ" เริ่มเก็บข้อมูลจากอัปเดตนี้เป็นต้นไป — งานเก่าก่อนหน้านี้ยังไม่มีการบันทึกว่าใครทำ ส่วนอันดับกิจกรรม/โทเค็นใช้ข้อมูลจริงที่มีอยู่แล้วทั้งหมด
+      </p>
+
+      {loading ? (
+        <p className="font-mono text-2xs" style={{ color: C.muted }}>กำลังโหลด...</p>
+      ) : err ? (
+        <p className="font-mono text-2xs" style={{ color: C.red }}>{err}</p>
+      ) : members.length === 0 ? (
+        <p className="font-body text-xs" style={{ color: C.muted }}>องค์กรนี้ยังมีแค่คุณคนเดียว — ชวนเพื่อนร่วมทีมด้วยรหัสองค์กรได้ที่หน้า Setting</p>
+      ) : (
+        <>
+          <div className="space-y-1.5 mb-4">
+            {rows.map((r, i) => (
+              <div key={r.email} className="flex items-center gap-2.5 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <span className="font-mono shrink-0 w-5 text-center" style={{ fontSize: 10, color: i === 0 ? C.orange : C.muted }}>{i + 1}</span>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: r.online ? C.emerald : C.border }} />
+                <div className="min-w-0 flex-1">
+                  <div className="font-body text-xs truncate" style={{ color: C.text }}>{r.name} <span style={{ color: C.muted }}>· {(CLEARANCE[r.clearance] || {}).label || '-'}</span></div>
+                  <div className="font-mono flex items-center gap-1" style={{ fontSize: 9, color: r.inactive ? C.red : C.muted }}>
+                    <Clock size={9} /> {r.online ? 'ออนไลน์ตอนนี้' : lastSeenLabel(r.lastAt)}{r.lastPage ? ` · ${r.lastPage}` : ''}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="font-mono text-2xs" style={{ color: C.violet }}>{r.tokens7} โทเค็น/7วัน</div>
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>
+                    {r.assignedTotal > 0 ? `ติ๊กเสร็จ ${r.assignedDone}/${r.assignedTotal}` : 'ยังไม่มีข้อมูลงาน'}
+                  </div>
+                </div>
+                {r.inactive && <AlertTriangle size={13} style={{ color: C.red }} className="shrink-0" />}
+              </div>
+            ))}
+          </div>
+
+          {chartData.length > 0 && (
+            <div className="mb-4">
+              <div className="font-mono text-2xs tracking-widest mb-2" style={{ color: C.blue }}>เทียบกิจกรรม 7 วันล่าสุด (โทเค็นที่ใช้)</div>
+              <ResponsiveContainer width="100%" height={Math.max(120, chartData.length * 36)}>
+                <BarChart data={chartData} layout="vertical" margin={{ left: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false} />
+                  <XAxis type="number" tick={{ fill: C.muted, fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" width={70} tick={{ fill: C.muted, fontSize: 10 }} />
+                  <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, fontSize: 11 }} />
+                  <Bar dataKey="โทเค็น" fill={C.violet} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {aiErr && <p className="font-mono text-2xs mb-2" style={{ color: C.orange }}>{aiErr}</p>}
+          {aiResult && (
+            <div className="space-y-2.5 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                {aiResult.teamScore && (
+                  <div className="shrink-0 text-center px-2.5 py-1.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${aiResult.teamScore.score >= 70 ? C.emerald : aiResult.teamScore.score >= 40 ? C.orange : C.red}` }}>
+                    <div className="font-display text-lg font-bold leading-none" style={{ color: aiResult.teamScore.score >= 70 ? C.emerald : aiResult.teamScore.score >= 40 ? C.orange : C.red }}>{aiResult.teamScore.score}</div>
+                    <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>คะแนนทีม</div>
+                  </div>
+                )}
+                <p className="font-body text-sm flex-1 min-w-[180px]" style={{ color: C.text }}>{aiResult.headline}</p>
+              </div>
+              {aiResult.teamScore?.comment && <p className="font-body text-xs" style={{ color: C.muted }}>{aiResult.teamScore.comment}</p>}
+              {Array.isArray(aiResult.standouts) && aiResult.standouts.length > 0 && (
+                <div className="p-2.5 rounded-xl" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+                  <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>ควรได้รับคำชม</div>
+                  {aiResult.standouts.map((s, i) => <p key={i} className="font-body text-xs" style={{ color: C.text }}>▸ {s.name}: {s.why}</p>)}
+                </div>
+              )}
+              {Array.isArray(aiResult.needsSupport) && aiResult.needsSupport.length > 0 && (
+                <div className="space-y-1.5">
+                  {aiResult.needsSupport.map((s, i) => (
+                    <div key={i} className="p-2.5 rounded-xl" style={{ background: C.bgDeep, borderLeft: `3px solid ${C.orange}`, border: `1px solid ${C.border}` }}>
+                      <div className="font-body text-xs" style={{ color: C.orange }}>{s.name} — {s.issue}</div>
+                      <div className="font-body text-xs" style={{ color: C.muted }}>→ {s.suggestion}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {aiResult.workloadAdvice && (
+                <p className="font-body text-xs p-2.5 rounded-xl" style={{ color: C.text, background: C.bgDeep }}><span style={{ color: C.cyan }}>จัดสรรงาน: </span>{aiResult.workloadAdvice}</p>
+              )}
+              {aiResult.advice && (
+                <div className="p-2.5 rounded-xl" style={{ background: `${C.violet}12`, border: `1px solid ${C.violet}44` }}>
+                  <div className="font-mono text-2xs mb-1" style={{ color: C.violet }}>คำแนะนำหลัก</div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{aiResult.advice}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -6312,7 +6830,7 @@ function DayNavigator({ viewDate, setViewDate }) {
   );
 }
 
-function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, setHistory, reminder, onDismissReminder, onOpenCalendar, initialViewDate, onConsumeInitialViewDate, onTrash }) {
+function DailyWork({ user, channels, setChannels, tasks, setTasks, futureTasks, setFutureTasks, history, setHistory, reminder, onDismissReminder, onOpenCalendar, initialViewDate, onConsumeInitialViewDate, onTrash }) {
   const [showAdd, setShowAdd] = useState(false);
   const [loadingMap, setLoadingMap] = useState({});
   const [generatingAllId, setGeneratingAllId] = useState(null);
@@ -6452,7 +6970,12 @@ function DailyWork({ channels, setChannels, tasks, setTasks, futureTasks, setFut
     });
   }
   function toggleTask(id) {
-    setActiveTasksUpdater((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+    setActiveTasksUpdater((prev) => prev.map((t) => {
+      if (t.id !== id) return t;
+      const nowDone = !t.done;
+      // ติ๊กว่าเสร็จ → บันทึกว่าใครเป็นคนติ๊ก (ใช้ในระบบติดตามทีมที่หน้าปฏิทิน) · ติ๊กออก → ไม่ลบประวัติเดิม
+      return { ...t, done: nowDone, assignedTo: nowDone ? (user?.email || t.assignedTo || null) : t.assignedTo };
+    }));
   }
   function resetTask(task) {
     setActiveTasksUpdater((prev) => prev.map((t) => (t.id === task.id ? emptyTask(t.id, t.channelId, t.platform, t.type, t.label, t.date) : t)));
@@ -7139,10 +7662,10 @@ export default function CompanyPortal() {
         <div className="flex">
           <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} features={features} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
           <div className="flex-1 min-w-0">
-            {stage === 'daily' && <DailyWork channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
+            {stage === 'daily' && <DailyWork user={user} channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
             {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} />}
-            {stage === 'calendar' && <CalendarPage history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
+            {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
