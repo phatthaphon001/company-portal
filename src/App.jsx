@@ -675,7 +675,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [loginStep, setLoginStep] = useState('credentials');
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '', code: '' });
   const [loginError, setLoginError] = useState('');
-  const [otpToken, setOtpToken] = useState('');
+  const [otpRef, setOtpRef] = useState(''); // ตัวอ้างอิงแบบสุ่ม ไม่มีรหัสอยู่ข้างใน
   const [otpEmail, setOtpEmail] = useState('');
   const [otpLoading, setOtpLoading] = useState(false);
   const [pendingAccount, setPendingAccount] = useState(null); // เก็บไว้แสดงชื่อระหว่างรอ OTP
@@ -711,12 +711,12 @@ function Terminal({ accounts, onSignup, onLogin }) {
 
       const { ok: sendOk, data } = await apiPost('/api/send-code', { email: acc.email });
       setOtpLoading(false);
-      if (!sendOk || !data.token) {
+      if (!sendOk || !data.ref) {
         // ส่งอีเมลไม่ได้ (เช่น ยังไม่ได้ยืนยันโดเมนใน Resend) — บอกให้ชัด อย่าปล่อยค้าง
         setLoginError((data.error || 'ส่งรหัสยืนยันไม่สำเร็จ') + ' — กรุณาแจ้งผู้ดูแลระบบให้ยกเว้นการยืนยันอีเมลให้บัญชีนี้');
         return;
       }
-      setOtpToken(data.token);
+      setOtpRef(data.ref);
       setOtpEmail(acc.email);
       setPendingAccount(acc);
       setLoginForm((f) => ({ ...f, code: '' }));
@@ -733,7 +733,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
     setOtpLoading(true);
     try {
       // เซิร์ฟเวอร์ตรวจ OTP เองแล้วออกโทเค็นให้ — หน้าเว็บปลอมขั้นตอนนี้ไม่ได้
-      const { ok, data } = await apiPost('/api/auth', { action: 'completeOtpLogin', otpToken, code: loginForm.code.trim() });
+      const { ok, data } = await apiPost('/api/auth', { action: 'completeOtpLogin', otpRef, code: loginForm.code.trim() });
       setOtpLoading(false);
       if (!ok) { setLoginError(data.error || 'รหัสไม่ถูกต้องหรือหมดอายุ'); return; }
       saveSession(data.token);
