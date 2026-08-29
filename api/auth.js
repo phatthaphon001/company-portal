@@ -4,13 +4,14 @@ import {
   issueToken, requireUser, sanitize, rateLimit,
   isBanned, addBan, removeBan, listBans, recordSuspicious, clientIp,
   logActivity, getActivityLog, autoBackup, listBackups, getBackup,
-  PLANS, TOKEN_COST, planOf, tokenState, getUsageStats,
+  PLANS, TIERS, TOKEN_COST, planOf, tokenState, tierOf, isPooledPlan, getUsageStats,
   isDisposableEmail, checkSignupAbuse, markSignup,
   getGate, saveGate, gateCheck, consumeInviteCode, makeInviteCode,
   addTicket, listTickets, updateTicket,
   getFeatures, saveFeatures, FEATURE_DEFS,
   touchPresence, getPresence, pushFeed, getFeed,
   createOtp, consumeOtp,
+  sendAlertEmail, alertRecipients,
   ROLES, roleOf, roleLevel, isDev, isExec, isManager, orgIdOf,
   getOrgs, getOrg, upsertOrg, makeOrgCode,
 } from './_lib.js';
@@ -113,6 +114,12 @@ export default async function handler(req, res) {
         const orgs = await getOrgs();
         const found = orgs.find((o) => o.code === joinCode);
         if (!found) return res.status(400).json({ error: 'รหัสองค์กรไม่ถูกต้อง — ขอรหัสจากผู้ดูแลองค์กรของคุณ' });
+        // จำนวนที่นั่งตามแพ็กขององค์กร — กันซื้อแพ็ก 5 คนแล้วใส่พนักงาน 50 คน
+        const seatLimit = (PLANS[found.plan] || {}).seats || 1;
+        const usedSeats = accounts.filter((a) => a.orgId === found.id).length;
+        if (usedSeats >= seatLimit) {
+          return res.status(403).json({ error: `องค์กรนี้ใช้ที่นั่งครบ ${seatLimit} คนแล้ว — ผู้ดูแลองค์กรต้องอัปเกรดแพ็กก่อนเพิ่มคน`, seatFull: true });
+        }
         orgId = found.id; orgName = found.name; orgRole = 'staff';
       } else {
         orgId = `org_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -221,7 +228,7 @@ export default async function handler(req, res) {
 
     if (action === 'me') {
       return res.status(200).json({
-        account: sanitize(me), tokens: tokenState(me), plans: PLANS, tokenCost: TOKEN_COST,
+        account: sanitize(me), tokens: tokenState(me, await getOrg(orgIdOf(me))), plans: PLANS, tiers: TIERS, tokenCost: TOKEN_COST,
         features: await getFeatures(),
         role: roleOf(me), roleLevel: roleLevel(me), roles: ROLES,
         org: await getOrg(orgIdOf(me)),
@@ -447,6 +454,151 @@ export default async function handler(req, res) {
       return res.status(200).json({ account: sanitize(accounts[idx]) });
     }
 
+    // ---- ศูนย์แจ้งเตือน: รวมสัญญาณปัญหาจริงจากระบบ แล้วแยกเป็น 3 กลุ่ม ----
+    // ล่วงหน้า = ยังไม่เกิดแต่กำลังจะเกิด · กำลังเกิด = ต้องแก้ตอนนี้ · ตามหลัง = เกิดไปแล้วรอตามเก็บ
+    if (action === 'protocolScan') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขึ้นไปเท่านั้น' });
+      const myOrgP = orgIdOf(me);
+      const devView = isDev(me);
+      const scope = accounts.filter((a) => devView || orgIdOf(a) === myOrgP);
+      const scopeEmails = new Set(scope.map((a) => a.email));
+      const now = Date.now();
+      const DAY = 24 * 60 * 60 * 1000;
+
+      const ahead = [];   // ปัญหาล่วงหน้า
+      const current = []; // ปัญหาที่กำลังเกิด
+      const trailing = []; // ปัญหาที่ตามหลัง
+
+      // --- ตั๋วที่ยังไม่ได้ตอบ = ปัญหาที่กำลังเกิด ---
+      let tickets = [];
+      try { tickets = await listTickets(); } catch (e) {}
+      const openTickets = tickets.filter((t) => (devView || scopeEmails.has(t.email)) && t.status !== 'done');
+      openTickets.forEach((t) => {
+        const ageH = Math.floor((now - (t.at || now)) / 3600000);
+        current.push({
+          severity: ageH > 24 ? 'สูง' : 'กลาง',
+          area: 'คำขอจากผู้ใช้',
+          what: `${t.name || t.email} ส่ง${t.kind === 'tokens' ? 'คำขอโทเค็น' : 'คำขอความช่วยเหลือ'}ไว้ ยังไม่ได้ตอบ${ageH >= 1 ? ` (${ageH} ชม.)` : ''}`,
+          detail: String(t.message || '').slice(0, 200),
+          action: 'เข้าไปตอบในหน้าจัดการคำขอ',
+        });
+      });
+
+      // --- โทเค็นใกล้หมด = ปัญหาล่วงหน้า ---
+      // ถ้าองค์กรใช้โทเค็นกองกลาง ต้องเตือนครั้งเดียวในนามองค์กร ไม่ใช่เตือนซ้ำทุกคน
+      const myOrgRec = await getOrg(myOrgP);
+      if (myOrgRec && myOrgRec.plan && isPooledPlan(myOrgRec.plan)) {
+        const stOrg = tokenState(me, myOrgRec);
+        if (!stOrg.unlimited && stOrg.quota > 0) {
+          if (stOrg.left <= 0) current.push({ severity: 'สูง', area: 'โทเค็น', what: `โทเค็นกองกลางขององค์กรหมดแล้ว ทุกคนใช้ AI ต่อไม่ได้`, action: 'ต่ออายุแพ็กหรือเติมโทเค็น' });
+          else if (stOrg.left / stOrg.quota < 0.15) ahead.push({ severity: 'กลาง', area: 'โทเค็น', what: `โทเค็นกองกลางเหลือ ${stOrg.left} จาก ${stOrg.quota} (ต่ำกว่า 15%) ใช้ร่วมกันทั้งทีม`, action: 'เตรียมเติมก่อนหมด ไม่งั้นทั้งทีมสะดุดพร้อมกัน' });
+        }
+      } else {
+        scope.forEach((a) => {
+          const st = tokenState(a);
+          if (st.unlimited) return;
+          const total = st.quota;
+          if (total > 0 && st.left <= 0) {
+            current.push({ severity: 'สูง', area: 'โทเค็น', what: `${a.name || a.email} โทเค็นหมดแล้ว ใช้ AI ต่อไม่ได้`, action: 'เติมโทเค็นให้ หรือแนะนำให้ใส่คีย์ Gemini ของตัวเอง' });
+          } else if (total > 0 && st.left / total < 0.15) {
+            ahead.push({ severity: 'กลาง', area: 'โทเค็น', what: `${a.name || a.email} เหลือโทเค็น ${st.left} (ต่ำกว่า 15%)`, action: 'เตรียมเติมก่อนหมด ไม่งั้นงานสะดุดกลางคัน' });
+          }
+        });
+      }
+
+      // --- บัญชียังไม่ยินยอม/ยังไม่ตั้งค่า = ล่วงหน้า ---
+      const notOnboarded = scope.filter((a) => !a.onboardedAt);
+      if (notOnboarded.length) {
+        ahead.push({
+          severity: 'ต่ำ', area: 'บัญชีผู้ใช้',
+          what: `มี ${notOnboarded.length} บัญชีที่สมัครแล้วแต่ยังไม่ผ่านหน้ายินยอม`,
+          detail: notOnboarded.slice(0, 5).map((a) => a.email).join(', '),
+          action: 'ทักไปเตือนให้เข้ามากรอกให้เสร็จ ไม่งั้นใช้ระบบไม่ได้',
+        });
+      }
+
+      // --- คนหายไปนาน = ตามหลัง ---
+      let presence = {};
+      try { presence = await getPresence(); } catch (e) {}
+      scope.forEach((a) => {
+        if (a.email === me.email) return;
+        const p = presence[a.email];
+        const last = p ? p.at : (a.lastLogin || 0);
+        if (last && now - last > 7 * DAY) {
+          trailing.push({ severity: 'ต่ำ', area: 'ทีมงาน', what: `${a.name || a.email} ไม่ได้เข้าระบบมา ${Math.floor((now - last) / DAY)} วัน`, action: 'เช็คว่ายังทำงานอยู่ไหม หรือควรปิดบัญชี' });
+        }
+      });
+
+      // --- ความปลอดภัย: ล็อกอินล้มเหลว / OTP ผิด / ถูกแบน = กำลังเกิด ---
+      if (devView) {
+        let log = [];
+        try { log = await getActivityLog(); } catch (e) {}
+        const recent = log.filter((l) => now - (l.at || 0) < DAY);
+        const failed = recent.filter((l) => l.type === 'login_failed' || l.type === 'otp_failed').length;
+        if (failed >= 10) {
+          current.push({ severity: 'สูง', area: 'ความปลอดภัย', what: `24 ชม.ที่ผ่านมามีการล็อกอิน/ใส่รหัสผิด ${failed} ครั้ง อาจมีคนพยายามเดารหัส`, action: 'ดูบันทึกกิจกรรมว่ามาจาก IP เดียวกันไหม ถ้าใช่ให้แบน' });
+        }
+        const blocked = recent.filter((l) => l.type === 'signup_blocked').length;
+        if (blocked >= 5) {
+          trailing.push({ severity: 'กลาง', area: 'ความปลอดภัย', what: `มีการสมัครที่ถูกบล็อก ${blocked} ครั้งใน 24 ชม.`, action: 'ตรวจว่าเป็นคนพยายามเลี่ยงข้อจำกัด หรือระบบกันผิดพลาด' });
+        }
+        let bans = [];
+        try { bans = await listBans(); } catch (e) {}
+        if (bans.length) trailing.push({ severity: 'ต่ำ', area: 'ความปลอดภัย', what: `มี ${bans.length} อุปกรณ์/IP ที่ถูกระงับอยู่`, action: 'ทบทวนว่ายังควรระงับอยู่ไหม' });
+      }
+
+      // --- สำรองข้อมูล = ล่วงหน้า ---
+      try {
+        const backups = await listBackups(me.email);
+        const latest = Array.isArray(backups) && backups.length ? backups[backups.length - 1] : null;
+        const latestDate = latest ? (latest.date || latest) : null;
+        if (!latestDate) {
+          ahead.push({ severity: 'กลาง', area: 'ข้อมูล', what: 'ยังไม่เคยสำรองข้อมูลเลย', action: 'กดสำรองข้อมูลในหน้าตั้งค่า ก่อนข้อมูลหาย' });
+        } else {
+          const days = Math.floor((now - new Date(String(latestDate) + 'T00:00:00').getTime()) / DAY);
+          if (days > 7) ahead.push({ severity: 'กลาง', area: 'ข้อมูล', what: `สำรองข้อมูลล่าสุดเมื่อ ${days} วันก่อน`, action: 'สำรองใหม่ ถ้าข้อมูลหายตอนนี้จะย้อนได้ถึงแค่วันนั้น' });
+        }
+      } catch (e) {}
+
+      // --- การตั้งค่าที่ทำให้ระบบเสี่ยง = กำลังเกิด ---
+      try {
+        const sec = await getSecurity();
+        if (sec.otpDisabled) current.push({ severity: 'สูง', area: 'ความปลอดภัย', what: 'ระบบปิดการยืนยันอีเมล (OTP) อยู่ ทุกบัญชีเข้าได้ด้วยรหัสผ่านอย่างเดียว', action: 'เปิดกลับในหน้าตั้งค่าความปลอดภัย ถ้าไม่ได้ตั้งใจปิดไว้ชั่วคราว' });
+      } catch (e) {}
+
+      const order = { 'สูง': 0, 'กลาง': 1, 'ต่ำ': 2 };
+      const sortBy = (arr) => arr.sort((a, b) => (order[a.severity] ?? 3) - (order[b.severity] ?? 3));
+      return res.status(200).json({
+        ahead: sortBy(ahead), current: sortBy(current), trailing: sortBy(trailing),
+        scannedAt: now,
+        scope: devView ? 'ทั้งระบบ' : 'องค์กรของคุณ',
+      });
+    }
+
+    // ---- ส่งสรุปปัญหาเข้าอีเมล เพื่อให้รู้เรื่องแม้ไม่ได้เปิดเว็บ ----
+    if (action === 'protocolEmail') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขึ้นไปเท่านั้น' });
+      const rl = await rateLimit(`protoemail_${me.email}`, 6, 60 * 60 * 1000);
+      if (!rl.allowed) return res.status(429).json({ error: `ส่งอีเมลถี่เกินไป ลองใหม่ใน ${Math.ceil(rl.retrySec / 60)} นาที` });
+      const { ahead = [], current = [], trailing = [] } = req.body || {};
+      const fmt = (arr, label) => arr.length
+        ? [`<b>${label} (${arr.length})</b>`, ...arr.slice(0, 12).map((x) => `• [${x.severity}] ${x.area}: ${x.what}${x.action ? ` → ${x.action}` : ''}`)]
+        : [`<b>${label}</b>`, '• ไม่พบปัญหา'];
+      const lines = [
+        ...fmt(current, 'ปัญหาที่กำลังเกิด'), '',
+        ...fmt(ahead, 'ปัญหาล่วงหน้า'), '',
+        ...fmt(trailing, 'ปัญหาที่ตามหลัง'),
+      ];
+      const r = await sendAlertEmail({
+        to: [me.email],
+        subject: `[FORGE] สรุปปัญหาระบบ ${current.length ? `— ด่วน ${current.length} เรื่อง` : ''}`,
+        title: 'สรุปสถานะระบบ',
+        lines,
+      });
+      if (!r.ok) return res.status(500).json({ error: r.reason || 'ส่งอีเมลไม่สำเร็จ' });
+      return res.status(200).json({ ok: true, to: me.email });
+    }
+
     if (action === 'updateProfile') {
       const { patch } = req.body;
       const idx = accounts.findIndex((a) => a.email === me.email); // แก้ได้เฉพาะบัญชีตัวเอง
@@ -507,6 +659,20 @@ export default async function handler(req, res) {
       if (!rl.allowed) return res.status(429).json({ error: `ส่งคำขอถี่เกินไป ลองใหม่ใน ${Math.ceil(rl.retrySec / 60)} นาที` });
       const t = await addTicket({ kind: kind === 'tokens' ? 'tokens' : 'help', email: me.email, name: me.name, message: String(message).slice(0, 1000) });
       await logActivity({ type: 'ticket', email: me.email, kind });
+      // แจ้งทางอีเมลทันที เพื่อให้รู้เรื่องแม้ไม่ได้เปิดหน้าเว็บอยู่
+      // ไม่ await ผลลัพธ์ ถ้าอีเมลส่งไม่ได้ก็ต้องไม่ทำให้การส่งตั๋วล้มเหลว
+      alertRecipients(orgIdOf(me)).then((to) => sendAlertEmail({
+        to,
+        subject: `[FORGE] มีคำขอใหม่จาก ${me.name || me.email}`,
+        title: kind === 'tokens' ? 'มีคำขอโทเค็นเข้ามาใหม่' : 'มีคำขอความช่วยเหลือเข้ามาใหม่',
+        lines: [
+          `<b>จาก:</b> ${me.name || '-'} (${me.email})`,
+          `<b>องค์กร:</b> ${me.orgName || '-'}`,
+          `<b>ประเภท:</b> ${kind === 'tokens' ? 'ขอโทเค็นเพิ่ม' : 'ขอความช่วยเหลือ'}`,
+          `<b>ข้อความ:</b><br>${String(message).slice(0, 1000).replace(/</g, '&lt;').replace(/\n/g, '<br>')}`,
+        ],
+        footer: 'เข้าไปตอบได้ที่หน้าตั้งค่า > กล่องคำขอ',
+      })).catch(() => {});
       return res.status(200).json({ ok: true, ticket: t });
     }
     if (action === 'myTickets') {
@@ -616,6 +782,41 @@ export default async function handler(req, res) {
       await logActivity({ type: 'grant_tokens', target: email, amount, by: me.email });
       return res.status(200).json({ ok: true, tokens: tokenState(accounts[idx]) });
     }
+    // ---- ตั้งแพ็กให้ทั้งองค์กร (แพ็กแบบกองกลาง) ----
+    // แพ็กนิติบุคคล/องค์กรต้องผูกกับองค์กร ไม่ใช่รายบุคคล ไม่งั้นพนักงานจะไม่ได้อะไรจากที่บริษัทจ่าย
+    if (action === 'adminSetOrgPlan') {
+      if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
+      const { orgId: targetOrgId, plan } = req.body;
+      if (!PLANS[plan]) return res.status(400).json({ error: 'แพ็กเกจไม่ถูกต้อง' });
+      if (!targetOrgId) return res.status(400).json({ error: 'ต้องระบุองค์กร' });
+      const cur = await getOrg(targetOrgId);
+      if (!cur) return res.status(404).json({ error: 'ไม่พบองค์กร' });
+      // เตือนถ้าคนในองค์กรมากกว่าที่นั่งของแพ็กใหม่ — ไม่บล็อก แต่ต้องรู้
+      const members = accounts.filter((a) => orgIdOf(a) === targetOrgId).length;
+      const seats = PLANS[plan].seats || 1;
+      const next = await upsertOrg({ id: targetOrgId, plan, tokensUsed: 0, cycleStart: Date.now() });
+      await logActivity({ type: 'set_org_plan', orgId: targetOrgId, plan, by: me.email });
+      return res.status(200).json({
+        ok: true, org: next,
+        warning: members > seats ? `องค์กรนี้มี ${members} คน แต่แพ็ก${PLANS[plan].name}รองรับ ${seats} ที่นั่ง — คนที่เกินยังใช้ได้ แต่จะเพิ่มคนใหม่ไม่ได้` : null,
+      });
+    }
+
+    // ---- ผู้บริหารตั้งแผนกให้พนักงานในองค์กรตัวเอง ----
+    if (action === 'setMemberDept') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขององค์กรเท่านั้น' });
+      const { email: t, dept } = req.body;
+      const idx = accounts.findIndex((a) => a.email === t);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      if (!isDev(me) && orgIdOf(accounts[idx]) !== orgIdOf(me)) {
+        return res.status(403).json({ error: 'แก้ข้อมูลคนนอกองค์กรไม่ได้' });
+      }
+      accounts[idx].dept = String(dept || '').slice(0, 60).trim();
+      await saveAccounts(accounts);
+      await logActivity({ type: 'set_dept', target: t, dept, by: me.email });
+      return res.status(200).json({ ok: true });
+    }
+
     if (action === 'adminSetPlan') {
       if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
       const { email, plan } = req.body;
