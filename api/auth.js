@@ -10,6 +10,7 @@ import {
   addTicket, listTickets, updateTicket,
   getFeatures, saveFeatures, FEATURE_DEFS,
   touchPresence, getPresence, pushFeed, getFeed,
+  createOtp, consumeOtp,
   ROLES, roleOf, roleLevel, isDev, isExec, isManager, orgIdOf,
   getOrgs, getOrg, upsertOrg, makeOrgCode,
 } from './_lib.js';
@@ -189,29 +190,28 @@ export default async function handler(req, res) {
 
     // ออกโทเค็นหลังยืนยัน OTP สำเร็จ (ฝั่งเซิร์ฟเวอร์ตรวจ OTP เองอีกชั้น ไม่เชื่อหน้าเว็บ)
     if (action === 'completeOtpLogin') {
-      const { otpToken, code } = req.body;
-      const crypto = await import('crypto');
-      if (!otpToken || !code) return res.status(400).json({ error: 'ข้อมูลไม่ครบ' });
-      let email;
-      try {
-        const decoded = Buffer.from(otpToken, 'base64').toString('utf-8');
-        const parts = decoded.split(':');
-        const signature = parts.pop();
-        const expiresAt = parts.pop();
-        const storedCode = parts.pop();
-        email = parts.join(':');
-        const expected = crypto.default.createHmac('sha256', process.env.OTP_SECRET).update(`${email}:${storedCode}:${expiresAt}`).digest('hex');
-        const a = Buffer.from(signature); const b = Buffer.from(expected);
-        if (a.length !== b.length || !crypto.default.timingSafeEqual(a, b)) { await recordSuspicious(ip, 'otp_token_tampered'); return res.status(400).json({ error: 'โทเค็นไม่ถูกต้อง' }); }
-        if (Date.now() > Number(expiresAt)) return res.status(400).json({ error: 'รหัสหมดอายุแล้ว กรุณาขอรหัสใหม่' });
-        if (String(code) !== String(storedCode)) return res.status(400).json({ error: 'รหัสไม่ถูกต้อง' });
-      } catch (e) {
-        return res.status(400).json({ error: 'โทเค็นไม่ถูกต้อง' });
+      const { otpRef, otpToken, code } = req.body;
+      const ref = otpRef || otpToken; // รองรับชื่อเดิมจากหน้าเว็บรุ่นก่อน
+      if (!ref || !code) return res.status(400).json({ error: 'ข้อมูลไม่ครบ' });
+
+      // จำกัดการเดารหัสต่อ IP ด้วย นอกเหนือจากการนับครั้งผิดต่อรหัส
+      const otpRl = await rateLimit(`otpverify_${ip}`, 20, 15 * 60 * 1000);
+      if (!otpRl.allowed) return res.status(429).json({ error: `ยืนยันรหัสถี่เกินไป ลองใหม่ใน ${otpRl.retrySec} วินาที` });
+
+      // ตรวจกับรหัสที่เก็บไว้ฝั่งเซิร์ฟเวอร์ — ใช้ได้ครั้งเดียว ผิดเกิน 5 ครั้งถือว่าใช้ไม่ได้
+      const r = await consumeOtp(ref, code);
+      if (!r.ok) {
+        await recordSuspicious(ip, 'otp_failed');
+        return res.status(400).json({ error: r.reason });
       }
       const accounts = await getAccounts();
-      const account = accounts.find((a) => a.email === email);
+      const account = accounts.find((a) => a.email === r.email);
       if (!account) return res.status(404).json({ error: 'ไม่พบบัญชี' });
-      return res.status(200).json({ account: sanitize(account), token: issueToken(email) });
+      if (account.suspended) return res.status(403).json({ error: 'บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ' });
+      const ogk = await gateCheck(account.email, account, null);
+      if (!ogk.allowed) return res.status(403).json({ error: ogk.reason, gateBlocked: true });
+      await logActivity({ type: 'otp_login', email: account.email, ip });
+      return res.status(200).json({ account: sanitize(account), token: issueToken(account.email) });
     }
 
     // ---------- ต้องล็อกอินแล้วเท่านั้น ----------
@@ -317,6 +317,8 @@ export default async function handler(req, res) {
     }
 
     if (action === 'getSecurity') {
+      // ตั้งค่าความปลอดภัยบอกใบ้ว่าระบบเปิด OTP อยู่ไหม ไม่ควรให้ผู้ใช้ทั่วไปเห็น
+      if (me.clearance !== 3) return res.status(403).json({ error: 'เฉพาะระดับสูงสุดเท่านั้น' });
       return res.status(200).json({ security: await getSecurity() });
     }
 
