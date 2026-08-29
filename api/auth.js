@@ -315,11 +315,17 @@ export default async function handler(req, res) {
       if (!isDev(me)) return res.status(403).json({ error: 'เฉพาะผู้พัฒนาระบบเท่านั้น' });
       const orgs = await getOrgs();
       return res.status(200).json({
-        orgs: orgs.map((o) => ({
-          ...o,
-          members: accounts.filter((a) => orgIdOf(a) === o.id).length,
-          tokensUsed: accounts.filter((a) => orgIdOf(a) === o.id).reduce((s2, a) => s2 + (a.tokensUsed || 0), 0),
-        })),
+        orgs: orgs.map((o) => {
+          const mem = accounts.filter((a) => orgIdOf(a) === o.id);
+          // แพ็กกองกลางเก็บยอดใช้ไว้ที่องค์กร ไม่ใช่รวมจากรายคน (ถ้ารวมรายคนจะได้เลขผิด)
+          const pooled = isPooledPlan(o.plan);
+          return {
+            ...o,
+            members: mem.length,
+            tokensUsed: pooled ? (o.tokensUsed || 0) : mem.reduce((s2, a) => s2 + (a.tokensUsed || 0), 0),
+            pooled,
+          };
+        }),
       });
     }
 
