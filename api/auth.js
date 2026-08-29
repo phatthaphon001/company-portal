@@ -538,8 +538,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     if (action === 'adminPresence') {
-      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
-      return res.status(200).json({ presence: await getPresence(), feed: (await getFeed()).slice(-120).reverse() });
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบหรือผู้บริหารเท่านั้น' });
+      const presenceAll = await getPresence();
+      const feedAll = (await getFeed()).slice(-120).reverse();
+      if (isDev(me)) return res.status(200).json({ presence: presenceAll, feed: feedAll });
+      // ผู้บริหารองค์กร (ไม่ใช่ผู้พัฒนาระบบ) เห็นได้เฉพาะคนในองค์กรตัวเอง — presence/feed เก็บรวมทุกองค์กรไว้ที่เดียว ต้องกรองก่อนส่งออกเสมอ
+      const myOrg5 = orgIdOf(me);
+      const orgEmails5 = new Set(accounts.filter((a) => orgIdOf(a) === myOrg5).map((a) => a.email));
+      const presence = Object.fromEntries(Object.entries(presenceAll).filter(([email]) => orgEmails5.has(email)));
+      const feed = feedAll.filter((f) => orgEmails5.has(f.email));
+      return res.status(200).json({ presence, feed });
     }
     if (action === 'adminResetPassword') {
       if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
@@ -569,8 +577,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
     if (action === 'adminUsage') {
-      if (!me.isOwner) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบเท่านั้น' });
-      return res.status(200).json({ stats: await getUsageStats(), plans: PLANS });
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะเจ้าของระบบหรือผู้บริหารเท่านั้น' });
+      const statsAll = await getUsageStats();
+      if (isDev(me)) return res.status(200).json({ stats: statsAll, plans: PLANS });
+      // ผู้บริหารองค์กร เห็นเฉพาะสถิติของคนในองค์กรตัวเอง — usage_stats เก็บรวมทุกองค์กรไว้ที่เดียว ต้องกรองก่อนส่งออกเสมอ
+      const myOrg6 = orgIdOf(me);
+      const orgEmails6 = new Set(accounts.filter((a) => orgIdOf(a) === myOrg6).map((a) => a.email));
+      const stats = {};
+      for (const day of Object.keys(statsAll)) {
+        const dayEntries = Object.fromEntries(Object.entries(statsAll[day] || {}).filter(([email]) => orgEmails6.has(email)));
+        if (Object.keys(dayEntries).length) stats[day] = dayEntries;
+      }
+      return res.status(200).json({ stats, plans: PLANS });
     }
 
     // ---------- ผู้ดูแลระบบ: ความปลอดภัย / สำรองข้อมูล / บันทึกกิจกรรม ----------
