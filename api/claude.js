@@ -1,4 +1,4 @@
-import { requireUser, isBanned, clientIp, spendTokens, tokenState, reserveAiSlot, TOKEN_COST, pushFeed, touchPresence } from './_lib.js';
+import { requireUser, isBanned, clientIp, spendTokens, tokenState, reserveAiSlot, TOKEN_COST, pushFeed, touchPresence, getOrg, orgIdOf } from './_lib.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -26,7 +26,10 @@ export default async function handler(req, res) {
   const act = action || 'other';
   const cost = TOKEN_COST[act] || 1;
   if (usingCentral) {
-    const st = tokenState(me);
+    // ดึงองค์กรมาด้วย เพื่อให้พนักงานหักจากกองกลางของบริษัท ไม่ใช่โควตาส่วนตัว
+    let myOrg = null;
+    try { myOrg = await getOrg(orgIdOf(me)); } catch (e) { myOrg = null; }
+    const st = tokenState(me, myOrg);
     if (!st.unlimited && st.left < cost) {
       return res.status(402).json({
         error: `โทเค็นไม่พอ (เหลือ ${st.left} ต้องใช้ ${cost}) — ใส่คีย์ Gemini ของคุณเองในหน้า Setting เพื่อใช้ได้ไม่จำกัด หรืออัปเกรดแพ็กเกจ`,
@@ -96,7 +99,7 @@ export default async function handler(req, res) {
     const text = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text).join('\n');
 
     // บันทึกว่าผู้ใช้ทำอะไร ให้เจ้าของระบบดูย้อนหลังได้
-    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', progressReview: 'ประเมินผลคลิป', holidayIdeas: 'คิดไอเดียวันสำคัญ', safeScript: 'ตรวจสินค้าอ่อนไหว', prodPack: 'สร้างชุด Prompt ผลิตคลิป', imageQC: 'ตรวจภาพ AI', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
+    const ACT_LABEL = { outline: 'ให้ AI คิดโครงเรื่อง', prompts: 'สร้าง Prompt', meta: 'สร้างชื่อ/แคปชั่น', review: 'สรุปผลตรวจคลิป', metricRead: 'อ่านตัวเลขจากภาพสถิติ', deepAnalysis: 'วิเคราะห์เชิงลึก', teamAnalysis: 'วิเคราะห์ทีม', postTimeAdvice: 'วิเคราะห์เวลาโพสต์', planAhead: 'วางแผนล่วงหน้า', progressReview: 'ประเมินผลคลิป', holidayIdeas: 'คิดไอเดียวันสำคัญ', safeScript: 'ตรวจสินค้าอ่อนไหว', prodPack: 'สร้างชุด Prompt ผลิตคลิป', imageQC: 'ตรวจภาพ AI', finalQC: 'ตรวจก่อนโพสต์', backendRead: 'อ่านสถิติหลังบ้าน', crossCheck: 'ตรวจงานข้ามแผนก', protocolAnalysis: 'วิเคราะห์ปัญหาระบบ', plan: 'วางแผนกลยุทธ์', rival: 'ถอดสูตรคู่แข่ง', productFit: 'วิเคราะห์สินค้า', other: 'ใช้ AI' };
     pushFeed({ email: me.email, what: ACT_LABEL[act] || act, action: act, cost: usingCentral ? cost : 0 }).catch(() => {});
     touchPresence(me.email, null, ACT_LABEL[act]).catch(() => {});
 
