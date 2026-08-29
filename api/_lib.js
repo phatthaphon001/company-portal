@@ -241,7 +241,7 @@ export const PLANS = {
 // ราคาโทเค็นต่อการกระทำ — สะท้อนต้นทุนจริงคร่าวๆ
 export const TOKEN_COST = {
   outline: 1, prompts: 2, meta: 2, review: 2,
-  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, plan: 6, rival: 8, productFit: 4,
+  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, safeScript: 5, prodPack: 8, imageQC: 6, plan: 6, rival: 8, productFit: 4,
   other: 1,
 };
 
