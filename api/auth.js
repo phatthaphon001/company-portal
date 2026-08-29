@@ -50,6 +50,8 @@ function checkPassword(account, password) {
 
 // รุ่นของเอกสารความยินยอม — ถ้าแก้ข้อความ PDPA/ข้อกำหนด ต้องขยับเลขนี้ เพื่อให้ผู้ใช้เดิมกดยอมรับใหม่
 const CONSENT_VERSION = 'v1-2026-08';
+// ต้องตรงกับ TOUR_VERSION ใน src/App.jsx — ถ้าขยับที่หน้าเว็บต้องขยับตรงนี้ด้วย
+const TOUR_VERSION_SERVER = 'v1';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -409,6 +411,37 @@ export default async function handler(req, res) {
       if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
       accounts[idx].tourSeen = String(req.body?.version || '').slice(0, 20);
       await saveAccounts(accounts);
+      return res.status(200).json({ account: sanitize(accounts[idx]) });
+    }
+
+    // ---- ทางลัดสำหรับผู้พัฒนา: ข้ามหน้ายินยอมและคู่มือ ----
+    // ตรวจสิทธิ์ที่เซิร์ฟเวอร์เสมอ การซ่อนปุ่มฝั่งหน้าเว็บไม่ใช่การป้องกัน คนอื่นยิง request ตรงมาก็ต้องถูกปฏิเสธ
+    if (action === 'devSkipOnboarding') {
+      if (!isDev(me) && !me.isOwner) return res.status(403).json({ error: 'เฉพาะผู้พัฒนาระบบเท่านั้น' });
+      const idx = accounts.findIndex((a) => a.email === me.email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      accounts[idx] = {
+        ...accounts[idx],
+        // บันทึกตามความจริงว่านี่คือการข้ามโดยผู้พัฒนา ไม่ใช่การกดยอมรับจริง
+        // เพื่อให้ประวัติการยินยอมของลูกค้าจริงเชื่อถือได้เวลาถูกตรวจสอบ
+        consent: { version: CONSENT_VERSION, at: Date.now(), ip, devBypass: true },
+        onboardedAt: accounts[idx].onboardedAt || Date.now(),
+        tourSeen: TOUR_VERSION_SERVER,
+      };
+      await saveAccounts(accounts);
+      await logActivity({ type: 'onboarding_dev_skip', email: me.email, ip });
+      return res.status(200).json({ account: sanitize(accounts[idx]) });
+    }
+
+    // ---- ผู้พัฒนาสั่งให้ตัวเองเห็นหน้ายินยอม/คู่มือใหม่ เพื่อทดสอบ flow ----
+    if (action === 'resetMyOnboarding') {
+      if (!isDev(me) && !me.isOwner) return res.status(403).json({ error: 'เฉพาะผู้พัฒนาระบบเท่านั้น' });
+      const idx = accounts.findIndex((a) => a.email === me.email);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      const { consent, onboardedAt, tourSeen, ...rest } = accounts[idx];
+      accounts[idx] = rest;
+      await saveAccounts(accounts);
+      await logActivity({ type: 'onboarding_reset_self', email: me.email, ip });
       return res.status(200).json({ account: sanitize(accounts[idx]) });
     }
 
