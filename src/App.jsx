@@ -648,15 +648,11 @@ function OverdueSidebarPanel({ history, onOpenDay, onDismissDay }) {
   );
 }
 
-function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay, tokens, features }) {
-  const account = (accounts || []).find((a) => a.email === user.email);
-  const totalToday = tasks.length;
-  const doneToday = tasks.filter((t) => t.done).length;
-  const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
-
-  // เจ้าของระบบเห็นทุกหน้าเสมอ ส่วนคนอื่นเห็นเฉพาะหน้าที่เจ้าของเปิดให้
-  const on = (key) => user.isOwner || !features || features.pages?.[key] !== false;
-  const navItems = [
+// รายการหน้าที่ผู้ใช้คนนี้เข้าถึงได้ — ใช้ทั้งในเมนูข้างและแถบค้นหาคำสั่ง
+function buildNavItems(user, features) {
+  // เจ้าของระบบเข้าได้ทุกหน้าเสมอ แม้ฟีเจอร์นั้นจะถูกปิดไว้ (ตรงกับตรรกะเดิมของเมนู)
+  const on = (k) => user.isOwner || !features || features.pages?.[k] !== false;
+  return [
     { key: 'daily', label: 'งานประจำวัน', Icon: ClipboardCheck },
     ...(on('calendar') ? [{ key: 'calendar', label: 'ปฏิทิน', Icon: Calendar }] : []),
     ...(on('directory') ? [{ key: 'directory', label: 'Directory', Icon: FileText }] : []),
@@ -668,12 +664,35 @@ function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOp
     ...(on('security') ? [{ key: 'security', label: 'Protocol', Icon: ScrollText }] : []),
     { key: 'settings', label: 'Setting', Icon: SettingsIcon },
   ];
+}
+
+function Sidebar({ user, stage, setStage, logout, accounts, tasks, history, onOpenDay, onDismissDay, tokens, features, onOpenPalette }) {
+  const account = (accounts || []).find((a) => a.email === user.email);
+  const totalToday = tasks.length;
+  const doneToday = tasks.filter((t) => t.done).length;
+  const pct = totalToday === 0 ? 0 : Math.round((doneToday / totalToday) * 100);
+
+  // เจ้าของระบบเห็นทุกหน้าเสมอ ส่วนคนอื่นเห็นเฉพาะหน้าที่เจ้าของเปิดให้
+  const navItems = buildNavItems(user, features);
 
   return (
     <div className="w-16 sm:w-56 shrink-0 flex flex-col sticky top-0" style={{ height: '100vh', background: C.bgDeep, borderRight: `1px solid ${C.border}` }}>
       <button onClick={() => setStage('daily')} className="p-4 flex items-center justify-center sm:justify-start" aria-label="กลับหน้างานประจำวัน">
         <Wordmark fontSize={15} />
       </button>
+      <div className="px-2 pb-2">
+        <button
+          onClick={onOpenPalette}
+          className="w-full flex items-center gap-2 rounded-xl px-2.5 py-2"
+          style={{ background: C.panel, border: `1px solid ${C.border}` }}
+          aria-label="ค้นหาหน้าและเครื่องมือ"
+          title="ค้นหา (Ctrl+K)"
+        >
+          <Search size={14} style={{ color: C.muted }} className="shrink-0" />
+          <span className="font-body text-xs hidden sm:block flex-1 text-left" style={{ color: C.muted }}>ค้นหา…</span>
+          <span className="font-mono hidden sm:block shrink-0 px-1.5 rounded" style={{ fontSize: 9, color: C.muted, border: `1px solid ${C.border}` }}>⌘K</span>
+        </button>
+      </div>
       <div className="flex-1 overflow-y-auto px-2 space-y-1">
         {navItems.map((n) => (
           <SidebarNavItem key={n.key} Icon={n.Icon} label={n.label} active={stage === n.key || (n.key === 'directory' && stage === 'department')} onClick={() => setStage(n.key)} />
@@ -2069,9 +2088,16 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
   );
 }
 
-function DeptWorkspace({ dept, records, setRecords, showToast, ctx }) {
+function DeptWorkspace({ dept, records, setRecords, showToast, ctx, initialTool, onConsumeInitialTool }) {
   const tools = DEPT_TOOLS[dept.id] || [];
   const [active, setActive] = useState(tools[0]?.key || null);
+  // เปิดเครื่องมือที่เลือกมาจากแถบค้นหาคำสั่งทันที แล้วล้างค่าทิ้ง
+  useEffect(() => {
+    if (initialTool && tools.some((t) => t.key === initialTool)) {
+      setActive(initialTool);
+      onConsumeInitialTool && onConsumeInitialTool();
+    }
+  }, [initialTool]);
   if (tools.length === 0) {
     return <p className="font-body text-xs p-4 rounded-2xl" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>แผนกนี้ยังไม่มีเครื่องมือ AI</p>;
   }
@@ -2115,7 +2141,7 @@ function RoleFile({ role, index, accent }) {
   );
 }
 
-function DepartmentView({ dept, onBack, records, setRecords, showToast, ctx }) {
+function DepartmentView({ dept, onBack, records, setRecords, showToast, ctx, initialTool, onConsumeInitialTool }) {
   const Icon = dept.icon;
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 anim-stamp">
@@ -2126,7 +2152,7 @@ function DepartmentView({ dept, onBack, records, setRecords, showToast, ctx }) {
         <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}><Bot size={14} style={{ color: dept.accent }} /><span className="font-body text-xs" style={{ color: C.text }}>{dept.manager}</span><span className="font-mono text-2xs" style={{ color: C.muted }}>· ดำเนินการโดย AI ภายใต้การกำกับของคุณ</span></div>
       </div>
       {/* เครื่องมือ AI ของแผนกนี้ — ใช้งานได้จริง เก็บผลไว้ดูย้อนหลังได้ */}
-      <DeptWorkspace dept={dept} records={records} setRecords={setRecords} showToast={showToast} ctx={ctx} />
+      <DeptWorkspace dept={dept} records={records} setRecords={setRecords} showToast={showToast} ctx={ctx} initialTool={initialTool} onConsumeInitialTool={onConsumeInitialTool} />
 
       <details className="mb-6">
         <summary className="font-mono text-2xs cursor-pointer mb-2" style={{ color: C.muted }}>ดูโครงสร้างตำแหน่งงานในแผนกนี้ ({dept.roles.length})</summary>
@@ -8301,6 +8327,119 @@ function MemberDeptPanel({ user, accounts, showToast }) {
   );
 }
 
+// ---------- แถบค้นหาคำสั่ง — กด Ctrl+K เพื่อกระโดดไปหน้าหรือเครื่องมือไหนก็ได้ ----------
+// ระบบมีหน้ากับเครื่องมือรวมกันเกิน 40 จุด การไล่หาในเมนูเริ่มช้ากว่าการพิมพ์ชื่อ
+function CommandPalette({ open, onClose, navItems, departments, user, onGoPage, onGoDept }) {
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(0);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => { if (open) { setQ(''); setSel(0); setTimeout(() => inputRef.current?.focus(), 30); } }, [open]);
+
+  // รวมทุกปลายทางไว้ที่เดียว — หน้า + แผนก + เครื่องมือในแต่ละแผนก
+  const items = [];
+  navItems.forEach((n) => items.push({ kind: 'หน้า', label: n.label, Icon: n.Icon, color: C.blue, go: () => onGoPage(n.key) }));
+  departments.forEach((d) => {
+    const locked = user.clearance < d.clearance;
+    items.push({ kind: 'แผนก', label: d.th, sub: d.en, Icon: d.icon, color: d.accent, locked, go: () => onGoDept(d) });
+    (DEPT_TOOLS[d.id] || []).forEach((t) => {
+      items.push({ kind: 'เครื่องมือ', label: t.label, sub: d.th, Icon: t.Icon, color: t.color, locked, go: () => onGoDept(d, t.key) });
+    });
+  });
+
+  const norm = (v) => String(v || '').toLowerCase();
+  const term = norm(q).trim();
+  const filtered = term
+    ? items.filter((i) => norm(i.label).includes(term) || norm(i.sub).includes(term) || norm(i.kind).includes(term))
+    : items;
+  const shown = filtered.slice(0, 40);
+
+  useEffect(() => { setSel(0); }, [q]);
+  useEffect(() => {
+    if (!open) return;
+    const el = listRef.current?.querySelector(`[data-i="${sel}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [sel, open]);
+
+  function choose(i) {
+    const it = shown[i];
+    if (!it || it.locked) return;
+    it.go(); onClose();
+  }
+
+  function onKey(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, shown.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(sel); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  }
+
+  if (!open) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '10vh 16px 16px' }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full anim-fade"
+        style={{ maxWidth: 560, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 18, overflow: 'hidden', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}
+      >
+        <div className="flex items-center gap-2 px-3.5" style={{ borderBottom: `1px solid ${C.border}`, height: 50 }}>
+          <Search size={15} style={{ color: C.muted }} className="shrink-0" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="พิมพ์ชื่อหน้าหรือเครื่องมือ…"
+            className="flex-1 font-body text-sm bg-transparent outline-none"
+            style={{ color: C.text }}
+          />
+          <span className="font-mono shrink-0 px-1.5 py-0.5 rounded" style={{ fontSize: 9, color: C.muted, border: `1px solid ${C.border}` }}>ESC</span>
+        </div>
+
+        <div ref={listRef} style={{ maxHeight: '52vh', overflowY: 'auto' }}>
+          {shown.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <p className="font-body text-xs" style={{ color: C.muted }}>ไม่พบ "{q}"</p>
+              <p className="font-body mt-1" style={{ fontSize: 10, color: C.muted }}>ลองพิมพ์คำสั้นลง เช่น ปฏิทิน, คอนเทนต์, ตรวจ</p>
+            </div>
+          ) : shown.map((it, i) => (
+            <button
+              key={i}
+              data-i={i}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => choose(i)}
+              disabled={it.locked}
+              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left"
+              style={{ background: i === sel ? `${it.color}14` : 'transparent', opacity: it.locked ? 0.4 : 1, cursor: it.locked ? 'not-allowed' : 'pointer' }}
+            >
+              <span className="shrink-0 flex items-center justify-center rounded-lg" style={{ width: 26, height: 26, background: `${it.color}18` }}>
+                <it.Icon size={13} style={{ color: it.color }} />
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="font-body text-xs block truncate" style={{ color: C.text }}>{it.label}</span>
+                {it.sub && <span className="font-mono block truncate" style={{ fontSize: 9, color: C.muted }}>{it.sub}</span>}
+              </span>
+              {it.locked
+                ? <span className="font-mono shrink-0" style={{ fontSize: 9, color: C.muted }}>สิทธิ์ไม่ถึง</span>
+                : <span className="font-mono shrink-0 px-1.5 rounded" style={{ fontSize: 9, color: it.color, border: `1px solid ${it.color}44` }}>{it.kind}</span>}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3 px-3.5 py-2" style={{ borderTop: `1px solid ${C.border}` }}>
+          <span className="font-mono" style={{ fontSize: 9, color: C.muted }}>↑↓ เลื่อน</span>
+          <span className="font-mono" style={{ fontSize: 9, color: C.muted }}>↵ เปิด</span>
+          <span className="font-mono ml-auto" style={{ fontSize: 9, color: C.muted }}>{filtered.length} รายการ</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // แผงเครื่องมือผู้พัฒนา — ใช้ทดสอบ flow ที่ผู้ใช้ใหม่จะเจอ
 function DevOnboardingPanel({ user, showToast, refreshMe }) {
   const [busy, setBusy] = useState(false);
@@ -9621,12 +9760,26 @@ export default function CompanyPortal() {
   const [company, setCompany] = useState({});      // ข้อมูลแบรนด์ขององค์กร เช่น โลโก้ลายน้ำ
   const [theme, setTheme] = useState('dark');     // ธีมสีของผู้ใช้แต่ละคน
   const [themeTick, setThemeTick] = useState(0);  // ใช้บังคับให้วาดใหม่ทั้งหน้าเมื่อเปลี่ยนธีม
+  const [paletteOpen, setPaletteOpen] = useState(false); // แถบค้นหาคำสั่ง (Ctrl+K)
+  const [pendingDeptTool, setPendingDeptTool] = useState(null); // เครื่องมือที่จะเปิดทันทีเมื่อเข้าแผนก
 
   // ใช้ธีมที่ผู้ใช้เคยเลือกไว้ทันทีที่รู้ว่าเป็นใคร
   useEffect(() => {
     const pref = user?.themePref;
     if (pref && THEMES[pref] && pref !== theme) { applyTheme(pref); setTheme(pref); setThemeTick((n) => n + 1); }
   }, [user?.themePref]);
+
+  // Ctrl+K / Cmd+K เปิดแถบค้นหาคำสั่งได้จากทุกหน้า
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   function changeTheme(key) {
     if (!THEMES[key]) return;
@@ -10132,12 +10285,24 @@ export default function CompanyPortal() {
       {stage === 'terminal' && <Terminal accounts={accounts} onSignup={handleSignup} onLogin={handleLogin} />}
 
       {stage !== 'terminal' && user && (
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          navItems={buildNavItems(user, features)}
+          departments={DEPARTMENTS}
+          user={user}
+          onGoPage={(k) => setStage(k)}
+          onGoDept={(d, toolKey) => { setActiveDept(d); setPendingDeptTool(toolKey || null); setStage('department'); }}
+        />
+      )}
+
+      {stage !== 'terminal' && user && (
         <div className="flex" style={{ position: 'relative', zIndex: 1 }}>
-          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} features={features} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} />
+          <Sidebar user={user} stage={stage} setStage={setStage} logout={logout} accounts={accounts} tasks={tasks} history={history} tokens={tokens} features={features} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} onDismissDay={dismissOverdueDay} onOpenPalette={() => setPaletteOpen(true)} />
           <div className="flex-1 min-w-0">
             {stage === 'daily' && <DailyWork user={user} channels={channels} setChannels={setChannels} tasks={tasks} setTasks={setTasks} futureTasks={futureTasks} setFutureTasks={setFutureTasks} history={history} setHistory={setHistory} reminder={reminder} onDismissReminder={() => setReminder(null)} onOpenCalendar={() => setStage('calendar')} initialViewDate={pendingViewDate} onConsumeInitialViewDate={() => setPendingViewDate(null)} onTrash={sendToTrash} />}
             {stage === 'directory' && <Directory user={user} denied={denied} onOpen={openDept} features={features} />}
-            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} ctx={{ user, channels, tasks, history }} />}
+            {stage === 'department' && activeDept && <DepartmentView dept={activeDept} onBack={() => setStage('directory')} records={deptData} setRecords={setDeptData} showToast={showToast} ctx={{ user, channels, tasks, history }} initialTool={pendingDeptTool} onConsumeInitialTool={() => setPendingDeptTool(null)} />}
             {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} progressLogs={progressLogs} setProgressLogs={setProgressLogs} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'files' && <FileBridgePage user={user} channels={channels} setChannels={setChannels} tasks={tasks} history={history} showToast={showToast} />}
