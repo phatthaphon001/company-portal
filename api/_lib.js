@@ -443,7 +443,7 @@ export function tierOf(account, org) {
 // ราคาโทเค็นต่อการกระทำ — สะท้อนต้นทุนจริงคร่าวๆ
 export const TOKEN_COST = {
   outline: 1, prompts: 2, meta: 2, review: 2,
-  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, safeScript: 5, prodPack: 8, imageQC: 6, finalQC: 6, backendRead: 7, crossCheck: 5, protocolAnalysis: 4, plan: 6, planSearch: 9, rival: 8, rivalSearch: 11, productFit: 4,
+  metricRead: 3, deepAnalysis: 5, teamAnalysis: 5, postTimeAdvice: 3, planAhead: 4, progressReview: 4, holidayIdeas: 4, safeScript: 5, prodPack: 8, imageQC: 6, finalQC: 6, backendRead: 7, crossCheck: 5, stockRead: 5, stockCount: 5, protocolAnalysis: 4, plan: 6, planSearch: 9, rival: 8, rivalSearch: 11, productFit: 4,
   other: 1,
 };
 
