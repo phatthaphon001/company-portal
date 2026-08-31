@@ -110,6 +110,95 @@ export async function consumeOtp(ref, code) {
   return { ok: true, email: rec.email };
 }
 
+
+// ---------- เชื่อมต่อ Canva (OAuth 2.0 + PKCE) ----------
+// token ของแต่ละคนเป็นข้อมูลส่วนตัว เก็บแยกรายบัญชี ไม่ปนกับข้อมูลองค์กร
+// และไม่ปนกับบัญชี Canva ของเพื่อนร่วมงาน แม้จะอยู่องค์กรเดียวกัน
+const CANVA_TOKEN_URL = 'https://api.canva.com/rest/v1/oauth/token';
+const CANVA_REVOKE_URL = 'https://api.canva.com/rest/v1/oauth/revoke';
+const CANVA_API_BASE = 'https://api.canva.com/rest/v1';
+
+const canvaKey = (email) => `canva_tok_${String(email).toLowerCase()}`;
+
+export async function saveCanvaTokens(email, tokens) {
+  await redisSet(canvaKey(email), tokens);
+}
+export async function getCanvaTokens(email) {
+  return await redisGet(canvaKey(email));
+}
+export async function deleteCanvaTokens(email) {
+  await redisSet(canvaKey(email), null);
+}
+
+// เก็บสถานะระหว่างรอ callback จาก Canva ชั่วคราว (ผูกกับ state กัน CSRF)
+// ผูก email ไว้ตั้งแต่ตอนเริ่ม จึงไม่ต้องพึ่ง cookie/session ตอนเบราว์เซอร์ถูก redirect กลับมา
+export async function saveCanvaOAuthState(state, data) {
+  const key = `canva_state_${String(state).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)}`;
+  await redisSet(key, { ...data, expiresAt: Date.now() + 10 * 60 * 1000 });
+}
+export async function consumeCanvaOAuthState(state) {
+  const key = `canva_state_${String(state).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)}`;
+  const rec = await redisGet(key);
+  if (!rec) return null;
+  await redisSet(key, null); // ใช้ครั้งเดียวทิ้ง กัน replay
+  if (Date.now() > rec.expiresAt) return null;
+  return rec;
+}
+
+// คืน access token ที่ใช้ได้จริงตอนนี้ ต่ออายุให้อัตโนมัติถ้าหมดอายุแล้ว
+export async function getValidCanvaAccessToken(email) {
+  const t = await getCanvaTokens(email);
+  if (!t) return null;
+  if (t.expiresAt && Date.now() < t.expiresAt - 60000) return t.accessToken;
+  if (!t.refreshToken) { await deleteCanvaTokens(email); return null; }
+  try {
+    const basic = Buffer.from(`${process.env.CANVA_CLIENT_ID}:${process.env.CANVA_CLIENT_SECRET}`).toString('base64');
+    const r = await fetch(CANVA_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refreshToken }),
+    });
+    const data = await r.json();
+    if (!r.ok || !data.access_token) { await deleteCanvaTokens(email); return null; }
+    const next = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || t.refreshToken, // ต้องเก็บตัวใหม่เสมอถ้ามี — refresh token ใช้ได้ครั้งเดียว
+      expiresAt: Date.now() + (data.expires_in || 14400) * 1000,
+      connectedAt: t.connectedAt,
+    };
+    await saveCanvaTokens(email, next);
+    return next.accessToken;
+  } catch (e) {
+    return null;
+  }
+}
+
+// เรียก Canva Connect API พร้อม token ที่ใช้ได้จริง — จัดการต่ออายุให้อัตโนมัติ
+export async function canvaFetch(email, path, opts = {}) {
+  const token = await getValidCanvaAccessToken(email);
+  if (!token) return { ok: false, status: 401, data: { error: { message: 'ยังไม่ได้เชื่อมต่อ Canva หรือ token หมดอายุ กรุณาเชื่อมต่อใหม่ในหน้าตั้งค่า' } } };
+  let res;
+  try {
+    res = await fetch(`${CANVA_API_BASE}${path}`, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${token}` } });
+  } catch (e) {
+    return { ok: false, status: 500, data: { error: { message: 'เชื่อมต่อ Canva ไม่สำเร็จ ลองใหม่อีกครั้ง' } } };
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  return { ok: res.ok, status: res.status, data };
+}
+
+export async function revokeCanvaToken(accessToken) {
+  try {
+    const basic = Buffer.from(`${process.env.CANVA_CLIENT_ID}:${process.env.CANVA_CLIENT_SECRET}`).toString('base64');
+    await fetch(CANVA_REVOKE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` },
+      body: new URLSearchParams({ token: accessToken }),
+    });
+  } catch (e) {}
+}
+
 // ---------- รหัสผ่าน ----------
 // ใช้ scrypt ที่มากับ Node อยู่แล้ว ไม่ต้องติดตั้งอะไรเพิ่ม และไม่มีค่าใช้จ่าย
 export function hashPassword(password, existingSalt) {
