@@ -299,6 +299,7 @@ function callClaude(system, content, images, action, opts) {
     });
     const data = await response.json();
     aiLastCallAt = Date.now();
+    // /api/claude เป็น endpoint ของเราเอง — 401 ที่นี่หมายความว่า session หมดจริง ให้ logout ได้เลย
     if (response.status === 401) {
       clearSession();
       window.dispatchEvent(new CustomEvent('forge-session-expired'));
@@ -387,6 +388,9 @@ function clearSession() {
 }
 
 // เรียก API พร้อมแนบโทเค็นให้อัตโนมัติ
+// หมายเหตุสำคัญ: 401 จาก /api/canva/* หรือ endpoint ภายนอก ≠ session ของผู้ใช้หมด
+// ห้าม logout ผู้ใช้เมื่อ Canva token หมดอายุ — ให้ logout เฉพาะ endpoint ของเราเอง (/api/auth, /api/store, /api/claude)
+const AUTH_PATHS = ['/api/auth', '/api/store', '/api/claude', '/api/send-code', '/api/verify-code'];
 async function api(path, options = {}) {
   const token = loadSession();
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -394,9 +398,14 @@ async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers });
   let data = {};
   try { data = await res.json(); } catch (e) {}
+  // เด้งออกเฉพาะเมื่อ endpoint ของระบบเราเองตอบ 401 เท่านั้น
+  // /api/canva/* ตอบ 401 = Canva token หมด ไม่ใช่ session ของผู้ใช้หมด
   if (res.status === 401) {
-    clearSession();
-    window.dispatchEvent(new CustomEvent('forge-session-expired'));
+    const isOurApi = AUTH_PATHS.some((p) => path.startsWith(p));
+    if (isOurApi) {
+      clearSession();
+      window.dispatchEvent(new CustomEvent('forge-session-expired'));
+    }
   }
   return { ok: res.ok, status: res.status, data };
 }
