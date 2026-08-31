@@ -35,14 +35,23 @@ export default async function handler(req, res) {
   // ---- รายชื่อเทมเพลตแบรนด์ (ใช้อ้างอิงตอน AI คิดคอนเทนต์) ----
   if (action === 'listBrandTemplates') {
     const r = await canvaFetch(me.email, '/brand-templates?limit=50');
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'ดึงเทมเพลตแบรนด์ไม่สำเร็จ' });
+    // หมายเหตุ: ถ้า Canva token ไม่มีหรือหมดอายุ canvaFetch คืน status 401
+    // ต้องไม่ส่ง 401 ออกไปให้หน้าเว็บ เพราะหน้าเว็บจะเข้าใจผิดว่า session ของผู้ใช้หมด แล้ว logout ทันที
+    // ใช้ 200 (connected: false) หรือ 503 แทน เพื่อบอกว่า Canva ยังไม่ได้เชื่อมต่อ/หมดอายุ
+    if (!r.ok) {
+      const safeStatus = r.status === 401 ? 503 : (r.status || 500);
+      return res.status(safeStatus).json({ error: r.data?.error?.message || 'ดึงเทมเพลตแบรนด์ไม่สำเร็จ — อาจยังไม่ได้เชื่อมต่อ Canva หรือ token หมดอายุ' });
+    }
     return res.status(200).json({ items: r.data?.items || [] });
   }
 
   // ---- รายชื่องานออกแบบล่าสุดของผู้ใช้ (สำหรับดึงกลับเข้าเว็บ) ----
   if (action === 'listDesigns') {
     const r = await canvaFetch(me.email, '/designs?ownership=owned&sort_by=modified_descending&limit=30');
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'ดึงรายการงานออกแบบไม่สำเร็จ' });
+    if (!r.ok) {
+      const safeStatus = r.status === 401 ? 503 : (r.status || 500);
+      return res.status(safeStatus).json({ error: r.data?.error?.message || 'ดึงรายการงานออกแบบไม่สำเร็จ' });
+    }
     return res.status(200).json({ items: r.data?.items || [] });
   }
 
@@ -62,7 +71,7 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/octet-stream', 'Asset-Upload-Metadata': JSON.stringify({ name_base64: nameB64 }) },
       body: buf,
     });
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'ส่งเข้า Canva ไม่สำเร็จ' });
+    if (!r.ok) { const s = r.status === 401 ? 503 : (r.status || 500); return res.status(s).json({ error: r.data?.error?.message || 'ส่งเข้า Canva ไม่สำเร็จ' }); }
     return res.status(200).json({ job: r.data?.job });
   }
 
@@ -71,7 +80,7 @@ export default async function handler(req, res) {
     const { jobId } = req.body || {};
     if (!jobId) return res.status(400).json({ error: 'ต้องระบุ jobId' });
     const r = await canvaFetch(me.email, `/asset-uploads/${encodeURIComponent(jobId)}`);
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'ตรวจสถานะไม่สำเร็จ' });
+    if (!r.ok) { const s = r.status === 401 ? 503 : (r.status || 500); return res.status(s).json({ error: r.data?.error?.message || 'ตรวจสถานะไม่สำเร็จ' }); }
     return res.status(200).json({ job: r.data?.job });
   }
 
@@ -87,7 +96,7 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ design_id: designId, format: { type: fmt } }),
     });
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'สร้างงานส่งออกไม่สำเร็จ' });
+    if (!r.ok) { const s = r.status === 401 ? 503 : (r.status || 500); return res.status(s).json({ error: r.data?.error?.message || 'สร้างงานส่งออกไม่สำเร็จ' }); }
     return res.status(200).json({ job: r.data?.job });
   }
 
@@ -96,7 +105,7 @@ export default async function handler(req, res) {
     const { jobId } = req.body || {};
     if (!jobId) return res.status(400).json({ error: 'ต้องระบุ jobId' });
     const r = await canvaFetch(me.email, `/exports/${encodeURIComponent(jobId)}`);
-    if (!r.ok) return res.status(r.status || 500).json({ error: r.data?.error?.message || 'ตรวจสถานะไม่สำเร็จ' });
+    if (!r.ok) { const s = r.status === 401 ? 503 : (r.status || 500); return res.status(s).json({ error: r.data?.error?.message || 'ตรวจสถานะไม่สำเร็จ' }); }
     return res.status(200).json({ job: r.data?.job });
   }
 
