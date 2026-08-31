@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import {
   redisReady, redisGet, redisSet,
   hashPassword, verifyPassword,
@@ -192,7 +193,10 @@ export default async function handler(req, res) {
         return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp: true });
       }
       await logActivity({ type: 'login', email: accounts[idx].email, ip });
-      return res.status(200).json({ account: sanitize(accounts[idx]), requireOtp: false, token: issueToken(accounts[idx].email) });
+      return res.status(200).json({
+        account: sanitize(accounts[idx]), requireOtp: false, token: issueToken(accounts[idx].email),
+        mustChangePassword: !!accounts[idx].mustChangePassword,
+      });
     }
 
     // ออกโทเค็นหลังยืนยัน OTP สำเร็จ (ฝั่งเซิร์ฟเวอร์ตรวจ OTP เองอีกชั้น ไม่เชื่อหน้าเว็บ)
@@ -605,6 +609,118 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, to: me.email });
     }
 
+    // ---- ผู้บริหารรีเซ็ตรหัสผ่านให้พนักงานที่ลืมรหัส ----
+    // ไม่มีใครเห็นรหัสเดิมของใครได้ เพราะเก็บเป็นค่าที่ย้อนกลับไม่ได้ (scrypt)
+    // วิธีที่ถูกต้องคือออกรหัสชั่วคราวใหม่ แล้วบังคับให้เจ้าตัวเปลี่ยนทันทีที่ล็อกอิน
+    if (action === 'resetMemberPassword') {
+      if (!isExec(me)) return res.status(403).json({ error: 'เฉพาะผู้บริหารขององค์กรเท่านั้น' });
+      const { email: target } = req.body || {};
+      const idx = accounts.findIndex((a) => a.email === target);
+      if (idx === -1) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+      // กันผู้บริหารองค์กรอื่นมารีเซ็ตข้ามองค์กร และกันไม่ให้รีเซ็ตของคนที่สิทธิ์สูงกว่าตัวเอง
+      if (!isDev(me) && orgIdOf(accounts[idx]) !== orgIdOf(me)) {
+        return res.status(403).json({ error: 'รีเซ็ตรหัสของคนนอกองค์กรไม่ได้' });
+      }
+      if (!isDev(me) && (accounts[idx].isOwner || roleLevel(accounts[idx]) > roleLevel(me))) {
+        return res.status(403).json({ error: 'รีเซ็ตรหัสของคนที่สิทธิ์สูงกว่าหรือเท่ากันไม่ได้' });
+      }
+
+      // รหัสชั่วคราวอ่านง่าย ไม่ใช้ตัวที่สับสน (0/O, 1/l/I) เพราะต้องบอกกันปากเปล่า
+      const CH = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+      let temp = '';
+      for (let i = 0; i < 10; i++) temp += CH[crypto.randomInt(0, CH.length)];
+
+      const { salt, hash } = hashPassword(temp);
+      accounts[idx].passwordSalt = salt;
+      accounts[idx].passwordHash = hash;
+      accounts[idx].mustChangePassword = true;          // บังคับตั้งใหม่ทันทีที่ล็อกอิน
+      accounts[idx].sessionsValidFrom = Date.now();      // เตะทุกอุปกรณ์ที่ล็อกอินค้างอยู่ออก
+      delete accounts[idx].password;
+      await saveAccounts(accounts);
+      await logActivity({ type: 'password_reset_by_admin', target, by: me.email, ip });
+      // ส่งรหัสชั่วคราวกลับให้ผู้บริหารครั้งเดียว เพื่อเอาไปบอกพนักงาน
+      return res.status(200).json({ ok: true, tempPassword: temp, name: accounts[idx].name || target });
+    }
+
+    // ---- บันทึกสถานะการทำงานรายวัน (มาทำงาน/ลา/ขาด/สาย) ----
+    if (action === 'setAttendance') {
+      const { email: target, date, status, note } = req.body || {};
+      const VALID = ['present', 'late', 'leave', 'absent', 'sick', 'wfh'];
+      if (!VALID.includes(status)) return res.status(400).json({ error: 'สถานะไม่ถูกต้อง' });
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? date : bangkokDateStr();
+      const who = target || me.email;
+      // พนักงานบันทึกของตัวเองได้ · หัวหน้าขึ้นไปบันทึกให้ลูกทีมในองค์กรตัวเองได้
+      if (who !== me.email) {
+        if (!isManager(me)) return res.status(403).json({ error: 'บันทึกให้คนอื่นได้เฉพาะระดับหัวหน้าขึ้นไป' });
+        const t = accounts.find((a) => a.email === who);
+        if (!t) return res.status(404).json({ error: 'ไม่พบบัญชี' });
+        if (!isDev(me) && orgIdOf(t) !== orgIdOf(me)) return res.status(403).json({ error: 'บันทึกให้คนนอกองค์กรไม่ได้' });
+      }
+      const key = `att_${orgIdOf(me)}_${day}`;
+      const rec = (await redisGet(key)) || {};
+      rec[who] = { status, note: String(note || '').slice(0, 200), at: Date.now(), by: me.email };
+      await redisSet(key, rec);
+      return res.status(200).json({ ok: true, date: day, attendance: rec });
+    }
+
+    // ---- ดูสถานะทีมวันนี้ + คำนวณ Work Flow ----
+    if (action === 'getAttendance') {
+      const { date } = req.body || {};
+      const day = /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? date : bangkokDateStr();
+      const myOrgA = orgIdOf(me);
+      const rec = (await redisGet(`att_${myOrgA}_${day}`)) || {};
+      const members = accounts.filter((a) => orgIdOf(a) === myOrgA && !a.suspended);
+
+      // พนักงานทั่วไปเห็นแค่ของตัวเอง — สถานะการลาของเพื่อนเป็นข้อมูลส่วนบุคคล
+      if (!isManager(me)) {
+        return res.status(200).json({ date: day, mine: rec[me.email] || null, canSeeTeam: false });
+      }
+
+      // น้ำหนักกำลังคน: มาเต็ม=1, สาย/ทำที่บ้าน=0.9, ลา/ป่วย=0, ขาด=0
+      const WEIGHT = { present: 1, wfh: 0.9, late: 0.9, leave: 0, sick: 0, absent: 0 };
+      const rows = members.map((a) => {
+        const r = rec[a.email];
+        // ยังไม่บันทึก = ถือว่ามาทำงานปกติ (ไม่ลงโทษคนที่ลืมเช็คอิน)
+        const status = r?.status || 'present';
+        return {
+          email: a.email, name: a.name || a.email, dept: a.dept || '', role: roleOf(a),
+          status, note: r?.note || '', markedAt: r?.at || null, marked: !!r,
+        };
+      });
+      const calc = (list) => {
+        if (list.length === 0) return null;
+        const sum = list.reduce((s2, x) => s2 + (WEIGHT[x.status] ?? 1), 0);
+        return Math.round((sum / list.length) * 100);
+      };
+      // แยกรายแผนกด้วย เพราะภาพรวมทั้งบริษัทอาจดูดี แต่บางแผนกอาจขาดคนจนงานหนักเกินไป
+      const byDept = {};
+      rows.forEach((r) => {
+        const d = r.dept || 'ไม่ระบุแผนก';
+        if (!byDept[d]) byDept[d] = [];
+        byDept[d].push(r);
+      });
+      const departments = Object.entries(byDept).map(([dept, list]) => {
+        const flow = calc(list);
+        return {
+          dept, total: list.length, flow,
+          out: list.filter((x) => (WEIGHT[x.status] ?? 1) === 0).length,
+          // แผนกเล็กที่คนหายไปครึ่งหนึ่ง งานจะกองที่คนที่เหลือทันที ต้องเตือน
+          strained: flow != null && flow < 60,
+        };
+      }).sort((a, b) => (a.flow ?? 100) - (b.flow ?? 100));
+
+      return res.status(200).json({
+        date: day, canSeeTeam: true,
+        workFlow: calc(rows),
+        headcount: rows.length,
+        present: rows.filter((r) => r.status === 'present').length,
+        late: rows.filter((r) => r.status === 'late').length,
+        leave: rows.filter((r) => r.status === 'leave' || r.status === 'sick').length,
+        absent: rows.filter((r) => r.status === 'absent').length,
+        rows, departments,
+      });
+    }
+
     if (action === 'updateProfile') {
       const { patch } = req.body;
       const idx = accounts.findIndex((a) => a.email === me.email); // แก้ได้เฉพาะบัญชีตัวเอง
@@ -624,6 +740,7 @@ export default async function handler(req, res) {
       accounts[idx].passwordSalt = salt;
       accounts[idx].passwordHash = hash;
       delete accounts[idx].password;
+      delete accounts[idx].mustChangePassword; // ตั้งรหัสใหม่แล้ว ไม่ต้องบังคับอีก
       accounts[idx].sessionsValidFrom = Date.now(); // เปลี่ยนรหัสแล้วเตะอุปกรณ์อื่นออก
       await saveAccounts(accounts);
       return res.status(200).json({ ok: true, token: issueToken(me.email) });
