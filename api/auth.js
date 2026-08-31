@@ -83,7 +83,7 @@ export default async function handler(req, res) {
 
     // ---------- ไม่ต้องล็อกอินก่อน ----------
     if (action === 'signup') {
-      const { name, username, email, password } = req.body;
+      const { name, nameEn, username, email, password } = req.body;
       if (!name || !username || !email || !password) return res.status(400).json({ error: 'กรอกข้อมูลให้ครบ' });
       if (String(password).length < 8) return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
 
@@ -130,7 +130,7 @@ export default async function handler(req, res) {
 
       const { salt, hash } = hashPassword(password);
       const account = {
-        name, username, email,
+        name, nameEn: String(nameEn || '').slice(0, 120).trim(), username, email,
         passwordSalt: salt, passwordHash: hash,
         clearance: accounts.length === 0 ? 3 : 1,
         isOwner: accounts.length === 0,
