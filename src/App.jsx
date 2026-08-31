@@ -2953,6 +2953,138 @@ function ConsentDoc() {
   );
 }
 
+// ---------- OnboardingField — ต้องอยู่นอก OnboardingFlow เสมอ ----------
+// ถ้าอยู่ข้างในจะถูก React สร้างใหม่ทุกครั้งที่ state เปลี่ยน ทำให้ input เสีย focus ทันที
+const OB_INPUT_CLS = 'w-full font-body text-xs px-2.5 py-2 rounded-xl outline-none';
+function OnboardingField({ label, value, onChange, ph, type = 'text', full, inputSty }) {
+  return (
+    <div className={full ? 'sm:col-span-2' : ''}>
+      <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>{label}</label>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={ph}
+        className={OB_INPUT_CLS}
+        style={inputSty}
+      />
+    </div>
+  );
+}
+
+// ---------- BirthDatePicker — popup เลือกวัน/เดือน/ปี ----------
+function BirthDatePicker({ value, onChange, inputSty, label = 'วันเดือนปีเกิด *' }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // แปลง "YYYY-MM-DD" → parts
+  const parts = value ? value.split('-') : ['', '', ''];
+  const selYear  = parts[0] || '';
+  const selMonth = parts[1] || '';
+  const selDay   = parts[2] || '';
+
+  const currentYear = new Date().getFullYear();
+  const years  = Array.from({ length: 100 }, (_, i) => currentYear - i);
+  const months = [
+    { v: '01', l: 'มกราคม' }, { v: '02', l: 'กุมภาพันธ์' }, { v: '03', l: 'มีนาคม' },
+    { v: '04', l: 'เมษายน' }, { v: '05', l: 'พฤษภาคม' },   { v: '06', l: 'มิถุนายน' },
+    { v: '07', l: 'กรกฎาคม' }, { v: '08', l: 'สิงหาคม' },  { v: '09', l: 'กันยายน' },
+    { v: '10', l: 'ตุลาคม' }, { v: '11', l: 'พฤศจิกายน' }, { v: '12', l: 'ธันวาคม' },
+  ];
+  const daysInMonth = selYear && selMonth
+    ? new Date(Number(selYear), Number(selMonth), 0).getDate()
+    : 31;
+  const days = Array.from({ length: daysInMonth }, (_, i) => String(i + 1).padStart(2, '0'));
+
+  function commit(y, m, d) {
+    if (y && m && d) onChange(`${y}-${m}-${d}`);
+  }
+
+  // ปิด popup เมื่อคลิกนอก
+  useEffect(() => {
+    if (!open) return;
+    function handle(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handle);
+    return () => document.removeEventListener('mousedown', handle);
+  }, [open]);
+
+  const displayTH = value
+    ? `${Number(selDay)} ${months.find((m) => m.v === selMonth)?.l || ''} ${Number(selYear) + 543}`
+    : 'เลือกวันเกิด';
+
+  const selectSty = { ...inputSty, cursor: 'pointer', fontSize: 11 };
+
+  return (
+    <div className="relative" ref={ref}>
+      <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={OB_INPUT_CLS + ' text-left flex items-center justify-between'}
+        style={{ ...inputSty, cursor: 'pointer' }}
+      >
+        <span style={{ color: value ? C.text : C.muted }}>{displayTH}</span>
+        <Calendar size={13} style={{ color: C.muted, flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-50 p-3 rounded-2xl shadow-2xl anim-fade"
+          style={{ top: '100%', left: 0, right: 0, marginTop: 4, background: C.panel, border: `1px solid ${C.border}` }}
+        >
+          <div className="grid grid-cols-3 gap-1.5">
+            {/* วัน */}
+            <div>
+              <div className="font-mono mb-1" style={{ fontSize: 9, color: C.muted }}>วัน</div>
+              <select
+                value={selDay}
+                onChange={(e) => { commit(selYear, selMonth, e.target.value); }}
+                className={OB_INPUT_CLS}
+                style={selectSty}
+              >
+                <option value="">--</option>
+                {days.map((d) => <option key={d} value={d}>{Number(d)}</option>)}
+              </select>
+            </div>
+            {/* เดือน */}
+            <div>
+              <div className="font-mono mb-1" style={{ fontSize: 9, color: C.muted }}>เดือน</div>
+              <select
+                value={selMonth}
+                onChange={(e) => { commit(selYear, e.target.value, selDay); }}
+                className={OB_INPUT_CLS}
+                style={selectSty}
+              >
+                <option value="">--</option>
+                {months.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+              </select>
+            </div>
+            {/* ปี (แสดงทั้ง ค.ศ. และ พ.ศ.) */}
+            <div>
+              <div className="font-mono mb-1" style={{ fontSize: 9, color: C.muted }}>ปีเกิด (ค.ศ.)</div>
+              <select
+                value={selYear}
+                onChange={(e) => { commit(e.target.value, selMonth, selDay); }}
+                className={OB_INPUT_CLS}
+                style={selectSty}
+              >
+                <option value="">--</option>
+                {years.map((y) => <option key={y} value={y}>{y} ({y + 543})</option>)}
+              </select>
+            </div>
+          </div>
+          {value && (
+            <div className="mt-2 pt-2 flex items-center justify-between" style={{ borderTop: `1px solid ${C.border}` }}>
+              <span className="font-body text-xs" style={{ color: C.text }}>{displayTH}</span>
+              <button onClick={() => setOpen(false)} className="font-mono text-2xs px-3 py-1 rounded-lg" style={{ background: C.blue, color: '#fff' }}>ตกลง</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OnboardingFlow({ user, onUpdateUser, showToast }) {
   const needConsent = !user.consent || user.consent.version !== CONSENT_VERSION;
   const needProfile = !user.onboardedAt;
@@ -3017,14 +3149,8 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
     setBusy(false);
   }
 
-  const inputCls = 'w-full font-body text-xs px-2.5 py-2 rounded-xl outline-none';
+  // inputSty คำนวณตอน render แต่ส่งลงไปเป็น prop — Field component อยู่ภายนอกแล้ว จึงไม่ถูก recreate
   const inputSty = { background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text };
-  const Field = ({ label, k, ph, type = 'text', full }) => (
-    <div className={full ? 'sm:col-span-2' : ''}>
-      <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>{label}</label>
-      <input type={type} value={p[k]} onChange={(e) => set(k, e.target.value)} placeholder={ph} className={inputCls} style={inputSty} />
-    </div>
-  );
 
   // ---------- ขั้นที่ 0: ยินยอม + โปรไฟล์ ----------
   if (step === 0) {
@@ -3066,12 +3192,12 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
               ))}
             </div>
             <div className="grid sm:grid-cols-2 gap-2.5 mb-3">
-              <Field label="ชื่อ-นามสกุล *" k="displayName" ph="ชื่อจริงของคุณ" />
-              <Field label="วันเดือนปีเกิด *" k="birthDate" type="date" />
-              <Field label="เบอร์ติดต่อ" k="phone" ph="08x-xxx-xxxx" />
+              <OnboardingField label="ชื่อ-นามสกุล *" value={p.displayName} onChange={(v) => set('displayName', v)} ph="ชื่อจริงของคุณ" inputSty={inputSty} />
+              <BirthDatePicker label="วันเดือนปีเกิด *" value={p.birthDate} onChange={(v) => set('birthDate', v)} inputSty={inputSty} />
+              <OnboardingField label="เบอร์ติดต่อ" value={p.phone} onChange={(v) => set('phone', v)} ph="08x-xxx-xxxx" type="tel" inputSty={inputSty} />
               <div>
                 <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>อาชีพ</label>
-                <select value={p.occupation} onChange={(e) => set('occupation', e.target.value)} className={inputCls} style={inputSty}>
+                <select value={p.occupation} onChange={(e) => set('occupation', e.target.value)} className={OB_INPUT_CLS} style={inputSty}>
                   {OCCUPATION_OPTIONS.map((o) => <option key={o.k} value={o.k}>{o.label}</option>)}
                 </select>
               </div>
@@ -3081,16 +3207,16 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
               <div className="pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
                 <div className="font-mono text-2xs mb-2.5" style={{ color: C.violet }}>ข้อมูลองค์กร</div>
                 <div className="grid sm:grid-cols-2 gap-2.5 mb-2.5">
-                  <Field label="ชื่อบริษัท/องค์กร *" k="companyName" ph="บริษัท ตัวอย่าง จำกัด" />
-                  <Field label="เลขประจำตัวผู้เสียภาษี" k="taxId" ph="13 หลัก" />
-                  <Field label="ที่อยู่จดทะเบียน" k="address" ph="ที่อยู่ตามหนังสือรับรอง" full />
-                  <Field label="ที่ตั้งสำนักงาน" k="office" ph="ถ้ามี" />
-                  <Field label="ที่ตั้งโกดังสินค้า" k="warehouse" ph="ถ้ามี" />
-                  <Field label="เบอร์ติดต่อองค์กร" k="orgPhone" ph="02-xxx-xxxx" />
-                  <Field label="อีเมลองค์กร" k="orgEmail" ph="contact@example.com" />
-                  <Field label="เพจ Facebook" k="facebook" ph="ลิงก์เพจ" />
-                  <Field label="LINE" k="line" ph="@lineid" />
-                  <Field label="เว็บไซต์" k="website" ph="https://" full />
+                  <OnboardingField label="ชื่อบริษัท/องค์กร *" value={p.companyName} onChange={(v) => set('companyName', v)} ph="บริษัท ตัวอย่าง จำกัด" inputSty={inputSty} />
+                  <OnboardingField label="เลขประจำตัวผู้เสียภาษี" value={p.taxId} onChange={(v) => set('taxId', v)} ph="13 หลัก" inputSty={inputSty} />
+                  <OnboardingField label="ที่อยู่จดทะเบียน" value={p.address} onChange={(v) => set('address', v)} ph="ที่อยู่ตามหนังสือรับรอง" full inputSty={inputSty} />
+                  <OnboardingField label="ที่ตั้งสำนักงาน" value={p.office} onChange={(v) => set('office', v)} ph="ถ้ามี" inputSty={inputSty} />
+                  <OnboardingField label="ที่ตั้งโกดังสินค้า" value={p.warehouse} onChange={(v) => set('warehouse', v)} ph="ถ้ามี" inputSty={inputSty} />
+                  <OnboardingField label="เบอร์ติดต่อองค์กร" value={p.orgPhone} onChange={(v) => set('orgPhone', v)} ph="02-xxx-xxxx" type="tel" inputSty={inputSty} />
+                  <OnboardingField label="อีเมลองค์กร" value={p.orgEmail} onChange={(v) => set('orgEmail', v)} ph="contact@example.com" type="email" inputSty={inputSty} />
+                  <OnboardingField label="เพจ Facebook" value={p.facebook} onChange={(v) => set('facebook', v)} ph="ลิงก์เพจ" inputSty={inputSty} />
+                  <OnboardingField label="LINE" value={p.line} onChange={(v) => set('line', v)} ph="@lineid" inputSty={inputSty} />
+                  <OnboardingField label="เว็บไซต์" value={p.website} onChange={(v) => set('website', v)} ph="https://" full inputSty={inputSty} />
                 </div>
 
                 <div className="mb-2.5">
@@ -3100,17 +3226,32 @@ function OnboardingFlow({ user, onUpdateUser, showToast }) {
                       {polishing ? <Loader2 size={9} className="animate-spin" /> : <Sparkles size={9} />} ให้ AI ช่วยเรียบเรียง
                     </button>
                   </div>
-                  <textarea value={p.businessDesc} onChange={(e) => set('businessDesc', e.target.value)} rows={3} placeholder="เขียนคร่าวๆ ก็ได้ เช่น ขายอาหารเสริมผ่านติ๊กต๊อกและช้อปปี้ กลุ่มลูกค้าผู้หญิงอายุ 25-40" className={inputCls + ' resize-none'} style={inputSty} />
+                  <textarea value={p.businessDesc} onChange={(e) => set('businessDesc', e.target.value)} rows={3} placeholder="เขียนคร่าวๆ ก็ได้ เช่น ขายอาหารเสริมผ่านติ๊กต๊อกและช้อปปี้ กลุ่มลูกค้าผู้หญิงอายุ 25-40" className={OB_INPUT_CLS + ' resize-none'} style={inputSty} />
                 </div>
 
                 <div>
                   <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>เจ้าของกิจการ</label>
                   {p.owners.map((o, i) => (
-                    <div key={i} className="flex gap-1.5 mb-1.5">
-                      <input value={o.name} onChange={(e) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], name: e.target.value }; return { ...s, owners: ow }; })} placeholder={`ชื่อเจ้าของคนที่ ${i + 1}`} className={inputCls} style={inputSty} />
-                      <input type="date" value={o.birthDate} onChange={(e) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], birthDate: e.target.value }; return { ...s, owners: ow }; })} className={inputCls} style={{ ...inputSty, maxWidth: 150 }} />
+                    <div key={i} className="flex gap-1.5 mb-1.5 items-end">
+                      <div className="flex-1">
+                        <input
+                          value={o.name}
+                          onChange={(e) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], name: e.target.value }; return { ...s, owners: ow }; })}
+                          placeholder={`ชื่อเจ้าของคนที่ ${i + 1}`}
+                          className={OB_INPUT_CLS}
+                          style={inputSty}
+                        />
+                      </div>
+                      <div style={{ minWidth: 160 }}>
+                        <BirthDatePicker
+                          label=""
+                          value={o.birthDate}
+                          onChange={(v) => setP((s) => { const ow = [...s.owners]; ow[i] = { ...ow[i], birthDate: v }; return { ...s, owners: ow }; })}
+                          inputSty={inputSty}
+                        />
+                      </div>
                       {p.owners.length > 1 && (
-                        <button onClick={() => setP((s) => ({ ...s, owners: s.owners.filter((_, x) => x !== i) }))} className="px-2 rounded-xl shrink-0" style={{ border: `1px solid ${C.border}`, color: C.muted }}><X size={12} /></button>
+                        <button onClick={() => setP((s) => ({ ...s, owners: s.owners.filter((_, x) => x !== i) }))} className="px-2 py-2 rounded-xl shrink-0 mb-0" style={{ border: `1px solid ${C.border}`, color: C.muted }}><X size={12} /></button>
                       )}
                     </div>
                   ))}
@@ -10385,9 +10526,18 @@ export default function CompanyPortal() {
   const [pendingDeptTool, setPendingDeptTool] = useState(null); // เครื่องมือที่จะเปิดทันทีเมื่อเข้าแผนก
 
   // ใช้ธีมที่ผู้ใช้เคยเลือกไว้ทันทีที่รู้ว่าเป็นใคร
+  // หมายเหตุ: เปลี่ยน theme โดยไม่ยิง setThemeTick เพราะ themeTick จะ unmount ทุก component
+  // รวมถึง OnboardingFlow ทำให้ฟอร์มรีเซ็ตกลายเป็นบักใหญ่ — setThemeTick ควรเรียกเฉพาะจาก changeTheme เท่านั้น
+  const appliedThemePrefRef = useRef(null);
   useEffect(() => {
     const pref = user?.themePref;
-    if (pref && THEMES[pref] && pref !== theme) { applyTheme(pref); setTheme(pref); setThemeTick((n) => n + 1); }
+    if (pref && THEMES[pref] && pref !== theme && pref !== appliedThemePrefRef.current) {
+      appliedThemePrefRef.current = pref;
+      applyTheme(pref);
+      setTheme(pref);
+      // ไม่ setThemeTick ที่นี่ — การเปลี่ยนธีมตอนโหลดข้อมูลเริ่มต้นไม่ต้องบังคับวาดใหม่ทั้งหน้า
+      // เพราะ C object ถูก mutate แล้ว และ component จะ re-render เองตาม state ที่เปลี่ยน
+    }
   }, [user?.themePref]);
 
   // Ctrl+K / Cmd+K เปิดแถบค้นหาคำสั่งได้จากทุกหน้า
@@ -10874,6 +11024,8 @@ export default function CompanyPortal() {
     !user.consent || user.consent.version !== CONSENT_VERSION || !user.onboardedAt || user.tourSeen !== TOUR_VERSION
   );
   if (user && dataLoaded && needsOnboarding) {
+    // *** ห้ามใส่ key={themeTick} ที่นี่ — ถ้าใส่ React จะ unmount OnboardingFlow ทุกครั้งที่ธีมเปลี่ยน
+    // ทำให้ข้อมูลที่กรอกในฟอร์มหายหมด และ input เสีย focus
     return (
       <div className="min-h-screen font-body" style={{ background: C.bg }}>
         <style>{`
