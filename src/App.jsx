@@ -1877,6 +1877,7 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [openId, setOpenId] = useState(null);
+  const [canvaTemplates, setCanvaTemplates] = useState(null); // null=ยังไม่โหลด, []=ไม่มี/ไม่ได้เชื่อม
 
   const mine = (records || []).filter((r) => r.dept === deptId && r.tool === tool.key);
   const active = mine.find((r) => r.id === openId) || mine[mine.length - 1] || null;
@@ -1931,8 +1932,19 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
     if (org.website) lines.push(`เว็บไซต์: ${org.website}`);
     const chs = (ctx?.channels || []).map((c) => `${c.name}${c.platform ? ` (${c.platform})` : ''}${c.niche ? ` แนว${c.niche}` : ''}`);
     if (chs.length) lines.push(`ช่อง/เพจที่ดูแล: ${chs.join(' · ')}`);
+    if (canvaTemplates && canvaTemplates.length) {
+      lines.push(`เทมเพลตแบรนด์ที่มีอยู่จริงใน Canva (อ้างอิงชื่อเหล่านี้ได้เวลาเสนอไอเดีย): ${canvaTemplates.map((t) => t.title).filter(Boolean).join(', ')}`);
+    }
     return lines.length ? lines.join('\n') : null;
   }
+
+  // โหลดรายชื่อเทมเพลตแบรนด์จาก Canva มาครั้งเดียว (ถ้าเชื่อมต่อไว้และเครื่องมือนี้ต้องใช้ข้อมูลแบรนด์)
+  useEffect(() => {
+    if (!tool.useBrand || canvaTemplates !== null) return;
+    apiPost('/api/canva/actions', { action: 'listBrandTemplates' }).then((r) => {
+      setCanvaTemplates(r.ok ? (r.data.items || []).slice(0, 20) : []);
+    });
+  }, [tool.useBrand]);
 
   // ชื่อคลิปที่เคยทำจริง ใช้กันไม่ให้ AI เสนอไอเดียซ้ำของเดิม
   function pastClips(limit = 40) {
@@ -2012,6 +2024,19 @@ function DeptTool({ tool, deptId, records, setRecords, showToast, ctx }) {
               ))}
             </div>
           )}
+          <div className="mt-2.5 flex justify-center">
+            <CanvaBridge
+              imageDataUrl={imgs[0]?.dataUrl}
+              imageName={`${tool.label}-${todayDateStr()}`}
+              showToast={showToast}
+              onPulledImage={(dataUrl, name) => {
+                if (imgs.length >= (tool.images || 6)) { setErr('แนบรูปครบแล้ว ลบรูปเก่าก่อนดึงเข้ามาใหม่'); return; }
+                const [head, base64] = dataUrl.split(',');
+                const mimeType = (head.match(/data:(.*);base64/) || [])[1] || 'image/png';
+                setImgs((p) => [...p, { id: `${Date.now()}-canva`, mimeType, base64, dataUrl }]);
+              }}
+            />
+          </div>
         </div>
       )}
 
@@ -8440,6 +8465,189 @@ function CommandPalette({ open, onClose, navItems, departments, user, onGoPage, 
   );
 }
 
+// ---------- เชื่อมต่อ Canva (บัญชีส่วนตัวของแต่ละคน) ----------
+function CanvaConnectPanel({ showToast }) {
+  const [status, setStatus] = useState(null); // null = กำลังโหลด
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function loadStatus() {
+    const r = await apiPost('/api/canva/actions', { action: 'status' });
+    if (r.ok) setStatus(r.data);
+    else setStatus({ connected: false });
+  }
+  useEffect(() => { loadStatus(); }, []);
+
+  // เว็บ Canva ส่งเรากลับมาพร้อม ?canva=connected หรือ ?canva=error ต่อท้าย URL — อ่านครั้งเดียวแล้วเคลียร์ทิ้ง
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get('canva');
+    if (!c) return;
+    if (c === 'connected') { showToast && showToast('เชื่อมต่อ Canva สำเร็จ'); loadStatus(); }
+    else if (c === 'error') { setErr('เชื่อมต่อ Canva ไม่สำเร็จ ลองใหม่อีกครั้ง'); }
+    params.delete('canva'); params.delete('canvaReason');
+    const q = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (q ? `?${q}` : ''));
+  }, []);
+
+  async function connect() {
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/canva/start', {});
+    if (r.ok && r.data.url) window.location.href = r.data.url;
+    else { setErr(r.data.error || 'เริ่มการเชื่อมต่อไม่สำเร็จ'); setBusy(false); }
+  }
+
+  async function disconnect() {
+    if (!window.confirm('ยกเลิกการเชื่อมต่อ Canva? ต้องเชื่อมต่อใหม่ถึงจะใช้ได้อีกครั้ง')) return;
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/canva/actions', { action: 'disconnect' });
+    if (r.ok) { showToast && showToast('ยกเลิกการเชื่อมต่อแล้ว'); await loadStatus(); }
+    else setErr(r.data.error || 'ยกเลิกไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center gap-2 mb-1"><Palette size={14} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>Canva</span></div>
+      <p className="font-body text-xs mb-3" style={{ color: C.muted }}>
+        เชื่อมบัญชี Canva ของคุณเอง (Pro/Teams/Enterprise ที่มีอยู่แล้ว) เพื่อส่งรูปเข้าคลัง ดึงงานออกแบบกลับมา และดูเทมเพลตแบรนด์ตอนคิดคอนเทนต์ — เป็นการเชื่อมต่อส่วนตัวของคุณ เพื่อนร่วมงานไม่เห็นและไม่ใช้ร่วมกัน
+      </p>
+
+      {status === null ? (
+        <p className="font-mono text-2xs" style={{ color: C.muted }}>กำลังตรวจสอบ...</p>
+      ) : status.connected ? (
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+            <CheckCircle2 size={13} style={{ color: C.emerald }} />
+            <span className="font-body text-xs" style={{ color: C.text }}>เชื่อมต่อแล้ว{status.displayName ? ` · ${status.displayName}` : ''}</span>
+          </div>
+          <button onClick={disconnect} disabled={busy} className="font-mono text-2xs px-3 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted, opacity: busy ? 0.5 : 1 }}>
+            ยกเลิกการเชื่อมต่อ
+          </button>
+        </div>
+      ) : (
+        <button onClick={connect} disabled={busy} className="font-mono text-2xs px-3 py-2 rounded-lg flex items-center gap-1.5" style={{ background: C.orange, color: '#0A0A0F', opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <Palette size={12} />} เชื่อมต่อ Canva
+          {status.expired && <span style={{ fontSize: 9 }}> (หมดอายุ เชื่อมใหม่)</span>}
+        </button>
+      )}
+      {err && <p className="font-mono text-2xs mt-2" style={{ color: C.orange }}>{err}</p>}
+    </div>
+  );
+}
+
+// ---------- ส่งรูปเข้า Canva / ดึงงานออกแบบกลับมา — ใช้ซ้ำได้หลายจุดในระบบ ----------
+function CanvaBridge({ imageDataUrl, imageName, onPulledImage, showToast }) {
+  const [connected, setConnected] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [sendErr, setSendErr] = useState('');
+  const [sentOk, setSentOk] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [designs, setDesigns] = useState(null);
+  const [pulling, setPulling] = useState('');
+  const [pullErr, setPullErr] = useState('');
+
+  useEffect(() => {
+    apiPost('/api/canva/actions', { action: 'status' }).then((r) => setConnected(r.ok && r.data.connected));
+  }, []);
+
+  async function sendToCanva() {
+    if (!imageDataUrl) return;
+    setSending(true); setSendErr(''); setSentOk(false);
+    try {
+      const base64 = imageDataUrl.split(',')[1] || imageDataUrl;
+      const r = await apiPost('/api/canva/actions', { action: 'uploadAsset', base64, name: imageName || `FORGE-${todayDateStr()}` });
+      if (!r.ok) { setSendErr(r.data.error || 'ส่งเข้า Canva ไม่สำเร็จ'); setSending(false); return; }
+      const jobId = r.data.job?.id;
+      // งานอัปโหลดเป็นแบบ asynchronous — ต้องถามซ้ำจนกว่าจะเสร็จ ไม่เกิน ~20 วินาที
+      for (let i = 0; i < 10; i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        const c = await apiPost('/api/canva/actions', { action: 'getUploadJob', jobId });
+        const st = c.data?.job?.status;
+        if (st === 'success') { setSentOk(true); showToast && showToast('ส่งเข้า Canva แล้ว'); break; }
+        if (st === 'failed') { setSendErr(c.data?.job?.error?.message || 'อัปโหลดไม่สำเร็จ'); break; }
+      }
+    } catch (e) { setSendErr('ส่งเข้า Canva ไม่สำเร็จ'); }
+    setSending(false);
+  }
+
+  async function openPicker() {
+    setShowPicker(true); setPullErr('');
+    if (designs) return;
+    const r = await apiPost('/api/canva/actions', { action: 'listDesigns' });
+    if (r.ok) setDesigns(r.data.items || []);
+    else { setPullErr(r.data.error || 'ดึงรายการไม่สำเร็จ'); setDesigns([]); }
+  }
+
+  async function pullDesign(design) {
+    setPulling(design.id); setPullErr('');
+    try {
+      const ex = await apiPost('/api/canva/actions', { action: 'exportDesign', designId: design.id, format: 'png' });
+      if (!ex.ok) { setPullErr(ex.data.error || 'ส่งออกไม่สำเร็จ'); setPulling(''); return; }
+      const jobId = ex.data.job?.id;
+      let url = null;
+      for (let i = 0; i < 12; i++) {
+        await new Promise((res) => setTimeout(res, 1500));
+        const c = await apiPost('/api/canva/actions', { action: 'getExportJob', jobId });
+        const st = c.data?.job?.status;
+        if (st === 'success') { url = c.data?.job?.urls?.[0]; break; }
+        if (st === 'failed') { setPullErr('สร้างไฟล์ส่งออกไม่สำเร็จ'); break; }
+      }
+      if (url) {
+        // ลิงก์ดาวน์โหลดของ Canva หมดอายุใน 24 ชม. — ดึงมาแปลงเป็น dataURL เก็บไว้ในงานทันที
+        const imgRes = await fetch(url);
+        const blob = await imgRes.blob();
+        const dataUrl = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+        onPulledImage && onPulledImage(dataUrl, design.title?.trim() || 'canva-design');
+        showToast && showToast('ดึงจาก Canva แล้ว');
+        setShowPicker(false);
+      } else if (!pullErr) setPullErr('ยังไม่เสร็จ ลองอีกครั้ง');
+    } catch (e) { setPullErr('ดึงงานไม่สำเร็จ'); }
+    setPulling('');
+  }
+
+  if (connected === null) return null;
+  if (!connected) {
+    return <p className="font-body" style={{ fontSize: 10, color: C.muted }}>เชื่อมต่อ Canva ในหน้าตั้งค่าเพื่อส่งรูปเข้า/ดึงงานออกแบบจาก Canva ได้</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {imageDataUrl && (
+        <button onClick={sendToCanva} disabled={sending} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ border: `1px solid ${C.orange}`, color: sentOk ? C.emerald : C.orange, opacity: sending ? 0.6 : 1 }}>
+          {sending ? <Loader2 size={11} className="animate-spin" /> : sentOk ? <CheckCircle2 size={11} /> : <Palette size={11} />}
+          {sentOk ? 'ส่งเข้า Canva แล้ว' : 'ส่งเข้า Canva'}
+        </button>
+      )}
+      <div className="relative">
+        <button onClick={openPicker} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+          <Download size={11} /> ดึงจาก Canva
+        </button>
+        {showPicker && (
+          <div className="absolute left-0 mt-1 rounded-xl z-20 overflow-hidden" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, width: 260, maxHeight: 320, overflowY: 'auto' }}>
+            <div className="flex items-center justify-between px-2.5 py-1.5" style={{ borderBottom: `1px solid ${C.border}` }}>
+              <span className="font-mono text-2xs" style={{ color: C.muted }}>งานออกแบบล่าสุด</span>
+              <button onClick={() => setShowPicker(false)}><X size={12} style={{ color: C.muted }} /></button>
+            </div>
+            {pullErr && <p className="font-mono text-2xs p-2" style={{ color: C.orange }}>{pullErr}</p>}
+            {designs === null ? (
+              <p className="font-mono text-2xs p-2.5" style={{ color: C.muted }}>กำลังโหลด...</p>
+            ) : designs.length === 0 ? (
+              <p className="font-body text-xs p-2.5" style={{ color: C.muted }}>ยังไม่มีงานออกแบบใน Canva</p>
+            ) : designs.map((d) => (
+              <button key={d.id} onClick={() => pullDesign(d)} disabled={!!pulling} className="w-full flex items-center gap-2 px-2.5 py-2 text-left" style={{ opacity: pulling && pulling !== d.id ? 0.5 : 1 }}>
+                {d.thumbnail?.url ? <img src={d.thumbnail.url} alt="" style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: 6 }} /> : <span style={{ width: 32, height: 32, borderRadius: 6, background: C.bgDeep }} />}
+                <span className="font-body text-xs flex-1 truncate" style={{ color: C.text }}>{d.title || 'ไม่มีชื่อ'}</span>
+                {pulling === d.id && <Loader2 size={11} className="animate-spin" style={{ color: C.orange }} />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // แผงเครื่องมือผู้พัฒนา — ใช้ทดสอบ flow ที่ผู้ใช้ใหม่จะเจอ
 function DevOnboardingPanel({ user, showToast, refreshMe }) {
   const [busy, setBusy] = useState(false);
@@ -8518,6 +8726,7 @@ function SettingsPage({ user, accounts, backupData, onImportBackup, tokens, refr
 
       <OrgPlanPanel user={user} showToast={showToast} />
       <MemberDeptPanel user={user} accounts={accounts} showToast={showToast} />
+      <CanvaConnectPanel showToast={showToast} />
       <AppearancePanel user={user} theme={theme} onChangeTheme={onChangeTheme} company={company} setCompany={setCompany} showToast={showToast} />
       <DevOnboardingPanel user={user} showToast={showToast} refreshMe={refreshMe} />
       <OwnerConsole user={user} showToast={showToast} onFeaturesChanged={refreshMe} />
