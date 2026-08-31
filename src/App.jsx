@@ -2631,12 +2631,15 @@ function SecurityProtocol({ user, onToggleOwnOtpExempt }) {
   );
 }
 
-function TeamPanel({ accounts, onUpdateClearance }) {
+function TeamPanel({ accounts, onUpdateClearance, user, showToast }) {
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
       <div className="flex items-center gap-2 mb-1"><Users size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>TEAM MANAGEMENT</span></div>
       <h2 className="font-body text-xl mb-1" style={{ color: C.text }}>จัดการทีมงาน</h2>
-      <p className="font-body text-xs mb-6" style={{ color: C.muted }}>คนที่สมัครใหม่จะเริ่มที่ระดับพนักงานทั่วไปเสมอ ปรับสิทธิ์ให้แต่ละคนได้ที่นี่ — บัญชีที่ไม่เข้าสู่ระบบเกิน 30 วันจะถูกลบอัตโนมัติ (ยกเว้นบัญชีเจ้าของระบบ)</p>
+      <p className="font-body text-xs mb-4" style={{ color: C.muted }}>คนที่สมัครใหม่จะเริ่มที่ระดับพนักงานทั่วไปเสมอ ปรับสิทธิ์ให้แต่ละคนได้ที่นี่ — บัญชีที่ไม่เข้าสู่ระบบเกิน 30 วันจะถูกลบอัตโนมัติ (ยกเว้นบัญชีเจ้าของระบบ)</p>
+
+      <AttendancePanel user={user} showToast={showToast} />
+
       {accounts.length === 0 ? (
         <p className="font-body text-sm" style={{ color: C.muted }}>ยังไม่มีสมาชิกในระบบ</p>
       ) : (
@@ -2661,11 +2664,14 @@ function TeamPanel({ accounts, onUpdateClearance }) {
                     </div>
                   </div>
                 </div>
-                <select value={a.clearance} onChange={(e) => onUpdateClearance(a.email, Number(e.target.value))} className="font-mono text-2xs px-2 py-2 rounded-xl outline-none shrink-0" style={{ background: C.panelAlt, color: cl.color, border: `1px solid ${C.border}` }}>
-                  <option value={1}>LV-1 STAFF</option>
-                  <option value={2}>LV-2 MANAGER</option>
-                  <option value={3}>LV-3 EXECUTIVE</option>
-                </select>
+                <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                  <ResetPasswordButton member={a} user={user} showToast={showToast} />
+                  <select value={a.clearance} onChange={(e) => onUpdateClearance(a.email, Number(e.target.value))} className="font-mono text-2xs px-2 py-2 rounded-xl outline-none shrink-0" style={{ background: C.panelAlt, color: cl.color, border: `1px solid ${C.border}` }}>
+                    <option value={1}>LV-1 STAFF</option>
+                    <option value={2}>LV-2 MANAGER</option>
+                    <option value={3}>LV-3 EXECUTIVE</option>
+                  </select>
+                </div>
               </div>
             );
           })}
@@ -8811,6 +8817,249 @@ function CanvaBridge({ imageDataUrl, imageName, onPulledImage, showToast }) {
   );
 }
 
+// ---------- ขาด ลา มาสาย + Work Flow รายวัน ----------
+const ATT_STATUS = {
+  present: { label: 'มาทำงาน', color: '#34D399', weight: 1 },
+  late: { label: 'มาสาย', color: '#FB923C', weight: 0.9 },
+  wfh: { label: 'ทำที่บ้าน', color: '#22D3EE', weight: 0.9 },
+  leave: { label: 'ลา', color: '#A78BFA', weight: 0 },
+  sick: { label: 'ลาป่วย', color: '#A78BFA', weight: 0 },
+  absent: { label: 'ขาดงาน', color: '#F87171', weight: 0 },
+};
+
+function AttendancePanel({ user, showToast }) {
+  const [date, setDate] = useState(todayDateStr());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState('');
+
+  async function load(d) {
+    setLoading(true); setErr('');
+    const r = await apiPost('/api/auth', { action: 'getAttendance', date: d || date });
+    if (r.ok) setData(r.data); else setErr(r.data.error || 'โหลดข้อมูลไม่สำเร็จ');
+    setLoading(false);
+  }
+  useEffect(() => { load(date); }, [date]);
+
+  async function mark(email, status) {
+    setSaving(email); setErr('');
+    const r = await apiPost('/api/auth', { action: 'setAttendance', email, date, status });
+    if (r.ok) { await load(date); showToast && showToast('บันทึกแล้ว'); }
+    else setErr(r.data.error || 'บันทึกไม่สำเร็จ');
+    setSaving('');
+  }
+
+  const flowColor = (f) => f == null ? C.muted : f >= 80 ? C.emerald : f >= 60 ? C.orange : C.red;
+
+  // พนักงานทั่วไป: เห็นแค่ของตัวเอง — สถานะการลาของเพื่อนเป็นข้อมูลส่วนบุคคล
+  if (data && !data.canSeeTeam) {
+    return (
+      <div className="p-4 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-3"><Clock size={14} style={{ color: C.cyan }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>สถานะวันนี้ของฉัน</span></div>
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(ATT_STATUS).map(([k, v]) => (
+            <button key={k} onClick={() => mark(user.email, k)} disabled={!!saving}
+              className="font-mono text-2xs px-3 py-2 rounded-lg"
+              style={{ background: data.mine?.status === k ? v.color : 'transparent', color: data.mine?.status === k ? '#0A0A0F' : C.muted, border: `1px solid ${data.mine?.status === k ? v.color : C.border}` }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {err && <p className="font-mono text-2xs mt-2" style={{ color: C.orange }}>{err}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 rounded-2xl mb-4" style={{ background: `linear-gradient(160deg, ${C.panel}, ${C.panelAlt})`, border: `1px solid ${C.cyan}44` }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-center gap-2"><Clock size={14} style={{ color: C.cyan }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.cyan }}>สถานะทีม & Work Flow</span></div>
+        <div className="flex items-center gap-1.5">
+          <input type="date" value={date} max={todayDateStr()} onChange={(e) => setDate(e.target.value)}
+            className="font-mono text-2xs px-2 py-1.5 rounded-lg outline-none" style={{ background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text }} />
+          <button onClick={() => setDate(todayDateStr())} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>วันนี้</button>
+        </div>
+      </div>
+
+      {loading && !data ? <p className="font-mono text-2xs" style={{ color: C.muted }}>กำลังโหลด...</p> : data && (
+        <>
+          {/* ตัวเลขรวมทั้งบริษัท */}
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <div className="shrink-0 text-center px-4 py-2.5 rounded-2xl" style={{ background: C.bgDeep, border: `2px solid ${flowColor(data.workFlow)}` }}>
+              <div className="font-display text-3xl font-bold leading-none" style={{ color: flowColor(data.workFlow) }}>{data.workFlow ?? '-'}%</div>
+              <div className="font-mono mt-0.5" style={{ fontSize: 9, color: C.muted }}>Work Flow</div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 flex-1 min-w-[200px]">
+              {[
+                { l: 'ทั้งหมด', v: data.headcount, c: C.text },
+                { l: 'มาทำงาน', v: data.present, c: C.emerald },
+                { l: 'สาย', v: data.late, c: C.orange },
+                { l: 'ลา/ขาด', v: data.leave + data.absent, c: C.red },
+              ].map((x) => (
+                <div key={x.l} className="p-2 rounded-xl text-center" style={{ background: C.bgDeep }}>
+                  <div className="font-display text-lg font-bold leading-none" style={{ color: x.c }}>{x.v}</div>
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>{x.l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* แยกรายแผนก — ภาพรวมบริษัทอาจดูดี แต่บางแผนกอาจขาดคนจนงานกองที่คนเดียว */}
+          {data.departments?.length > 0 && (
+            <div className="mb-4">
+              <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>Work Flow รายแผนก</div>
+              <div className="space-y-1.5">
+                {data.departments.map((d) => (
+                  <div key={d.dept} className="flex items-center gap-2.5 p-2.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${d.strained ? C.red : C.border}` }}>
+                    <span className="font-body text-xs flex-1 min-w-0 truncate" style={{ color: C.text }}>{d.dept}</span>
+                    <span className="font-mono shrink-0" style={{ fontSize: 9, color: C.muted }}>{d.total - d.out}/{d.total} คน</span>
+                    <div className="shrink-0" style={{ width: 70, height: 5, borderRadius: 999, background: C.border, overflow: 'hidden' }}>
+                      <div style={{ width: `${d.flow ?? 0}%`, height: '100%', background: flowColor(d.flow) }} />
+                    </div>
+                    <span className="font-mono shrink-0 tabular-nums" style={{ fontSize: 11, color: flowColor(d.flow), width: 34, textAlign: 'right' }}>{d.flow}%</span>
+                  </div>
+                ))}
+              </div>
+              {data.departments.some((d) => d.strained) && (
+                <p className="font-body text-xs mt-2 p-2 rounded-lg" style={{ color: C.red, background: `${C.red}12` }}>
+                  ⚠ แผนกที่ขึ้นกรอบแดงเหลือกำลังคนไม่ถึง 60% งานจะกองที่คนที่เหลือ — ควรให้หัวหน้าลงมาช่วยหรือเลื่อนงานที่ไม่เร่งด่วน
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* รายคน */}
+          <div className="space-y-1.5">
+            {data.rows.map((r) => (
+              <div key={r.email} className="flex items-center gap-2 p-2.5 rounded-xl flex-wrap" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+                <div className="flex-1 min-w-[120px]">
+                  <div className="font-body text-xs truncate" style={{ color: C.text }}>{r.name}</div>
+                  <div className="font-mono" style={{ fontSize: 9, color: C.muted }}>
+                    {r.dept || 'ยังไม่ระบุแผนก'}{!r.marked && ' · ยังไม่ได้เช็คอิน'}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1 shrink-0">
+                  {Object.entries(ATT_STATUS).map(([k, v]) => (
+                    <button key={k} onClick={() => mark(r.email, k)} disabled={saving === r.email}
+                      className="font-mono px-2 py-1 rounded-lg"
+                      style={{ fontSize: 9, background: r.status === k ? v.color : 'transparent', color: r.status === k ? '#0A0A0F' : C.muted, border: `1px solid ${r.status === k ? v.color : C.border}`, opacity: saving === r.email ? 0.5 : 1 }}>
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {err && <p className="font-mono text-2xs mt-2" style={{ color: C.orange }}>{err}</p>}
+    </div>
+  );
+}
+
+// ---------- ปุ่มรีเซ็ตรหัสผ่านให้พนักงานที่ลืมรหัส ----------
+function ResetPasswordButton({ member, user, showToast }) {
+  const [busy, setBusy] = useState(false);
+  const [temp, setTemp] = useState(null);
+  const [err, setErr] = useState('');
+
+  // ป้องกันตั้งแต่หน้าเว็บด้วย (เซิร์ฟเวอร์ตรวจซ้ำอีกชั้นอยู่แล้ว)
+  const canReset = (user.clearance === 3 || ['exec', 'dev'].includes(user.role) || user.isOwner)
+    && member.email !== user.email && !member.isOwner;
+  if (!canReset) return null;
+
+  async function doReset() {
+    if (!window.confirm(`รีเซ็ตรหัสผ่านของ ${member.name || member.email}?\n\nระบบจะสร้างรหัสชั่วคราวให้ และเตะอุปกรณ์ที่ล็อกอินค้างอยู่ออกทั้งหมด`)) return;
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/auth', { action: 'resetMemberPassword', email: member.email });
+    if (r.ok) { setTemp(r.data.tempPassword); showToast && showToast('รีเซ็ตแล้ว'); }
+    else setErr(r.data.error || 'รีเซ็ตไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  if (temp) {
+    return (
+      <div className="p-2.5 rounded-xl w-full mt-1.5" style={{ background: `${C.emerald}12`, border: `1px solid ${C.emerald}44` }}>
+        <div className="font-mono text-2xs mb-1" style={{ color: C.emerald }}>รหัสชั่วคราว — แสดงครั้งเดียว บอกให้เจ้าตัวทันที</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <code className="font-mono px-2.5 py-1.5 rounded-lg" style={{ fontSize: 15, letterSpacing: 2, background: C.bgDeep, color: C.text }}>{temp}</code>
+          <button onClick={() => { copyText(temp); showToast && showToast('คัดลอกแล้ว'); }} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>คัดลอก</button>
+          <button onClick={() => setTemp(null)} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ปิด</button>
+        </div>
+        <p className="font-body mt-1.5" style={{ fontSize: 10, color: C.muted }}>พนักงานเอารหัสนี้ไปล็อกอิน แล้วระบบจะบังคับให้ตั้งรหัสใหม่ทันที</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shrink-0">
+      <button onClick={doReset} disabled={busy} className="font-mono text-2xs px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.orange}`, color: C.orange, opacity: busy ? 0.5 : 1 }}>
+        {busy ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />} รีเซ็ตรหัสผ่าน
+      </button>
+      {err && <p className="font-mono mt-1" style={{ fontSize: 9, color: C.red }}>{err}</p>}
+    </div>
+  );
+}
+
+// ---------- บังคับตั้งรหัสใหม่ หลังผู้บริหารรีเซ็ตรหัสให้ ----------
+// ถ้าไม่บังคับ รหัสชั่วคราวจะใช้ได้ตลอดไป ซึ่งอันตรายเพราะมีคนอื่นรู้รหัสนี้
+function ForcePasswordChange({ onDone, showToast }) {
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!cur || !next) { setErr('กรอกข้อมูลให้ครบ'); return; }
+    if (next.length < 8) { setErr('รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
+    if (next !== confirm) { setErr('รหัสผ่านใหม่ไม่ตรงกัน'); return; }
+    if (next === cur) { setErr('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสชั่วคราว'); return; }
+    setBusy(true); setErr('');
+    const r = await apiPost('/api/auth', { action: 'changePassword', currentPassword: cur, newPassword: next });
+    if (r.ok) {
+      if (r.data.token) saveSession(r.data.token);
+      showToast && showToast('ตั้งรหัสผ่านใหม่แล้ว');
+      onDone && onDone();
+    } else setErr(r.data.error || 'เปลี่ยนรหัสไม่สำเร็จ');
+    setBusy(false);
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ background: C.bg }}>
+      <form onSubmit={submit} className="w-full anim-fade" style={{ maxWidth: 400 }}>
+        <div className="p-5 rounded-2xl" style={{ background: C.panel, border: `1px solid ${C.orange}44` }}>
+          <div className="flex items-center gap-2 mb-1"><Shield size={16} style={{ color: C.orange }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.orange }}>ต้องตั้งรหัสผ่านใหม่</span></div>
+          <p className="font-body text-xs mb-4" style={{ color: C.muted }}>
+            ผู้ดูแลเพิ่งรีเซ็ตรหัสผ่านให้คุณ เพื่อความปลอดภัยต้องตั้งรหัสใหม่ก่อนใช้งาน เพราะรหัสชั่วคราวมีคนอื่นรู้ด้วย
+          </p>
+          <div className="space-y-3">
+            <TextField label="รหัสชั่วคราวที่ได้รับ" type="password" value={cur} onChange={(e) => setCur(e.target.value)} placeholder="รหัสที่ผู้ดูแลให้มา" required />
+            <div>
+              <TextField label="รหัสผ่านใหม่" type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="อย่างน้อย 8 ตัวอักษร" required />
+              {next && <PasswordStrength value={next} />}
+            </div>
+            <div>
+              <TextField label="ยืนยันรหัสผ่านใหม่" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="พิมพ์อีกครั้ง" required />
+              {confirm && (
+                <p className="font-mono mt-1" style={{ fontSize: 10, color: next === confirm ? C.emerald : C.red }}>
+                  {next === confirm ? '✓ ตรงกัน' : '✕ ยังไม่ตรงกัน'}
+                </p>
+              )}
+            </div>
+          </div>
+          {err && <p className="font-mono text-2xs mt-3" style={{ color: C.red }}>{err}</p>}
+          <button type="submit" disabled={busy} className="w-full mt-4 py-3 font-mono text-xs rounded-xl flex items-center justify-center gap-1.5" style={{ background: C.orange, color: '#0A0A0F', opacity: busy ? 0.6 : 1 }}>
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} ตั้งรหัสผ่านใหม่
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // แผงเครื่องมือผู้พัฒนา — ใช้ทดสอบ flow ที่ผู้ใช้ใหม่จะเจอ
 function DevOnboardingPanel({ user, showToast, refreshMe }) {
   const [busy, setBusy] = useState(false);
@@ -10601,6 +10850,24 @@ export default function CompanyPortal() {
     );
   }
 
+  // ---- ถูกรีเซ็ตรหัสมา ต้องตั้งรหัสใหม่ก่อนทำอะไรทั้งสิ้น ----
+  if (user && dataLoaded && user.mustChangePassword) {
+    return (
+      <div className="min-h-screen font-body" style={{ background: C.bg }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+          .font-display{font-family:'Space Grotesk','IBM Plex Sans Thai',sans-serif;}
+          .font-body{font-family:'IBM Plex Sans Thai','Space Grotesk',sans-serif;}
+          .font-mono{font-family:'IBM Plex Mono',monospace;}
+          .text-2xs{font-size:10px; line-height:1rem;}
+          @keyframes fadeIn{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+          .anim-fade{animation:fadeIn 0.35s ease-out;}
+        `}</style>
+        <ForcePasswordChange showToast={showToast} onDone={refreshMe} />
+      </div>
+    );
+  }
+
   // ---- ต้องยินยอมและอ่านคู่มือก่อนถึงจะเข้าใช้งานได้ ----
   // ถ้าขยับ CONSENT_VERSION หรือ TOUR_VERSION ผู้ใช้เดิมจะถูกพามาหน้านี้อีกครั้งโดยอัตโนมัติ
   const needsOnboarding = user && (
@@ -10678,7 +10945,7 @@ export default function CompanyPortal() {
             {stage === 'calendar' && <CalendarPage user={user} history={history} tasks={tasks} channels={channels} futureTasks={futureTasks} notes={calendarNotes} setNotes={setCalendarNotes} progressLogs={progressLogs} setProgressLogs={setProgressLogs} onOpenDay={(dateStr) => { setPendingViewDate(dateStr); setStage('daily'); }} />}
             {stage === 'platforms' && <PlatformsPanel />}
             {stage === 'files' && <FileBridgePage user={user} channels={channels} setChannels={setChannels} tasks={tasks} history={history} showToast={showToast} />}
-            {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} />}
+            {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} user={user} showToast={showToast} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
             {stage === 'settings' && <SettingsPage theme={theme} onChangeTheme={changeTheme} company={company} setCompany={setCompany} user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} tokens={tokens} refreshMe={refreshMe} showToast={showToast} onFixOrphans={fixOrphanTasks} onBackupNow={runBackupNow} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
