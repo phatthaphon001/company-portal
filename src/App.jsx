@@ -10,7 +10,7 @@ import {
   Target, Trash, RotateCcw, Activity, Search, Flame, Award, Gauge,
   Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight, Clock,
   Layers, Building2, Zap, Shield, Check, FileSpreadsheet, ExternalLink, BadgeCheck,
-  BarChart3, Swords, Handshake, MessageSquare,
+  BarChart3, Swords, Handshake, MessageSquare, Package,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -81,7 +81,10 @@ const PLATFORM_META = {
   tiktok: { label: 'TikTok', color: C.pink, icon: Music2 },
   facebook: { label: 'Facebook', color: C.blue, icon: Share2 },
   youtube: { label: 'YouTube', color: C.red, icon: PlayCircle },
-  instagram: { label: 'Instagram', color: C.orange, icon: Camera },
+  instagram: { label: 'Instagram', color: C.pink, icon: Camera },
+  threads: { label: 'Threads', color: C.text, icon: AtSign },
+  lemon8: { label: 'Lemon8', color: C.emerald, icon: Sparkles },
+  x: { label: 'X (Twitter)', color: C.text, icon: AtSign },
   shopee: { label: 'Shopee', color: C.orange, icon: ShoppingBag },
   other: { label: 'อื่นๆ', color: C.teal, icon: AtSign },
 };
@@ -160,6 +163,17 @@ const DEPARTMENTS = [
       { title: 'ออกใบแจ้งหนี้', en: 'Billing', duty: 'จัดทำและติดตามใบแจ้งหนี้และใบเสร็จ' },
     ],
   },
+  {
+    id: 'stock', th: 'ฝ่ายคลังสินค้า', en: 'STOCK & WAREHOUSE', clearance: 1,
+    icon: Package, accent: '#22D3EE', manager: 'ผู้จัดการคลังสินค้า',
+    brief: 'ดูแลสต๊อกสินค้าทั้งหมด รับเข้า จ่ายออก ของตีกลับ ของเสีย และคุมยอดคงเหลือให้ตรงกับความจริง',
+    roles: [
+      { title: 'เจ้าหน้าที่รับเข้า', en: 'Inbound Officer', duty: 'ตรวจรับสินค้าเข้าคลัง เทียบกับใบสั่งซื้อ และบันทึกจำนวนจริง' },
+      { title: 'เจ้าหน้าที่จ่ายออก', en: 'Outbound Officer', duty: 'จัดของตามออเดอร์ แพ็ก และตัดสต๊อกให้ตรงกับที่ส่งจริง' },
+      { title: 'เจ้าหน้าที่ตรวจนับ', en: 'Stock Auditor', duty: 'นับสต๊อกตามรอบ เทียบกับตัวเลขในระบบ และหาสาเหตุที่ไม่ตรง' },
+      { title: 'ดูแลของตีกลับ', en: 'Returns Officer', duty: 'ตรวจของที่ลูกค้าส่งคืน แยกของขายต่อได้กับของเสีย' },
+    ],
+  },
 ];
 
 const CHART_DATA = [
@@ -198,6 +212,9 @@ const SECURITY_PROTOCOL = [
 const PLATFORMS = [
   { name: 'Facebook', icon: Share2, note: 'สำหรับโพสต์และจัดการเพจธุรกิจ' },
   { name: 'TikTok', icon: Music2, note: 'สำหรับอัปโหลดคลิปและจัดการร้านค้า' },
+  { name: 'Instagram', icon: Camera, note: 'สำหรับโพสต์ภาพ รีล และสตอรี่' },
+  { name: 'Threads', icon: AtSign, note: 'สำหรับโพสต์ข้อความสั้นและสร้างการสนทนา' },
+  { name: 'Lemon8', icon: Sparkles, note: 'สำหรับคอนเทนต์ไลฟ์สไตล์ รีวิว และบิวตี้' },
   { name: 'Shopee', icon: ShoppingBag, note: 'สำหรับซิงค์สินค้าและออเดอร์' },
   { name: 'YouTube', icon: PlayCircle, note: 'สำหรับอัปโหลดและจัดการวิดีโอ' },
   { name: 'X (Twitter)', icon: AtSign, note: 'สำหรับโพสต์และติดตามการมีส่วนร่วม' },
@@ -748,6 +765,39 @@ function TextField({ label, ...props }) {
   );
 }
 
+// แถบวัดความแข็งแรงของรหัสผ่าน — ช่วยให้ผู้ใช้ตั้งรหัสที่เดายาก โดยไม่บังคับจนน่ารำคาญ
+function PasswordStrength({ value }) {
+  const v = String(value || '');
+  const checks = [
+    { ok: v.length >= 8, label: 'อย่างน้อย 8 ตัว' },
+    { ok: /[a-z]/.test(v) && /[A-Z]/.test(v), label: 'พิมพ์เล็ก+ใหญ่' },
+    { ok: /[0-9]/.test(v), label: 'มีตัวเลข' },
+    { ok: /[^A-Za-z0-9]/.test(v), label: 'มีอักขระพิเศษ' },
+  ];
+  const score = checks.filter((c) => c.ok).length;
+  const color = score <= 1 ? C.red : score === 2 ? C.orange : score === 3 ? C.cyan : C.emerald;
+  const label = score <= 1 ? 'อ่อนมาก' : score === 2 ? 'พอใช้' : score === 3 ? 'ดี' : 'แข็งแรง';
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center gap-1.5 mb-1">
+        <div className="flex-1 flex gap-1">
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} style={{ flex: 1, height: 3, borderRadius: 999, background: i < score ? color : C.border }} />
+          ))}
+        </div>
+        <span className="font-mono shrink-0" style={{ fontSize: 9, color }}>{label}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+        {checks.map((c, i) => (
+          <span key={i} className="font-mono" style={{ fontSize: 9, color: c.ok ? C.emerald : C.muted }}>
+            {c.ok ? '✓' : '○'} {c.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Terminal({ accounts, onSignup, onLogin }) {
   const [mode, setMode] = useState('login');
   const [loginStep, setLoginStep] = useState('credentials');
@@ -763,7 +813,7 @@ function Terminal({ accounts, onSignup, onLogin }) {
   const [orgName, setOrgName] = useState('');
   const [orgCode, setOrgCode] = useState('');
   const [gateMode, setGateMode] = useState(null);
-  const [signupForm, setSignupForm] = useState({ name: '', username: '', email: '', password: '', confirm: '' });
+  const [signupForm, setSignupForm] = useState({ nameTh: '', nameEn: '', username: '', email: '', password: '', confirm: '' });
   const [signupError, setSignupError] = useState('');
   const [signupDone, setSignupDone] = useState(false);
   const [signupRole, setSignupRole] = useState(3);
@@ -828,14 +878,15 @@ function Terminal({ accounts, onSignup, onLogin }) {
   async function submitSignup(e) {
     e.preventDefault();
     setSignupError('');
-    if (!signupForm.name.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
+    if (!signupForm.nameTh.trim() || !signupForm.username.trim() || !signupForm.email.trim() || !signupForm.password) { setSignupError('กรอกข้อมูลให้ครบ'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(signupForm.email.trim())) { setSignupError('รูปแบบอีเมลไม่ถูกต้อง'); return; }
     if (signupForm.password.length < 8) { setSignupError('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร'); return; }
     if (signupForm.password !== signupForm.confirm) { setSignupError('รหัสผ่านไม่ตรงกัน'); return; }
     if (!birthDate) { setSignupError('กรุณาระบุวันเกิดจริง (ใช้กับฟีเจอร์ในฝ่ายบุคคล)'); return; }
     if (joinMode === 'join' && !orgCode.trim()) { setSignupError('กรุณากรอกรหัสองค์กรที่ได้รับจากผู้ดูแล'); return; }
     setSignupLoading(true);
     try {
-      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.name.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, birthDate, orgName: joinMode === 'create' ? orgName.trim() : '', orgCode: joinMode === 'join' ? orgCode.trim() : '', inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
+      const { ok, data } = await apiPost('/api/auth', { action: 'signup', name: signupForm.nameTh.trim(), nameEn: signupForm.nameEn.trim(), username: signupForm.username.trim(), email: signupForm.email.trim(), password: signupForm.password, birthDate, orgName: joinMode === 'create' ? orgName.trim() : '', orgCode: joinMode === 'join' ? orgCode.trim() : '', inviteCode: inviteCode.trim(), fingerprint: deviceFingerprint() });
       setSignupLoading(false);
       if (!ok) { setSignupError(data.error || 'สร้างบัญชีไม่สำเร็จ'); return; }
       if (data.token) saveSession(data.token);
@@ -866,11 +917,24 @@ function Terminal({ accounts, onSignup, onLogin }) {
           </div>
         ) : (
           <form onSubmit={submitSignup} className="px-6 pb-6 space-y-3">
-            <TextField label="ชื่อ" value={signupForm.name} onChange={(e) => setSignupForm({ ...signupForm, name: e.target.value })} placeholder="ชื่อของคุณ" required />
-            <TextField label="ชื่อผู้ใช้ (สำหรับล็อกอิน)" value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value.replace(/\s/g, '') })} placeholder="เช่น forge_admin" required />
+            <div className="grid sm:grid-cols-2 gap-3">
+              <TextField label="ชื่อ-นามสกุล (ไทย)" value={signupForm.nameTh} onChange={(e) => setSignupForm({ ...signupForm, nameTh: e.target.value })} placeholder="สมชาย ใจดี" required />
+              <TextField label="ชื่อ-นามสกุล (อังกฤษ)" value={signupForm.nameEn} onChange={(e) => setSignupForm({ ...signupForm, nameEn: e.target.value })} placeholder="Somchai Jaidee" />
+            </div>
+            <TextField label="ชื่อผู้ใช้ / ชื่อเล่น (ใช้ล็อกอิน)" value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value.replace(/\s/g, '') })} placeholder="ไทยหรืออังกฤษก็ได้ เช่น ชาย หรือ forge_admin" required />
             <TextField label="อีเมล" type="email" value={signupForm.email} onChange={(e) => setSignupForm({ ...signupForm, email: e.target.value })} placeholder="you@email.com" required />
-            <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="••••••••" required />
-            <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="••••••••" required />
+            <div>
+              <TextField label="รหัสผ่าน" type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} placeholder="อย่างน้อย 8 ตัวอักษร" required />
+              {signupForm.password && <PasswordStrength value={signupForm.password} />}
+            </div>
+            <div>
+              <TextField label="ยืนยันรหัสผ่าน" type="password" value={signupForm.confirm} onChange={(e) => setSignupForm({ ...signupForm, confirm: e.target.value })} placeholder="พิมพ์รหัสผ่านอีกครั้ง" required />
+              {signupForm.confirm && (
+                <p className="font-mono mt-1" style={{ fontSize: 10, color: signupForm.password === signupForm.confirm ? C.emerald : C.red }}>
+                  {signupForm.password === signupForm.confirm ? '✓ รหัสผ่านตรงกัน' : '✕ รหัสผ่านยังไม่ตรงกัน'}
+                </p>
+              )}
+            </div>
           {/* เข้าร่วมองค์กรเดิม หรือสร้างองค์กรใหม่ */}
           <div className="p-3 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
             <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>องค์กรของคุณ</div>
@@ -1465,6 +1529,105 @@ const DEPT_TOOLS = {
 กติกาเข้มงวด: ตัวเลขทุกช่องต้องเป็นตัวเลขล้วน ไม่ใส่เครื่องหมายคั่นหลักหรือหน่วย · amount ต้องเท่ากับ qty คูณ unitPrice เป๊ะๆ · ยอดรวมต้องบวกลบถูกต้อง ตรวจซ้ำก่อนตอบ · ต้องแสดงวิธีคิดใน calcNote ทุกครั้งเพื่อให้ผู้ใช้ตรวจได้ · ถ้าข้อมูลไม่พอให้ใส่ - แล้วระบุใน checkBeforeSend ว่าต้องเติมอะไร ห้ามเดาราคาเอง`,
     },
   ],
+  stock: [
+    {
+      key: 'stockRead', label: 'อ่านสต๊อกจากไฟล์/ภาพ แล้วสรุปให้', Icon: Package, color: '#22D3EE',
+      desc: 'แนบภาพหรือวางตารางสต๊อกมา ระบบจะอ่านตัวเลขออกมาเป็นตาราง แยกยอดรับเข้า จ่ายออก ตีกลับ ของเสีย และคงเหลือ พร้อมกราฟและจุดที่ต้องระวัง',
+      action: 'stockRead', images: 6, useBrand: true,
+      fields: [
+        { k: 'period', label: 'ช่วงเวลาของข้อมูล', ph: '1-31 ส.ค. 2569', required: true },
+        { k: 'raw', label: 'วางตารางสต๊อก (ถ้ามี)', ph: 'ชื่อสินค้า / รับเข้า / จ่ายออก / ตีกลับ / ของเสีย / คงเหลือ', big: true },
+      ],
+      sys: `คุณคือเจ้าหน้าที่คลังสินค้าที่อ่านข้อมูลสต๊อกอย่างละเอียดและคิดเลขแม่น
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"สรุปสต๊อก",
+ "metrics":[{"label":"มูลค่าสต๊อกคงเหลือ","value":"ตัวเลขที่คำนวณได้","note":"หมายเหตุสั้นๆ","trend":"ขึ้น|ลง|เท่าเดิม"}],
+ "items":[{"sku":"ชื่อ/รหัสสินค้า","opening":"ยกมา","inbound":"รับเข้า","outbound":"จ่ายออก","returned":"ตีกลับ","damaged":"ของเสีย","closing":"คงเหลือ","checkSum":"ยกมา+รับเข้า-จ่ายออก+ตีกลับ-ของเสีย ต้องเท่ากับคงเหลือไหม ถ้าไม่เท่าให้ระบุส่วนต่าง"}],
+ "charts":[{"type":"bar","title":"สินค้าคงเหลือมากที่สุด","data":[{"name":"สินค้า A","value":120}]},{"type":"pie","title":"สัดส่วนของเสีย/ตีกลับ/ขายออก","data":[{"name":"ขายออก","value":80}]}],
+ "mismatches":[{"sku":"สินค้าที่ตัวเลขไม่ตรง","expected":"ควรเป็นเท่าไหร่","actual":"ในระบบเท่าไหร่","gap":"ส่วนต่าง","possibleCause":"สาเหตุที่เป็นไปได้ เช่น ลืมบันทึกจ่ายออก ของหาย นับผิด"}],
+ "lowStock":[{"sku":"สินค้าที่ใกล้หมด","left":"เหลือเท่าไหร่","note":"ควรสั่งเพิ่มไหม"}],
+ "deadStock":[{"sku":"สินค้าที่ค้างนาน ขายไม่ออก","left":"เหลือเท่าไหร่","suggestion":"ควรทำอย่างไร เช่น จัดโปร ลดราคา"}],
+ "dataGaps":["ข้อมูลที่อ่านไม่ได้หรือขาดไป ระบุให้ชัดว่าต้องการอะไรเพิ่ม"]
+}
+กติกาเข้มงวด:
+- อ่านตัวเลขจากภาพหรือตารางที่ให้มาเท่านั้น ห้ามแต่งตัวเลขเด็ดขาด อ่านไม่ออกใส่ "-"
+- ต้องตรวจสมการสต๊อกทุกรายการ: ยกมา + รับเข้า − จ่ายออก + ตีกลับ − ของเสีย = คงเหลือ ถ้าไม่ตรงต้องรายงานใน mismatches เสมอ เพราะแปลว่ามีของหายหรือบันทึกผิด
+- ตัวเลขใน charts ต้องเป็นตัวเลขล้วนที่มาจากข้อมูลจริง ถ้าข้อมูลไม่พอให้ส่ง charts เป็นลิสต์ว่าง`,
+    },
+    {
+      key: 'stockForecast', label: 'พยากรณ์ของหมด + ควรสั่งเท่าไหร่', Icon: TrendingUp, color: '#A78BFA',
+      desc: 'ใส่ยอดขายย้อนหลังกับสต๊อกคงเหลือ ระบบจะคำนวณว่าของจะหมดเมื่อไหร่ ควรสั่งเพิ่มกี่ชิ้น และสั่งเมื่อไหร่ถึงจะไม่ขาดของช่วงพีค',
+      action: 'deepAnalysis', useBrand: true,
+      fields: [
+        { k: 'sales', label: 'ยอดขายย้อนหลัง (ต่อสินค้า)', ph: 'ครีม A ขายเดือนละ 120 ชิ้น 3 เดือนล่าสุด 100/130/140', required: true, big: true },
+        { k: 'onHand', label: 'สต๊อกคงเหลือตอนนี้', ph: 'ครีม A เหลือ 85 ชิ้น', required: true, big: true },
+        { k: 'leadTime', label: 'สั่งของแล้วกี่วันถึงจะได้ของ', ph: '14 วัน', required: true },
+        { k: 'upcoming', label: 'มีแคมเปญ/ช่วงพีคอะไรไหม', ph: 'Double Day 9.9 คาดว่าขายเพิ่ม 3 เท่า' },
+      ],
+      sys: `คุณคือนักวางแผนสต๊อกที่คิดเลขแม่นและระวังของขาดเป็นพิเศษ
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"พยากรณ์สต๊อก",
+ "metrics":[{"label":"สินค้าเสี่ยงขาด","value":"3 รายการ","note":"ภายใน 30 วัน","trend":"ลง"}],
+ "forecast":[{"sku":"ชื่อสินค้า","avgPerDay":"ขายเฉลี่ยวันละกี่ชิ้น คิดจากข้อมูลจริง","onHand":"เหลือเท่าไหร่","daysLeft":"จะหมดในกี่วัน","runOutDate":"ประมาณวันไหน","reorderBy":"ต้องสั่งภายในวันไหนถึงจะทัน (คิดจาก lead time)","suggestQty":"ควรสั่งกี่ชิ้น","reason":"อธิบายวิธีคิดให้ตรวจตามได้"}],
+ "charts":[{"type":"bar","title":"จำนวนวันที่ของจะอยู่ได้","data":[{"name":"ครีม A","value":21}]}],
+ "urgent":[{"sku":"ต้องสั่งด่วน","why":"เพราะอะไร","ifNotOrdered":"ถ้าไม่สั่งจะเกิดอะไร"}],
+ "campaignImpact":"ถ้ามีแคมเปญที่ระบุมา ให้คำนวณเพิ่มว่าต้องเผื่อของอีกเท่าไหร่ ถ้าไม่มีให้ใส่ ไม่มีแคมเปญที่ต้องเผื่อ",
+ "calcNote":"อธิบายสูตรที่ใช้คิดทีละขั้น เพื่อให้ผู้ใช้ตรวจตามได้เอง"
+}
+กติกาเข้มงวด:
+- คำนวณจากตัวเลขที่ผู้ใช้ให้มาเท่านั้น ห้ามสมมติยอดขายที่ไม่มีในข้อมูล
+- ต้องแสดงวิธีคิดใน calcNote ทุกครั้ง เพราะเป็นเรื่องเงินและของจริง ผู้ใช้ต้องตรวจได้
+- ถ้าข้อมูลไม่พอสำหรับสินค้าไหน ให้ระบุตรงๆ ว่าต้องการข้อมูลอะไรเพิ่ม ห้ามเดา
+- วันที่ต้องสั่ง ต้องเผื่อ lead time เสมอ ถ้าคำนวณแล้วต้องสั่งไปแล้วในอดีต ให้เตือนว่าสายแล้ว`,
+    },
+    {
+      key: 'returnAnalysis', label: 'วิเคราะห์ของตีกลับ / ของเสีย', Icon: RotateCcw, color: '#F87171',
+      desc: 'ของตีกลับเยอะแปลว่ามีปัญหาที่ต้นทาง — ระบบจะหาว่าเป็นเพราะสินค้า การแพ็ก การส่ง หรือคำโฆษณาเกินจริง แล้วบอกวิธีลด',
+      action: 'deepAnalysis', images: 6, useBrand: true,
+      fields: [
+        { k: 'returns', label: 'ข้อมูลของตีกลับ', ph: 'สินค้า / จำนวน / เหตุผลที่ลูกค้าคืน', required: true, big: true },
+        { k: 'totalSold', label: 'ยอดขายรวมช่วงเดียวกัน', ph: 'ขายไป 1200 ชิ้น ตีกลับ 84 ชิ้น' },
+      ],
+      sys: `คุณคือนักวิเคราะห์คุณภาพสินค้าและกระบวนการจัดส่ง
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"วิเคราะห์ของตีกลับ",
+ "metrics":[{"label":"อัตราตีกลับ","value":"7%","note":"เทียบกับยอดขายรวม","trend":"ขึ้น"}],
+ "charts":[{"type":"pie","title":"สาเหตุการตีกลับ","data":[{"name":"สินค้าชำรุด","value":40}]},{"type":"bar","title":"สินค้าที่ตีกลับมากที่สุด","data":[{"name":"ครีม A","value":30}]}],
+ "rootCauses":[{"cause":"สาเหตุ","share":"คิดเป็นกี่เปอร์เซ็นต์","where":"เกิดที่ขั้นตอนไหน เช่น ผลิต แพ็ก ขนส่ง หรือโฆษณาเกินจริง","fix":"แก้ยังไงเป็นรูปธรรม","costToFix":"แก้แล้วคุ้มไหม"}],
+ "worstProducts":[{"sku":"สินค้าที่มีปัญหาสุด","returnRate":"อัตราตีกลับของตัวนี้","action":"ควรทำอะไร เช่น หยุดขายชั่วคราว เปลี่ยนแพ็กเกจ แก้คำโฆษณา"}],
+ "resellable":"ของที่ตีกลับมา เอามาขายต่อได้กี่เปอร์เซ็นต์ ควรจัดการยังไงกับส่วนที่ขายต่อไม่ได้",
+ "moneyLost":"ประเมินมูลค่าที่เสียไป ถ้าข้อมูลพอคำนวณ ถ้าไม่พอให้บอกว่าต้องการอะไรเพิ่ม",
+ "priority":"ถ้าแก้ได้เรื่องเดียว ควรแก้อะไรก่อน เพราะอะไร"
+}
+กติกา: คำนวณเปอร์เซ็นต์จากตัวเลขจริงที่ให้มาเท่านั้น · ถ้าเหตุผลการคืนชี้ว่าโฆษณาเกินจริง ต้องเตือนเรื่องความเสี่ยงผิดกฎโฆษณาด้วย · ห้ามเดาสาเหตุที่ไม่มีหลักฐานในข้อมูล`,
+    },
+    {
+      key: 'stockCount', label: 'ช่วยตรวจนับสต๊อก / หาของหาย', Icon: ClipboardCheck, color: '#34D399',
+      desc: 'เทียบตัวเลขที่นับได้จริงกับตัวเลขในระบบ หาว่าต่างกันตรงไหน มูลค่าเท่าไหร่ และน่าจะหายไปที่ขั้นตอนไหน',
+      action: 'stockCount', images: 8,
+      fields: [
+        { k: 'system', label: 'ตัวเลขในระบบ', ph: 'ครีม A 120 / ครีม B 85', required: true, big: true },
+        { k: 'counted', label: 'ตัวเลขที่นับได้จริง', ph: 'ครีม A 117 / ครีม B 85', required: true, big: true },
+        { k: 'value', label: 'ราคาต่อชิ้น (ถ้ามี)', ph: 'ครีม A 250 บาท', big: true },
+      ],
+      sys: `คุณคือผู้ตรวจสอบสต๊อกที่ละเอียดและตรงไปตรงมา
+ตอบเป็น JSON เท่านั้น ห้ามใส่ \`\`\`json
+{
+ "title":"ผลตรวจนับสต๊อก",
+ "verdict":"ตรงทั้งหมด|ต่างเล็กน้อย|ต่างมากต้องสอบสวน",
+ "metrics":[{"label":"รายการที่ไม่ตรง","value":"3 จาก 20","note":"คิดเป็น 15%","trend":"ขึ้น"}],
+ "charts":[{"type":"bar","title":"ส่วนต่างรายสินค้า (ติดลบ=ของหาย)","data":[{"name":"ครีม A","value":-3}]}],
+ "diffs":[{"sku":"ชื่อสินค้า","system":"ในระบบ","counted":"นับได้","gap":"ส่วนต่าง","valueLost":"มูลค่าส่วนต่าง ถ้ามีราคา","likelyCause":"สาเหตุที่เป็นไปได้"}],
+ "totalValueGap":"มูลค่ารวมที่หายไป ถ้าคำนวณได้",
+ "investigate":["รายการที่ควรสอบสวนเพิ่ม พร้อมเหตุผล"],
+ "preventNext":["วิธีป้องกันไม่ให้เกิดซ้ำ เป็นรูปธรรม"]
+}
+กติกาเข้มงวด: เทียบทีละรายการจากข้อมูลจริง ห้ามข้าม · คิดเลขส่วนต่างให้ถูกต้อง ตรวจซ้ำก่อนตอบ · ถ้าส่วนต่างเยอะผิดปกติต้องให้ verdict เป็นต้องสอบสวน ห้ามผ่านให้เพราะดูเป็นเรื่องเล็ก · likelyCause ต้องอิงจากรูปแบบที่เห็นในข้อมูล ห้ามกล่าวหาคนโดยไม่มีหลักฐาน`,
+    },
+  ],
   content: [
 
     {
@@ -1679,7 +1842,7 @@ const DEPT_TOOLS = {
       fields: [
         { k: 'caption', label: 'แคปชั่นที่จะใช้จริง', ph: 'วางแคปชั่นเต็มพร้อมแฮชแท็กที่จะโพสต์', required: true, big: true },
         { k: 'product', label: 'สินค้าในคลิป', ph: 'ชื่อสินค้า ถ้ามี' },
-        { k: 'platform', label: 'จะลงที่ไหน', ph: 'TikTok / Facebook / Shopee / YouTube' },
+        { k: 'platform', label: 'จะลงที่ไหน', ph: 'TikTok / Facebook / Instagram / Threads / Lemon8 / Shopee / YouTube' },
         { k: 'spoken', label: 'บทพูดในคลิป (ถ้ามี)', ph: 'วางบทพูดเพื่อให้เทียบกับซับว่าตรงกันไหม', big: true },
       ],
       sys: `คุณคือด่านตรวจสุดท้ายก่อนโพสต์คลิปลงโซเชียล ตรวจอย่างละเอียดเหมือนคนที่รู้ว่าโพสต์ผิดแล้วช่องโดนปิดการมองเห็น
