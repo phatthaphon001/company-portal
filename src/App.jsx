@@ -11,6 +11,7 @@ import {
   Compass, ShoppingCart, Mic2, Clapperboard, ArrowRight, Clock,
   Layers, Building2, Zap, Shield, Check, FileSpreadsheet, ExternalLink, BadgeCheck,
   BarChart3, Swords, Handshake, MessageSquare, Package,
+  BookOpen, Copy, Save, Pencil, ChevronLeft, ChevronRight, CheckCircle,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -680,6 +681,7 @@ function buildNavItems(user, features) {
   const on = (k) => user.isOwner || !features || features.pages?.[k] !== false;
   return [
     { key: 'daily', label: 'งานประจำวัน', Icon: ClipboardCheck },
+    { key: 'worklog', label: 'บันทึกผลงาน', Icon: BookOpen },
     ...(on('calendar') ? [{ key: 'calendar', label: 'ปฏิทิน', Icon: Calendar }] : []),
     ...(on('directory') ? [{ key: 'directory', label: 'Directory', Icon: FileText }] : []),
     ...(on('platforms') ? [{ key: 'platforms', label: 'แพลตฟอร์ม', Icon: Share2 }] : []),
@@ -5300,6 +5302,655 @@ function StatCard({ label, value, sub, color, Icon }) {
 }
 
 const KPI_SYS = 'คุณคือที่ปรึกษาด้านประสิทธิภาพการทำงาน วิเคราะห์จากตัวชี้วัดจริงที่ให้มา ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น ห้ามใส่ code fence รูปแบบ: {"headline":"สรุปสถานการณ์ 1 ประโยค ตรงไปตรงมา","grade":"ต้องปรับปรุงด่วน|พอใช้|ดี|ดีเยี่ยม","strengths":["จุดแข็งที่เห็นจากตัวเลข"],"problems":[{"problem":"ปัญหา","evidence":"อ้างตัวเลขจริง","impact":"กระทบอะไร","fix":"แก้ยังไงให้เห็นผลใน 7 วัน"}],"channelAdvice":[{"channel":"ชื่อช่อง","status":"ดี|ต้องดู|วิกฤต","action":"ควรทำอะไรกับช่องนี้"}],"qualityVsQuantity":"ทำเยอะกับทำดีสมดุลกันไหม อธิบายจากตัวเลข","nextMonthTarget":{"completion":"เป้าอัตราทำเสร็จเดือนหน้า","quality":"เป้าคะแนนคุณภาพ","reasoning":"ตั้งเป้านี้เพราะอะไร"},"topPriority":"สิ่งเดียวที่ควรโฟกัสที่สุดตอนนี้"}';
+
+// ============================================================
+//  WORKLOG — บันทึกงานประจำวัน + สรุปสัปดาห์ + สรุปเดือน + AI โค้ช KPI
+// ============================================================
+
+const WORKLOG_AI_SYS = `คุณคือ AI โค้ชพนักงานมืออาชีพ วิเคราะห์บันทึกการทำงานจริงและให้คำแนะนำที่ตรงไปตรงมา
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+
+{
+  "grade": "ต้องปรับปรุงด่วน | พอใช้ | ดี | ดีเยี่ยม",
+  "gradeScore": ตัวเลข 0-100,
+  "headline": "สรุปภาพรวมผลงานช่วงนี้ 1 ประโยค ตรงไปตรงมา",
+  "strengths": ["จุดแข็งที่โดดเด่น อ้างจากบันทึกจริง"],
+  "gaps": [{"gap":"สิ่งที่ขาด","impact":"ส่งผลยังไงต่อการประเมิน","fixNow":"วิธีแก้ที่ทำได้ทันที","priority":"high|medium|low"}],
+  "raiseReadiness": {
+    "ready": true หรือ false,
+    "score": ตัวเลข 0-100 ความพร้อมขึ้นเงินเดือน,
+    "verdict": "อธิบายว่าพร้อมหรือไม่พร้อมเพราะอะไร อ้างจากข้อมูลจริง",
+    "missingFor": ["สิ่งที่ยังขาดก่อนจะขึ้นเงินเดือนได้"]
+  },
+  "promotionReadiness": {
+    "ready": true หรือ false,
+    "score": ตัวเลข 0-100,
+    "verdict": "อธิบายความพร้อมโปรโมท",
+    "requiredSkills": ["ทักษะที่ต้องพัฒนาก่อนโปรโมทได้"]
+  },
+  "weeklyPlan": ["แผนสัปดาห์หน้าที่ควรทำ 3-5 ข้อ เรียงตามความสำคัญ"],
+  "blindSpots": ["สิ่งที่อาจมองข้ามแต่เจ้านายสังเกตเห็น"],
+  "topFocus": "สิ่งเดียวที่ควรโฟกัสที่สุดตอนนี้เพื่อผลลัพธ์สูงสุด"
+}
+
+กติกา: ต้องอ้างอิงจากบันทึกจริงเสมอ ห้ามพูดลอยๆ ถ้าข้อมูลน้อยให้บอกตรงๆ ว่าบันทึกยังไม่พอวิเคราะห์`;
+
+const WORKLOG_MONTHLY_SYS = `คุณคือ AI ช่วยสรุป Monthly Report ของพนักงานให้น่าประทับใจและครอบคลุม
+ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่นนอก JSON ห้ามใส่ \`\`\`json
+{
+  "executiveSummary": "สรุปผลงานเดือนนี้สำหรับเจ้านาย 2-3 ประโยค เน้นตัวเลขและผลลัพธ์",
+  "highlights": [{"title":"ผลงานเด่น","detail":"รายละเอียด","impact":"ผลกระทบต่อทีม/องค์กร"}],
+  "metrics": [{"name":"ตัวชี้วัด","value":"ค่า","trend":"up|down|stable","note":"ความหมาย"}],
+  "challenges": [{"challenge":"ความท้าทาย","howHandled":"จัดการอย่างไร","lesson":"บทเรียน"}],
+  "nextMonthGoals": ["เป้าหมายเดือนหน้า 3-5 ข้อ ระบุตัวเลขให้ชัด"],
+  "skillsDeveloped": ["ทักษะที่พัฒนาได้ในเดือนนี้"],
+  "collaborations": "การทำงานร่วมกับทีมหรือแผนกอื่น",
+  "reportText": "ข้อความรายงานภาษาทางการที่ copy ไปส่งเจ้านายได้เลย ครอบคลุม 1 เดือน"
+}`;
+
+// helper: สัปดาห์ที่ N ของปี (ISO week)
+function isoWeek(dateStr) {
+  const d = new Date(dateStr);
+  const jan4 = new Date(d.getFullYear(), 0, 4);
+  const startOfWeek1 = new Date(jan4);
+  startOfWeek1.setDate(jan4.getDate() - ((jan4.getDay() + 6) % 7));
+  const diff = d - startOfWeek1;
+  return Math.floor(diff / (7 * 86400000)) + 1;
+}
+function weekKey(dateStr) {
+  const d = new Date(dateStr);
+  return `${d.getFullYear()}-W${String(isoWeek(dateStr)).padStart(2, '0')}`;
+}
+function weekLabel(wk) {
+  const [y, w] = wk.split('-W');
+  return `สัปดาห์ที่ ${w} / ${y}`;
+}
+
+// ---- WorkLog Entry component (อยู่นอก WorkLogPage เพื่อไม่ให้ focus หาย) ----
+function WorkLogEntryCard({ entry, onEdit, onDelete, onAiCoach, coaching, coachLoading }) {
+  const [expanded, setExpanded] = useState(false);
+  const moodEmoji = { great: '😄', good: '🙂', ok: '😐', tired: '😓', hard: '😤' };
+  const moodLabel = { great: 'ยอดเยี่ยม', good: 'ดี', ok: 'พอใช้', tired: 'เหนื่อย', hard: 'ยากมาก' };
+  const categoryColor = { content: C.blue, admin: C.violet, meeting: C.orange, learning: C.emerald, other: C.muted };
+  const categoryLabel = { content: 'คอนเทนต์', admin: 'งานธุรการ', meeting: 'ประชุม', learning: 'เรียนรู้', other: 'อื่นๆ' };
+
+  return (
+    <div className="p-3.5 rounded-2xl mb-2.5 anim-fade" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className="font-mono text-2xs px-2 py-0.5 rounded-full" style={{ background: `${categoryColor[entry.category] || C.muted}22`, color: categoryColor[entry.category] || C.muted }}>
+              {categoryLabel[entry.category] || entry.category}
+            </span>
+            {entry.mood && <span className="text-xs">{moodEmoji[entry.mood]} {moodLabel[entry.mood]}</span>}
+            {entry.hours > 0 && <span className="font-mono text-2xs" style={{ color: C.muted }}>{entry.hours} ชม.</span>}
+          </div>
+          <p className="font-body text-xs leading-relaxed" style={{ color: C.text }}>{entry.title}</p>
+          {entry.detail && (
+            <p className={`font-body text-2xs mt-1 leading-relaxed ${expanded ? '' : 'line-clamp-2'}`} style={{ color: C.muted }}>{entry.detail}</p>
+          )}
+          {entry.detail && entry.detail.length > 100 && (
+            <button onClick={() => setExpanded(v => !v)} className="font-mono text-2xs mt-0.5" style={{ color: C.blue }}>{expanded ? 'ย่อ' : 'ดูเพิ่ม'}</button>
+          )}
+          {entry.outcome && (
+            <div className="mt-1.5 px-2 py-1 rounded-lg flex items-start gap-1.5" style={{ background: `${C.emerald}15`, border: `1px solid ${C.emerald}33` }}>
+              <CheckCircle size={11} style={{ color: C.emerald, marginTop: 1.5, shrink: 0 }} />
+              <p className="font-body text-2xs leading-relaxed" style={{ color: C.emerald }}>{entry.outcome}</p>
+            </div>
+          )}
+          {entry.blockers && (
+            <div className="mt-1 px-2 py-1 rounded-lg flex items-start gap-1.5" style={{ background: `${C.orange}15`, border: `1px solid ${C.orange}33` }}>
+              <AlertTriangle size={11} style={{ color: C.orange, marginTop: 1.5 }} />
+              <p className="font-body text-2xs leading-relaxed" style={{ color: C.orange }}>{entry.blockers}</p>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={onAiCoach} title="AI วิเคราะห์รายการนี้" className="p-1.5 rounded-lg" style={{ color: C.violet }}>
+            <Sparkles size={13} />
+          </button>
+          <button onClick={onEdit} className="p-1.5 rounded-lg" style={{ color: C.muted }}>
+            <Pencil size={13} />
+          </button>
+          <button onClick={onDelete} className="p-1.5 rounded-lg" style={{ color: C.red }}>
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+      {coachLoading && (
+        <div className="mt-2 pt-2 flex items-center gap-2" style={{ borderTop: `1px solid ${C.border}` }}>
+          <Loader2 size={12} className="animate-spin" style={{ color: C.violet }} />
+          <span className="font-mono text-2xs" style={{ color: C.muted }}>AI กำลังวิเคราะห์...</span>
+        </div>
+      )}
+      {coaching && !coachLoading && (
+        <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="font-mono text-2xs mb-1 flex items-center gap-1" style={{ color: C.violet }}>
+            <Sparkles size={10} /> AI วิเคราะห์งานนี้
+          </div>
+          <p className="font-body text-2xs leading-relaxed" style={{ color: C.text }}>{coaching}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- WorkLog Form (อยู่นอก WorkLogPage) ----
+const WL_CATS = [
+  { k: 'content', label: '🎬 คอนเทนต์' }, { k: 'admin', label: '📋 งานธุรการ' },
+  { k: 'meeting', label: '🤝 ประชุม' }, { k: 'learning', label: '📚 เรียนรู้' },
+  { k: 'other', label: '📌 อื่นๆ' },
+];
+const WL_MOODS = [
+  { k: 'great', e: '😄', l: 'ยอดเยี่ยม' }, { k: 'good', e: '🙂', l: 'ดี' },
+  { k: 'ok', e: '😐', l: 'พอใช้' }, { k: 'tired', e: '😓', l: 'เหนื่อย' },
+  { k: 'hard', e: '😤', l: 'ยาก' },
+];
+const WL_INPUT = 'w-full font-body text-xs px-2.5 py-2 rounded-xl outline-none';
+
+function WorkLogForm({ initial, onSave, onCancel, inputSty }) {
+  const [form, setForm] = useState(initial || { title: '', detail: '', outcome: '', blockers: '', category: 'content', mood: 'good', hours: 1 });
+  const set = (k, v) => setForm(s => ({ ...s, [k]: v }));
+  return (
+    <div className="p-4 rounded-2xl mb-3" style={{ background: C.bgDeep, border: `1px solid ${C.blue}44` }}>
+      <div className="font-mono text-2xs mb-3 flex items-center gap-1.5" style={{ color: C.blue }}>
+        <Plus size={11} /> {initial?.id ? 'แก้ไขรายการ' : 'บันทึกงานวันนี้'}
+      </div>
+      <div className="grid sm:grid-cols-2 gap-2 mb-2">
+        <div className="sm:col-span-2">
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>งานที่ทำ (จำเป็น)</label>
+          <input value={form.title} onChange={e => set('title', e.target.value)} placeholder="เช่น ถ่ายคลิปสินค้า X พร้อมตัดต่อ 3 คลิป" className={WL_INPUT} style={inputSty} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>รายละเอียดเพิ่มเติม</label>
+          <textarea value={form.detail} onChange={e => set('detail', e.target.value)} rows={2} placeholder="ขั้นตอน เครื่องมือที่ใช้ หรือบริบทที่เป็นประโยชน์" className={WL_INPUT + ' resize-none'} style={inputSty} />
+        </div>
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>ผลลัพธ์ที่ได้</label>
+          <input value={form.outcome} onChange={e => set('outcome', e.target.value)} placeholder="เช่น คลิปผ่านตรวจ ยอด 5K วิว" className={WL_INPUT} style={inputSty} />
+        </div>
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>อุปสรรค/ปัญหา</label>
+          <input value={form.blockers} onChange={e => set('blockers', e.target.value)} placeholder="เช่น ไฟไม่พอ ต้องรอข้อมูลจากทีม" className={WL_INPUT} style={inputSty} />
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-3">
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>หมวดหมู่</label>
+          <select value={form.category} onChange={e => set('category', e.target.value)} className={WL_INPUT} style={{ ...inputSty, cursor: 'pointer' }}>
+            {WL_CATS.map(c => <option key={c.k} value={c.k}>{c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>ความรู้สึก</label>
+          <select value={form.mood} onChange={e => set('mood', e.target.value)} className={WL_INPUT} style={{ ...inputSty, cursor: 'pointer' }}>
+            {WL_MOODS.map(m => <option key={m.k} value={m.k}>{m.e} {m.l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="font-mono block mb-1" style={{ fontSize: 9, color: C.muted }}>เวลา (ชม.)</label>
+          <input type="number" min={0.5} max={12} step={0.5} value={form.hours} onChange={e => set('hours', parseFloat(e.target.value) || 0)} className={WL_INPUT} style={inputSty} />
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={() => onSave(form)} disabled={!form.title.trim()} className="flex-1 font-mono text-2xs py-2 rounded-xl" style={{ background: C.blue, color: '#fff', opacity: form.title.trim() ? 1 : 0.5 }}>
+          <Save size={11} className="inline mr-1" /> บันทึก
+        </button>
+        <button onClick={onCancel} className="px-4 font-mono text-2xs py-2 rounded-xl" style={{ border: `1px solid ${C.border}`, color: C.muted }}>ยกเลิก</button>
+      </div>
+    </div>
+  );
+}
+
+// ---- WorkLogPage หน้าหลัก ----
+function WorkLogPage({ user, workLogs, setWorkLogs, showToast }) {
+  const today = todayDateStr();
+  const [viewDate, setViewDate] = useState(today);
+  const [tab, setTab] = useState('daily'); // 'daily' | 'weekly' | 'monthly'
+  const [showForm, setShowForm] = useState(false);
+  const [editEntry, setEditEntry] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiErr, setAiErr] = useState('');
+  const [monthlyReport, setMonthlyReport] = useState(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [perEntryCoach, setPerEntryCoach] = useState({}); // { id: text }
+  const [perEntryLoading, setPerEntryLoading] = useState({}); // { id: bool }
+  const [selWeek, setSelWeek] = useState(weekKey(today));
+  const [selMonth, setSelMonth] = useState(monthKey(today));
+
+  // inputSty คำนวณตอน render ส่งลงไป — WorkLogForm อยู่นอก component แล้ว ไม่ถูก recreate
+  const inputSty = { background: C.bgDeep, border: `1px solid ${C.border}`, color: C.text };
+
+  // ---- CRUD ----
+  function saveEntry(form) {
+    if (editEntry) {
+      setWorkLogs(prev => prev.map(e => e.id === editEntry.id ? { ...editEntry, ...form, updatedAt: Date.now() } : e));
+      showToast('แก้ไขแล้ว');
+    } else {
+      const entry = { id: `wl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, date: viewDate, ...form, createdAt: Date.now() };
+      setWorkLogs(prev => [...prev, entry]);
+      showToast('บันทึกแล้ว');
+    }
+    setShowForm(false); setEditEntry(null);
+  }
+  function deleteEntry(id) {
+    setWorkLogs(prev => prev.filter(e => e.id !== id));
+    showToast('ลบแล้ว');
+  }
+  function startEdit(entry) { setEditEntry(entry); setShowForm(true); }
+
+  // ---- AI: วิเคราะห์รายการเดียว ----
+  async function coachEntry(entry) {
+    setPerEntryLoading(p => ({ ...p, [entry.id]: true }));
+    try {
+      const prompt = `ตำแหน่ง: ${user.occupation || user.role || 'พนักงาน'}\nงาน: ${entry.title}\nรายละเอียด: ${entry.detail || '-'}\nผลลัพธ์: ${entry.outcome || '-'}\nอุปสรรค: ${entry.blockers || '-'}\nเวลาที่ใช้: ${entry.hours} ชม.\nหมวด: ${entry.category}`;
+      const sys = `คุณคือโค้ชพนักงาน วิเคราะห์งานรายการเดียวนี้ ตอบเป็นข้อความธรรมดา (ไม่ใช่ JSON) 3-5 ประโยค: 1) ประเมินงานนี้ 2) จุดที่ควรทำให้ดีขึ้น 3) วิธีทำให้เจ้านายประทับใจกับงานแบบนี้`;
+      const text = await callClaude(sys, prompt, undefined, 'other');
+      setPerEntryCoach(p => ({ ...p, [entry.id]: text }));
+    } catch (e) { showToast('AI วิเคราะห์ไม่สำเร็จ'); }
+    setPerEntryLoading(p => ({ ...p, [entry.id]: false }));
+  }
+
+  // ---- AI: วิเคราะห์รายสัปดาห์ ----
+  async function runWeeklyAi() {
+    setAiLoading(true); setAiErr(''); setAiResult(null);
+    const entries = workLogs.filter(e => weekKey(e.date) === selWeek);
+    if (!entries.length) { setAiErr('ยังไม่มีบันทึกสัปดาห์นี้'); setAiLoading(false); return; }
+    const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+    const byCat = WL_CATS.map(c => ({ cat: c.label, count: entries.filter(e => e.category === c.k).length, hours: entries.filter(e => e.category === c.k).reduce((s, e) => s + (e.hours || 0), 0) })).filter(c => c.count > 0);
+    const payload = { ตำแหน่ง: user.occupation || user.role || 'พนักงาน', ชื่อ: user.name || '', สัปดาห์: weekLabel(selWeek), รวมชั่วโมง: totalHours, จำนวนรายการ: entries.length, แยกหมวด: byCat, รายการ: entries.map(e => ({ วันที่: e.date, งาน: e.title, ผล: e.outcome || '-', อุปสรรค: e.blockers || '-', ความรู้สึก: e.mood })) };
+    try {
+      const text = await callClaude(WORKLOG_AI_SYS, `ข้อมูลบันทึกงานจริง:\n${JSON.stringify(payload, null, 1)}`, undefined, 'deepAnalysis');
+      setAiResult(parseJsonLoose(text));
+    } catch (e) { setAiErr(e.message || 'วิเคราะห์ไม่สำเร็จ'); }
+    setAiLoading(false);
+  }
+
+  // ---- AI: สรุปรายเดือน + Monthly Report ----
+  async function runMonthlyReport() {
+    setMonthlyLoading(true); setAiErr(''); setMonthlyReport(null);
+    const entries = workLogs.filter(e => monthKey(e.date) === selMonth);
+    if (!entries.length) { setAiErr('ยังไม่มีบันทึกเดือนนี้'); setMonthlyLoading(false); return; }
+    const totalHours = entries.reduce((s, e) => s + (e.hours || 0), 0);
+    const byCat = WL_CATS.map(c => ({ หมวด: c.label, จำนวน: entries.filter(e => e.category === c.k).length, ชั่วโมง: entries.filter(e => e.category === c.k).reduce((s, e) => s + (e.hours || 0), 0) })).filter(c => c.จำนวน > 0);
+    const payload = { ตำแหน่ง: user.occupation || user.role || 'พนักงาน', ชื่อ: user.name || '', เดือน: thaiMonthLabel(selMonth), รวมชั่วโมง: totalHours, จำนวนวันที่บันทึก: new Set(entries.map(e => e.date)).size, แยกหมวด: byCat, รายการทั้งหมด: entries.map(e => ({ วัน: e.date, งาน: e.title, รายละเอียด: e.detail || '', ผล: e.outcome || '', อุปสรรค: e.blockers || '', หมวด: e.category })) };
+    try {
+      const text = await callClaude(WORKLOG_MONTHLY_SYS, `ข้อมูลบันทึกงานทั้งเดือน:\n${JSON.stringify(payload, null, 1)}`, undefined, 'deepAnalysis');
+      setMonthlyReport(parseJsonLoose(text));
+    } catch (e) { setAiErr(e.message || 'สรุปไม่สำเร็จ'); }
+    setMonthlyLoading(false);
+  }
+
+  // ---- data selectors ----
+  const dayEntries = workLogs.filter(e => e.date === viewDate).sort((a, b) => b.createdAt - a.createdAt);
+  const weekEntries = workLogs.filter(e => weekKey(e.date) === selWeek);
+  const monthEntries = workLogs.filter(e => monthKey(e.date) === selMonth);
+  const allWeeks = [...new Set(workLogs.map(e => weekKey(e.date)))].sort().reverse();
+  const allMonths = [...new Set(workLogs.map(e => monthKey(e.date)))].sort().reverse();
+  if (!allWeeks.includes(selWeek)) allWeeks.unshift(selWeek);
+  if (!allMonths.includes(selMonth)) allMonths.unshift(selMonth);
+
+  const gradeColor = { 'ดีเยี่ยม': C.emerald, 'ดี': C.blue, 'พอใช้': C.orange, 'ต้องปรับปรุงด่วน': C.red };
+  const TABS = [{ k: 'daily', l: 'รายวัน', Icon: BookOpen }, { k: 'weekly', l: 'รายสัปดาห์', Icon: Calendar }, { k: 'monthly', l: 'รายเดือน', Icon: BarChart3 }];
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 anim-fade">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-1"><BookOpen size={18} style={{ color: C.blue }} /><span className="font-mono text-2xs tracking-widest" style={{ color: C.blue }}>WORK LOG</span></div>
+      <div className="flex items-end justify-between gap-3 flex-wrap mb-5">
+        <div>
+          <h2 className="font-body text-xl" style={{ color: C.text }}>บันทึกงานประจำวัน</h2>
+          <p className="font-body text-xs" style={{ color: C.muted }}>บันทึกสิ่งที่ทำ → AI วิเคราะห์ → รู้ว่าต้องทำอะไรเพื่อขึ้นเงินเดือน</p>
+        </div>
+        <div className="flex items-center gap-1 p-0.5 rounded-xl" style={{ background: C.bgDeep, border: `1px solid ${C.border}` }}>
+          {TABS.map(t => (
+            <button key={t.k} onClick={() => setTab(t.k)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-2xs transition-all" style={{ background: tab === t.k ? C.blue : 'transparent', color: tab === t.k ? '#fff' : C.muted }}>
+              <t.Icon size={11} />{t.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- TAB: รายวัน ---- */}
+      {tab === 'daily' && (
+        <div>
+          {/* Date nav */}
+          <div className="flex items-center gap-2 mb-4">
+            <button onClick={() => { const d = new Date(viewDate); d.setDate(d.getDate() - 1); setViewDate(d.toISOString().slice(0, 10)); }} className="p-2 rounded-xl" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+              <ChevronLeft size={14} />
+            </button>
+            <div className="flex-1 text-center">
+              <span className="font-body text-sm font-medium" style={{ color: C.text }}>
+                {viewDate === today ? '📅 วันนี้ — ' : ''}{new Date(viewDate + 'T00:00:00').toLocaleDateString('th-TH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              </span>
+            </div>
+            <button onClick={() => { const d = new Date(viewDate); d.setDate(d.getDate() + 1); if (d.toISOString().slice(0, 10) <= today) setViewDate(d.toISOString().slice(0, 10)); }} disabled={viewDate >= today} className="p-2 rounded-xl" style={{ border: `1px solid ${C.border}`, color: viewDate >= today ? C.border : C.muted }}>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          {/* Stats day */}
+          {dayEntries.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="p-3 rounded-xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-lg font-bold" style={{ color: C.blue }}>{dayEntries.length}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>รายการ</div>
+              </div>
+              <div className="p-3 rounded-xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-lg font-bold" style={{ color: C.violet }}>{dayEntries.reduce((s, e) => s + (e.hours || 0), 0)}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>ชั่วโมง</div>
+              </div>
+              <div className="p-3 rounded-xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-lg font-bold" style={{ color: C.emerald }}>{dayEntries.filter(e => e.outcome).length}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>มีผลลัพธ์</div>
+              </div>
+            </div>
+          )}
+
+          {/* Add button */}
+          {!showForm && (
+            <button onClick={() => { setEditEntry(null); setShowForm(true); }} className="w-full py-2.5 rounded-2xl mb-4 font-mono text-2xs flex items-center justify-center gap-2" style={{ border: `2px dashed ${C.blue}66`, color: C.blue }}>
+              <Plus size={14} /> เพิ่มรายการงาน
+            </button>
+          )}
+
+          {/* Form */}
+          {showForm && (
+            <WorkLogForm
+              initial={editEntry || undefined}
+              onSave={saveEntry}
+              onCancel={() => { setShowForm(false); setEditEntry(null); }}
+              inputSty={inputSty}
+            />
+          )}
+
+          {/* Entries */}
+          {dayEntries.length === 0 && !showForm && (
+            <div className="text-center py-12" style={{ color: C.muted }}>
+              <BookOpen size={32} className="mx-auto mb-3 opacity-30" />
+              <p className="font-body text-sm">ยังไม่มีบันทึกวันนี้</p>
+              <p className="font-body text-xs mt-1">กดปุ่มด้านบนเพื่อเริ่มบันทึก</p>
+            </div>
+          )}
+          {dayEntries.map(entry => (
+            <WorkLogEntryCard
+              key={entry.id}
+              entry={entry}
+              onEdit={() => startEdit(entry)}
+              onDelete={() => deleteEntry(entry.id)}
+              onAiCoach={() => coachEntry(entry)}
+              coaching={perEntryCoach[entry.id]}
+              coachLoading={perEntryLoading[entry.id]}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* ---- TAB: รายสัปดาห์ ---- */}
+      {tab === 'weekly' && (
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <select value={selWeek} onChange={e => { setSelWeek(e.target.value); setAiResult(null); }} className="flex-1 font-mono text-xs px-3 py-2 rounded-xl outline-none" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }}>
+              {allWeeks.map(w => <option key={w} value={w}>{weekLabel(w)}</option>)}
+            </select>
+            <button onClick={runWeeklyAi} disabled={aiLoading} className="px-4 py-2 rounded-xl font-mono text-2xs flex items-center gap-1.5" style={{ background: C.violet, color: '#fff', opacity: aiLoading ? 0.6 : 1 }}>
+              {aiLoading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} AI วิเคราะห์
+            </button>
+          </div>
+
+          {/* Week stats */}
+          <div className="grid grid-cols-4 gap-2 mb-4">
+            {[
+              { l: 'รายการ', v: weekEntries.length, c: C.blue },
+              { l: 'ชั่วโมง', v: weekEntries.reduce((s, e) => s + (e.hours || 0), 0), c: C.violet },
+              { l: 'วันที่บันทึก', v: new Set(weekEntries.map(e => e.date)).size, c: C.orange },
+              { l: 'มีผลลัพธ์', v: weekEntries.filter(e => e.outcome).length, c: C.emerald },
+            ].map(s => (
+              <div key={s.l} className="p-3 rounded-xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-base font-bold" style={{ color: s.c }}>{s.v}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Category breakdown */}
+          {weekEntries.length > 0 && (
+            <div className="p-3.5 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs mb-2" style={{ color: C.muted }}>สัดส่วนเวลาตามหมวด</div>
+              {WL_CATS.map(c => {
+                const hrs = weekEntries.filter(e => e.category === c.k).reduce((s, e) => s + (e.hours || 0), 0);
+                const total = weekEntries.reduce((s, e) => s + (e.hours || 0), 0);
+                if (!hrs) return null;
+                const pct = total ? Math.round((hrs / total) * 100) : 0;
+                return (
+                  <div key={c.k} className="flex items-center gap-2 mb-1.5">
+                    <span className="font-body text-xs w-24 shrink-0" style={{ color: C.text }}>{c.label}</span>
+                    <div className="flex-1 rounded-full h-2" style={{ background: C.bgDeep }}>
+                      <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: C.blue }} />
+                    </div>
+                    <span className="font-mono text-2xs w-10 text-right" style={{ color: C.muted }}>{hrs}ชม.</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Grouped by day */}
+          {[...new Set(weekEntries.map(e => e.date))].sort().reverse().map(date => (
+            <div key={date} className="mb-3">
+              <div className="font-mono text-2xs mb-2 flex items-center gap-2" style={{ color: C.muted }}>
+                <span>{new Date(date + 'T00:00:00').toLocaleDateString('th-TH', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                <span style={{ color: C.border }}>—</span>
+                <span>{weekEntries.filter(e => e.date === date).reduce((s, e) => s + (e.hours || 0), 0)} ชม.</span>
+              </div>
+              {weekEntries.filter(e => e.date === date).map(entry => (
+                <WorkLogEntryCard key={entry.id} entry={entry} onEdit={() => { setTab('daily'); setViewDate(date); startEdit(entry); }} onDelete={() => deleteEntry(entry.id)} onAiCoach={() => coachEntry(entry)} coaching={perEntryCoach[entry.id]} coachLoading={perEntryLoading[entry.id]} />
+              ))}
+            </div>
+          ))}
+
+          {weekEntries.length === 0 && <div className="text-center py-12" style={{ color: C.muted }}><Calendar size={32} className="mx-auto mb-3 opacity-30" /><p className="font-body text-sm">ยังไม่มีบันทึกสัปดาห์นี้</p></div>}
+
+          {/* AI Result weekly */}
+          {aiErr && <div className="mt-3 p-3 rounded-xl font-body text-xs" style={{ background: `${C.red}15`, color: C.red, border: `1px solid ${C.red}33` }}>{aiErr}</div>}
+          {aiResult && (
+            <div className="mt-4 p-4 rounded-2xl anim-fade" style={{ background: C.panel, border: `1px solid ${C.violet}44` }}>
+              <div className="font-mono text-2xs mb-3 flex items-center gap-1.5" style={{ color: C.violet }}><Sparkles size={11} /> ผลวิเคราะห์ AI รายสัปดาห์</div>
+              {/* Grade */}
+              <div className="flex items-center gap-3 mb-3 p-3 rounded-xl" style={{ background: C.bgDeep }}>
+                <div className="font-mono text-xl font-bold" style={{ color: gradeColor[aiResult.grade] || C.blue }}>{aiResult.gradeScore}</div>
+                <div>
+                  <div className="font-mono text-xs font-bold" style={{ color: gradeColor[aiResult.grade] || C.blue }}>{aiResult.grade}</div>
+                  <div className="font-body text-xs" style={{ color: C.text }}>{aiResult.headline}</div>
+                </div>
+              </div>
+              {/* Raise readiness */}
+              {aiResult.raiseReadiness && (
+                <div className="mb-3 p-3 rounded-xl" style={{ background: `${aiResult.raiseReadiness.ready ? C.emerald : C.orange}15`, border: `1px solid ${aiResult.raiseReadiness.ready ? C.emerald : C.orange}44` }}>
+                  <div className="font-mono text-2xs mb-1 flex items-center gap-1" style={{ color: aiResult.raiseReadiness.ready ? C.emerald : C.orange }}>
+                    <TrendingUp size={10} /> ความพร้อมขึ้นเงินเดือน — {aiResult.raiseReadiness.score}/100
+                  </div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{aiResult.raiseReadiness.verdict}</p>
+                  {aiResult.raiseReadiness.missingFor?.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5">{aiResult.raiseReadiness.missingFor.map((m, i) => <li key={i} className="font-body text-2xs flex items-start gap-1" style={{ color: C.muted }}><X size={9} className="mt-0.5 shrink-0" style={{ color: C.orange }} />{m}</li>)}</ul>
+                  )}
+                </div>
+              )}
+              {/* Promotion readiness */}
+              {aiResult.promotionReadiness && (
+                <div className="mb-3 p-3 rounded-xl" style={{ background: `${aiResult.promotionReadiness.ready ? C.blue : C.muted}15`, border: `1px solid ${aiResult.promotionReadiness.ready ? C.blue : C.border}` }}>
+                  <div className="font-mono text-2xs mb-1 flex items-center gap-1" style={{ color: aiResult.promotionReadiness.ready ? C.blue : C.muted }}>
+                    <Award size={10} /> ความพร้อมโปรโมท — {aiResult.promotionReadiness.score}/100
+                  </div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{aiResult.promotionReadiness.verdict}</p>
+                </div>
+              )}
+              {/* Strengths */}
+              {aiResult.strengths?.length > 0 && (
+                <div className="mb-3">
+                  <div className="font-mono text-2xs mb-1.5" style={{ color: C.emerald }}>จุดแข็ง</div>
+                  {aiResult.strengths.map((s, i) => <div key={i} className="flex items-start gap-1.5 mb-1"><CheckCircle size={11} className="mt-0.5 shrink-0" style={{ color: C.emerald }} /><p className="font-body text-xs" style={{ color: C.text }}>{s}</p></div>)}
+                </div>
+              )}
+              {/* Gaps */}
+              {aiResult.gaps?.length > 0 && (
+                <div className="mb-3">
+                  <div className="font-mono text-2xs mb-1.5" style={{ color: C.orange }}>สิ่งที่ต้องพัฒนา</div>
+                  {aiResult.gaps.map((g, i) => (
+                    <div key={i} className="mb-2 p-2.5 rounded-xl" style={{ background: `${C.orange}10`, border: `1px solid ${C.orange}33` }}>
+                      <div className="font-body text-xs font-medium mb-0.5" style={{ color: C.text }}>{g.gap}</div>
+                      <div className="font-body text-2xs" style={{ color: C.muted }}>{g.impact}</div>
+                      {g.fixNow && <div className="font-body text-2xs mt-1" style={{ color: C.orange }}>→ {g.fixNow}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Top focus */}
+              {aiResult.topFocus && (
+                <div className="p-3 rounded-xl" style={{ background: `${C.blue}15`, border: `1px solid ${C.blue}33` }}>
+                  <div className="font-mono text-2xs mb-1" style={{ color: C.blue }}>โฟกัสสิ่งนี้ก่อน</div>
+                  <p className="font-body text-xs" style={{ color: C.text }}>{aiResult.topFocus}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ---- TAB: รายเดือน ---- */}
+      {tab === 'monthly' && (
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setMonthlyReport(null); }} className="flex-1 font-mono text-xs px-3 py-2 rounded-xl outline-none" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}` }}>
+              {allMonths.map(m => <option key={m} value={m}>{thaiMonthLabel(m)}</option>)}
+            </select>
+            <button onClick={runMonthlyReport} disabled={monthlyLoading} className="px-4 py-2 rounded-xl font-mono text-2xs flex items-center gap-1.5" style={{ background: C.emerald, color: '#fff', opacity: monthlyLoading ? 0.6 : 1 }}>
+              {monthlyLoading ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} สรุปเดือน
+            </button>
+          </div>
+
+          {/* Month stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            {[
+              { l: 'รายการทั้งหมด', v: monthEntries.length, c: C.blue },
+              { l: 'ชั่วโมงรวม', v: monthEntries.reduce((s, e) => s + (e.hours || 0), 0), c: C.violet },
+              { l: 'วันที่บันทึก', v: new Set(monthEntries.map(e => e.date)).size, c: C.orange },
+              { l: 'มีผลลัพธ์', v: monthEntries.filter(e => e.outcome).length, c: C.emerald },
+            ].map(s => (
+              <div key={s.l} className="p-3 rounded-xl text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="font-mono text-xl font-bold" style={{ color: s.c }}>{s.v}</div>
+                <div className="font-mono text-2xs" style={{ color: C.muted }}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Category pie-style bars */}
+          {monthEntries.length > 0 && (
+            <div className="p-3.5 rounded-2xl mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="font-mono text-2xs mb-2.5" style={{ color: C.muted }}>เวลาตามหมวดงาน</div>
+              {WL_CATS.map(c => {
+                const items = monthEntries.filter(e => e.category === c.k);
+                const hrs = items.reduce((s, e) => s + (e.hours || 0), 0);
+                const total = monthEntries.reduce((s, e) => s + (e.hours || 0), 0);
+                if (!hrs) return null;
+                const pct = total ? Math.round((hrs / total) * 100) : 0;
+                return (
+                  <div key={c.k} className="flex items-center gap-2 mb-2">
+                    <span className="font-body text-xs w-28 shrink-0" style={{ color: C.text }}>{c.label}</span>
+                    <div className="flex-1 rounded-full h-2.5" style={{ background: C.bgDeep }}>
+                      <div className="h-2.5 rounded-full" style={{ width: `${pct}%`, background: C.violet }} />
+                    </div>
+                    <span className="font-mono text-2xs" style={{ color: C.muted }}>{hrs}ชม. ({pct}%)</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {monthEntries.length === 0 && <div className="text-center py-12" style={{ color: C.muted }}><BarChart3 size={32} className="mx-auto mb-3 opacity-30" /><p className="font-body text-sm">ยังไม่มีบันทึกเดือนนี้</p></div>}
+
+          {/* Weekly breakdown in month */}
+          {monthEntries.length > 0 && (
+            <div className="mb-4">
+              <div className="font-mono text-2xs mb-2" style={{ color: C.muted }}>สรุปรายสัปดาห์</div>
+              {[...new Set(monthEntries.map(e => weekKey(e.date)))].sort().reverse().map(wk => {
+                const we = monthEntries.filter(e => weekKey(e.date) === wk);
+                return (
+                  <div key={wk} className="p-3 rounded-xl mb-2 flex items-center justify-between" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div>
+                      <div className="font-body text-xs" style={{ color: C.text }}>{weekLabel(wk)}</div>
+                      <div className="font-mono text-2xs" style={{ color: C.muted }}>{we.length} รายการ · {we.reduce((s, e) => s + (e.hours || 0), 0)} ชม.</div>
+                    </div>
+                    <button onClick={() => { setTab('weekly'); setSelWeek(wk); }} className="font-mono text-2xs px-2 py-1 rounded-lg" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+                      ดูรายละเอียด
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Monthly Report AI */}
+          {aiErr && <div className="mt-3 p-3 rounded-xl font-body text-xs" style={{ background: `${C.red}15`, color: C.red, border: `1px solid ${C.red}33` }}>{aiErr}</div>}
+          {monthlyReport && (
+            <div className="mt-4 p-4 rounded-2xl anim-fade" style={{ background: C.panel, border: `1px solid ${C.emerald}44` }}>
+              <div className="font-mono text-2xs mb-3 flex items-center justify-between" style={{ color: C.emerald }}>
+                <span className="flex items-center gap-1.5"><FileText size={11} /> Monthly Report — {thaiMonthLabel(selMonth)}</span>
+                <button onClick={() => { navigator.clipboard.writeText(monthlyReport.reportText || ''); showToast('คัดลอกรายงานแล้ว'); }} className="font-mono text-2xs px-2 py-1 rounded-lg flex items-center gap-1" style={{ border: `1px solid ${C.emerald}`, color: C.emerald }}>
+                  <Copy size={9} /> คัดลอก
+                </button>
+              </div>
+
+              {/* Executive Summary */}
+              <div className="mb-3 p-3 rounded-xl" style={{ background: C.bgDeep }}>
+                <div className="font-mono text-2xs mb-1" style={{ color: C.muted }}>Executive Summary</div>
+                <p className="font-body text-xs leading-relaxed" style={{ color: C.text }}>{monthlyReport.executiveSummary}</p>
+              </div>
+
+              {/* Highlights */}
+              {monthlyReport.highlights?.length > 0 && (
+                <div className="mb-3">
+                  <div className="font-mono text-2xs mb-2" style={{ color: C.emerald }}>ผลงานเด่น</div>
+                  {monthlyReport.highlights.map((h, i) => (
+                    <div key={i} className="mb-2 p-2.5 rounded-xl" style={{ background: `${C.emerald}10`, border: `1px solid ${C.emerald}33` }}>
+                      <div className="font-body text-xs font-medium" style={{ color: C.text }}>{h.title}</div>
+                      <div className="font-body text-2xs mt-0.5" style={{ color: C.muted }}>{h.detail}</div>
+                      {h.impact && <div className="font-body text-2xs mt-1" style={{ color: C.emerald }}>→ {h.impact}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Next month goals */}
+              {monthlyReport.nextMonthGoals?.length > 0 && (
+                <div className="mb-3">
+                  <div className="font-mono text-2xs mb-2" style={{ color: C.blue }}>เป้าหมายเดือนหน้า</div>
+                  {monthlyReport.nextMonthGoals.map((g, i) => (
+                    <div key={i} className="flex items-start gap-1.5 mb-1">
+                      <Target size={11} className="mt-0.5 shrink-0" style={{ color: C.blue }} />
+                      <p className="font-body text-xs" style={{ color: C.text }}>{g}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Full report text */}
+              {monthlyReport.reportText && (
+                <div className="mt-3">
+                  <div className="font-mono text-2xs mb-1.5" style={{ color: C.muted }}>ข้อความรายงานฉบับเต็ม (copy ไปส่งเจ้านายได้เลย)</div>
+                  <div className="p-3 rounded-xl whitespace-pre-wrap font-body text-xs leading-relaxed" style={{ background: C.bgDeep, color: C.text, border: `1px solid ${C.border}` }}>
+                    {monthlyReport.reportText}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function KpiPage({ history, tasks, channels }) {
   const allDays = collectAllDays(history, tasks);
@@ -10528,6 +11179,7 @@ export default function CompanyPortal() {
   const [deptData, setDeptData] = useState([]);   // ผลงานจากเครื่องมือ AI ของแต่ละแผนก
   const [calendarNotes, setCalendarNotes] = useState({}); // โน้ต/ธุระรายวันในปฏิทิน { 'YYYY-MM-DD': { text, busy } }
   const [progressLogs, setProgressLogs] = useState([]); // ผลประเมินความคืบหน้ารายวันที่ AI อ่านจากภาพสถิติ
+  const [workLogs, setWorkLogs] = useState([]);          // บันทึกงานประจำวันของพนักงานแต่ละคน (private)
   const [company, setCompany] = useState({});      // ข้อมูลแบรนด์ขององค์กร เช่น โลโก้ลายน้ำ
   const [theme, setTheme] = useState('dark');     // ธีมสีของผู้ใช้แต่ละคน
   const [themeTick, setThemeTick] = useState(0);  // ใช้บังคับให้วาดใหม่ทั้งหน้าเมื่อเปลี่ยนธีม
@@ -10666,7 +11318,7 @@ export default function CompanyPortal() {
     if (dataLoaded) return;
     async function loadAll() {
       try {
-        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes, noteRes, progRes, compRes] = await Promise.all([
+        const [accRes, chRes, taskRes, histRes, dateRes, futureRes, trashRes, metricRes, planRes, rivalRes, adRes, deptRes, noteRes, progRes, compRes, wlRes] = await Promise.all([
           apiPost('/api/auth', { action: 'listAccounts' }),
           api('/api/store?key=channels'),
           api('/api/store?key=tasks'),
@@ -10682,6 +11334,7 @@ export default function CompanyPortal() {
           api('/api/store?key=calendarNotes'),
           api('/api/store?key=progressLogs'),
           api('/api/store?key=company'),
+          api('/api/store?key=myNotes'), // workLogs — private key ของแต่ละคน
         ]);
         const accData = accRes.data;
         const chData = chRes.data;
@@ -10756,6 +11409,7 @@ export default function CompanyPortal() {
         const noteVal = noteRes.data;
         setCalendarNotes((noteVal.value && typeof noteVal.value === 'object' && !Array.isArray(noteVal.value)) ? noteVal.value : {});
         setProgressLogs(Array.isArray(progRes.data.value) ? progRes.data.value : []);
+        setWorkLogs(Array.isArray(wlRes.data.value) ? wlRes.data.value : []);
         setCompany((compRes.data.value && typeof compRes.data.value === 'object') ? compRes.data.value : {});
         setLastActiveDate(today);
         setLoadOk(true); // โหลดสำเร็จจริงเท่านั้น ถึงจะยอมให้เขียนทับฐานข้อมูลได้
@@ -10825,6 +11479,10 @@ export default function CompanyPortal() {
     if (!dataLoaded || !loadOk || !user) return;
     apiPost('/api/store', { key: 'company', value: company }).catch(() => {});
   }, [company, dataLoaded, loadOk, user]);
+  useEffect(() => {
+    if (!dataLoaded || !loadOk || !user) return;
+    apiPost('/api/store', { key: 'myNotes', value: workLogs }).catch(() => {});
+  }, [workLogs, dataLoaded, loadOk, user]);
 
   function openDept(dept) {
     if (user.clearance < dept.clearance) { setDenied(dept.id); setTimeout(() => setDenied(null), 1200); return; }
@@ -11109,6 +11767,7 @@ export default function CompanyPortal() {
             {stage === 'team' && user.clearance === 3 && <TeamPanel accounts={accounts} onUpdateClearance={updateAccountClearance} user={user} showToast={showToast} />}
             {stage === 'analytics' && <AnalyticsPage user={user} features={features} history={history} tasks={tasks} channels={channels} metrics={metrics} setMetrics={setMetrics} plans={plans} setPlans={setPlans} setTasks={setTasks} rivals={rivals} setRivals={setRivals} ads={ads} setAds={setAds} showToast={showToast} />}
             {stage === 'kpi' && <KpiPage history={history} tasks={tasks} channels={channels} />}
+            {stage === 'worklog' && <WorkLogPage user={user} workLogs={workLogs} setWorkLogs={setWorkLogs} showToast={showToast} />}
             {stage === 'settings' && <SettingsPage theme={theme} onChangeTheme={changeTheme} company={company} setCompany={setCompany} user={user} accounts={accounts} backupData={{ channels, tasks, futureTasks, history, lastActiveDate }} onImportBackup={importBackup} tokens={tokens} refreshMe={refreshMe} showToast={showToast} onFixOrphans={fixOrphanTasks} onBackupNow={runBackupNow} trash={trash} onRestoreTrash={restoreFromTrash} onPurgeTrash={purgeFromTrash} onEmptyTrash={emptyTrash} channels={channels} tasks={tasks} history={history} futureTasks={futureTasks} loadOk={loadOk} />}
             {stage === 'profile' && <ProfilePage user={user} accounts={accounts} tasks={tasks} history={history} onUpdateProfile={updateProfile} />}
             {stage === 'security' && (
